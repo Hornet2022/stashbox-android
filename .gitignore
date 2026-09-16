@@ -1,0 +1,32 @@
+# ==========================================
+# macOS / IDE / 密钥 / 通用
+# ==========================================
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.log
+*.tmp
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ==========================================
+# Android / Gradle / Kotlin
+# ==========================================
+.gradle/
+build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+*.iml
+
+# ==========================================
+# WorkBuddy 私域（git 协作相关）
+# ==========================================
+.workbuddy/
