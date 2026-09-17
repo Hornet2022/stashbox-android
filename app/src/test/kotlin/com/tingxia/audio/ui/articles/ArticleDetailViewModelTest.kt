@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui.articles
 
+import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.ArticleListResponse
@@ -19,8 +20,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class ArticleDetailViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
@@ -48,6 +55,8 @@ class ArticleDetailViewModelTest {
         override suspend fun getAudioUrl(id: String) = AudioUrlResponse(audio_url = audioUrl)
     })
 
+    private fun fakeController() = PlayerController(RuntimeEnvironment.getApplication())
+
     @Test
     fun loadArticle_ready_setsAudioUrlWithoutPolling() = testScope.runTest {
         val article = Article(
@@ -57,7 +66,7 @@ class ArticleDetailViewModelTest {
             audioUrl = "u",
             taskId = "t1",
         )
-        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.READY, "u"))
+        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.READY, "u"), fakeController())
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle()
         assertEquals(DistillStatus.READY, vm.uiState.value.status)
@@ -72,7 +81,7 @@ class ArticleDetailViewModelTest {
             status = DistillStatus.DISTILLING,
             taskId = "t1",
         )
-        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.READY, "https://x/final.mp3"))
+        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.READY, "https://x/final.mp3"), fakeController())
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle() // loadArticle 完成，轮询已启动
         testScheduler.advanceTimeBy(ArticleDetailViewModel.POLL_INTERVAL_MS + 200)
@@ -90,7 +99,7 @@ class ArticleDetailViewModelTest {
             taskId = "t1",
         )
         // 蒸馏状态一直停留在 DISTILLING → 超过最大次数后超时
-        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.DISTILLING, "u"))
+        val vm = ArticleDetailViewModel(fakeRepo(article, DistillStatus.DISTILLING, "u"), fakeController())
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle()
         testScheduler.advanceTimeBy(

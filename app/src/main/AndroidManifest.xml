@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
@@ -26,11 +27,15 @@
             </intent-filter>
         </activity>
 
-        <!-- CP4.4 才用，先注册占位 -->
+        <!-- CP4.4 后台播放：MediaSessionService + ExoPlayer + MediaSession -->
         <service
             android:name=".audio.AudioPlayerService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
 
         <!-- Robolectric 本地 Compose UI 单测（createComposeRule 会启动 ComponentActivity）需要该 activity 在 manifest 中注册，否则 resolve 失败 -->
         <activity

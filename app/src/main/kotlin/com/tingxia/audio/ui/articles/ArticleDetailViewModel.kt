@@ -2,6 +2,7 @@ package com.tingxia.audio.ui.articles
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.repository.ArticleRepository
@@ -26,6 +27,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ArticleDetailViewModel @Inject constructor(
     private val repository: ArticleRepository,
+    private val playerController: PlayerController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ArticleUiState())
@@ -53,6 +55,8 @@ class ArticleDetailViewModel @Inject constructor(
                         isLoading = false,
                     )
                 }
+                // CP4.4：蒸馏已就绪，直接起播（audio_url 已就绪）
+                initialAudioUrl?.let { url -> playerController.play(url) }
                 if (article.taskId != null &&
                     article.status != DistillStatus.READY &&
                     article.status != DistillStatus.LISTENED
@@ -77,6 +81,8 @@ class ArticleDetailViewModel @Inject constructor(
                         DistillStatus.READY -> {
                             val url = runCatching { repository.getAudioUrl(articleId) }.getOrNull()
                             _uiState.update { it.copy(status = DistillStatus.READY, audioUrl = url) }
+                            // CP4.4：蒸馏完成，起播
+                            url?.let { playerController.play(it) }
                             return@launch
                         }
                         DistillStatus.FAILED -> {

@@ -41,6 +41,8 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        // Media3 ExoPlayer / MediaSession 部分 API 仍标 @UnstableApi，全局 opt-in 避免逐个标注
+        freeCompilerArgs += listOf("-opt-in=androidx.media3.common.util.UnstableApi")
     }
 
     buildFeatures {

@@ -1,10 +1,13 @@
 package com.tingxia.audio.di
 
+import android.content.Context
+import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -63,4 +66,14 @@ object AppModule {
     @Singleton
     fun provideArticleRepository(api: ArticleApi): ArticleRepository =
         ArticleRepository(api)
+
+    /**
+     * 播放控制器单例（CP4.4）。
+     * 内部持有 ExoPlayer，暴露 StateFlow 给 Compose UI。
+     * AudioPlayerService 由系统启动，不走 Hilt，因此不在此处注入。
+     */
+    @Provides
+    @Singleton
+    fun providePlayerController(@ApplicationContext context: Context): PlayerController =
+        PlayerController(context)
 }
