@@ -32,6 +32,11 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- Robolectric 本地 Compose UI 单测（createComposeRule 会启动 ComponentActivity）需要该 activity 在 manifest 中注册，否则 resolve 失败 -->
+        <activity
+            android:name="androidx.activity.ComponentActivity"
+            android:exported="false" />
+
     </application>
 
 </manifest>

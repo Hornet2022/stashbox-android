@@ -13,6 +13,7 @@ media3 = "1.4.1"
 retrofit = "2.11.0"
 okhttp = "4.12.0"
 coroutines = "1.9.0"
+robolectric = "4.12.2"
 kotlinxSerialization = "1.7.3"
 room = "2.6.1"
 junit = "4.13.2"
@@ -54,6 +55,13 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+
+# Compose UI test (本地 Robolectric 单测用 createComposeRule)
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+
+# Robolectric — 本地 Compose UI 单元测试（无需 emulator）
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 
 # Local DB — CP5 才用
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
