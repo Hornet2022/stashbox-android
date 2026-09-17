@@ -1,6 +1,8 @@
 package com.tingxia.audio.audio
 
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import android.net.Uri
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -60,5 +62,27 @@ class PlayerControllerTest {
     fun `seekTo updates position`() {
         controller.seekTo(3000L)
         assertEquals(3000L, controller.position.value)
+    }
+
+    @Test
+    fun `play sets media metadata for lock screen`() {
+        // CP4.5：play() 应把 title/author/coverUrl 写入 ExoPlayer mediaItem 的 MediaMetadata，
+        // 让锁屏 UI / MediaStyle 通知自动渲染。需真 ExoPlayer（initialize）。
+        controller.initialize()
+        controller.play(
+            audioUrl = "https://example.com/a.mp3",
+            title = "测试标题",
+            author = "测试来源",
+            coverUrl = "https://example.com/cover.png",
+        )
+
+        val playerField = PlayerController::class.java.getDeclaredField("player")
+        playerField.isAccessible = true
+        val player = playerField.get(controller) as ExoPlayer
+        val md = player.currentMediaItem?.mediaMetadata
+
+        assertEquals("测试标题", md?.title.toString())
+        assertEquals("测试来源", md?.artist.toString())
+        assertEquals(Uri.parse("https://example.com/cover.png"), md?.artworkUri)
     }
 }

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">听匣</string>
+    <string name="audio_player_channel_name">听匣音频播放</string>
+    <string name="audio_player_channel_description">通知显示当前正在播放的听匣音频</string>
 </resources>

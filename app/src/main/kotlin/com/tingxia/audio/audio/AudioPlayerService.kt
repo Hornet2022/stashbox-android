@@ -3,8 +3,10 @@ package com.tingxia.audio.audio
 import android.content.Intent
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.tingxia.audio.R
 
 /**
  * 音频播放前台服务（CP4.4）。
@@ -29,6 +31,21 @@ class AudioPlayerService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .setCallback(callback)
             .build()
+
+        // CP4.5: 用 Media3 自带 DefaultMediaNotificationProvider 自动处理锁屏 UI + MediaStyle 通知
+        // （含 play/pause + skip previous/next + close actions），无需自定义 NotificationBuilder
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setNotificationIdProvider { _ -> NOTIFICATION_ID }
+                .setChannelId(NOTIFICATION_CHANNEL_ID)
+                .setChannelName(R.string.audio_player_channel_name)
+                .build(),
+        )
+    }
+
+    companion object {
+        const val NOTIFICATION_ID = 1001
+        const val NOTIFICATION_CHANNEL_ID = "stashbox_audio_playback"
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

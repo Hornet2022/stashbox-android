@@ -56,7 +56,10 @@ class ArticleDetailViewModel @Inject constructor(
                     )
                 }
                 // CP4.4：蒸馏已就绪，直接起播（audio_url 已就绪）
-                initialAudioUrl?.let { url -> playerController.play(url) }
+                // CP4.5：把 article.title/source 传给 play()，让锁屏 UI 显示标题/作者
+                initialAudioUrl?.let { url ->
+                    playerController.play(url, title = article.title, author = article.source)
+                }
                 if (article.taskId != null &&
                     article.status != DistillStatus.READY &&
                     article.status != DistillStatus.LISTENED
@@ -81,8 +84,15 @@ class ArticleDetailViewModel @Inject constructor(
                         DistillStatus.READY -> {
                             val url = runCatching { repository.getAudioUrl(articleId) }.getOrNull()
                             _uiState.update { it.copy(status = DistillStatus.READY, audioUrl = url) }
-                            // CP4.4：蒸馏完成，起播
-                            url?.let { playerController.play(it) }
+                            // CP4.4：蒸馏完成，起播；CP4.5：带 title/source 供锁屏显示
+                            val art = _uiState.value.article
+                            url?.let {
+                                playerController.play(
+                                    it,
+                                    title = art?.title ?: "",
+                                    author = art?.source,
+                                )
+                            }
                             return@launch
                         }
                         DistillStatus.FAILED -> {

@@ -5,7 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.exoplayer.ExoPlayer
+import android.net.Uri
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
@@ -64,17 +66,37 @@ class PlayerController(context: Context) {
     }
 
     /**
-     * 播放指定音频直链。
+     * 播放指定音频直链，并携带锁屏/通知所需元数据（CP4.5）。
      * 若尚未 [initialize]，仅更新状态机（不真正出声）——UI 仍可反映“播放中”。
+     *
+     * @param audioUrl 音频直链
+     * @param title    锁屏/通知标题（文章标题）；默认空串，兼容无标题的手动起播
+     * @param author   锁屏/通知副标题（文章来源/作者），可空
+     * @param coverUrl 锁屏封面图 URL，可空（CP4.7 接入封面字段）
      */
-    fun play(audioUrl: String) {
+    fun play(
+        audioUrl: String,
+        title: String = "",
+        author: String? = null,
+        coverUrl: String? = null,
+    ) {
         val p = player
         if (p == null) {
             _state.value = PlaybackState.PLAYING
             return
         }
         _state.value = PlaybackState.PLAYING
-        p.setMediaItem(MediaItem.fromUri(audioUrl))
+        val mediaItem = MediaItem.Builder()
+            .setUri(audioUrl)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(author)
+                    .setArtworkUri(coverUrl?.let(Uri::parse))
+                    .build(),
+            )
+            .build()
+        p.setMediaItem(mediaItem)
         p.prepare()
         p.play()
         startPolling()
