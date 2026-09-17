@@ -90,6 +90,9 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.kotlinx.serialization.json)
 
+    // DataStore — CP4.6 JWT 持久化（tokenManager 用 preferencesDataStore）
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
     implementation(libs.kotlinx.coroutines.android)
 
     // Test

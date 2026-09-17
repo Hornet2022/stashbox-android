@@ -2,6 +2,10 @@ package com.tingxia.audio.di
 
 import android.content.Context
 import com.tingxia.audio.audio.PlayerController
+import com.tingxia.audio.auth.AuthApi
+import com.tingxia.audio.auth.AuthInterceptor
+import com.tingxia.audio.auth.AuthRepository
+import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import dagger.Module
@@ -38,9 +42,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient =
+    fun provideTokenManager(@ApplicationContext context: Context): TokenManager =
+        TokenManager(context)
+
+    @Provides
+    @Singleton
+    fun provideAuthInterceptor(tokenManager: TokenManager): AuthInterceptor =
+        AuthInterceptor(tokenManager)
+
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient =
         OkHttpClient.Builder()
-            // TODO(CP4.6): 在此处加 Authorization 拦截器（JWT 鉴权）
+            // JWT 鉴权：自动附加 Authorization: Bearer <token>（CP4.6）
+            .addInterceptor(authInterceptor)
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BASIC
@@ -64,8 +79,20 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideAuthApi(retrofit: Retrofit): AuthApi =
+        retrofit.create(AuthApi::class.java)
+
+    @Provides
+    @Singleton
     fun provideArticleRepository(api: ArticleApi): ArticleRepository =
         ArticleRepository(api)
+
+    @Provides
+    @Singleton
+    fun provideAuthRepository(
+        api: AuthApi,
+        tokenManager: TokenManager,
+    ): AuthRepository = AuthRepository(api, tokenManager)
 
     /**
      * 播放控制器单例（CP4.4）。
