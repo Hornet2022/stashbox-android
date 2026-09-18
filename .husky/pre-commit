@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+HUSKY_DIR="$(cd "$(dirname -- "$0")" && pwd)"
+. "$HUSKY_DIR/_/husky.sh"
+
+# Kotlin lint too slow for pre-commit; skip
