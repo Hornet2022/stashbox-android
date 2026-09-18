@@ -5,9 +5,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
@@ -82,12 +90,10 @@ fun FeedbackHistoryScreen(
                     }
                 }
                 uiState.feedbacks.isEmpty() -> {
-                    Box(
+                    EmptyFeedbackHistoryState(
                         modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("还没有反馈", style = MaterialTheme.typography.bodyLarge)
-                    }
+                        onNavigateToList = onBack,
+                    )
                 }
                 else -> {
                     LazyColumn(
@@ -102,6 +108,42 @@ fun FeedbackHistoryScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EmptyFeedbackHistoryState(
+    modifier: Modifier = Modifier,
+    onNavigateToList: () -> Unit,
+) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Default.Settings,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "还没有反馈",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "使用过程中遇到问题，欢迎提交反馈与建议",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onNavigateToList) {
+            Text("去听听")
         }
     }
 }
