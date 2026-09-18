@@ -29,6 +29,7 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.articles.ArticleListViewModel
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 
 /**
  * 文章列表页。
@@ -41,6 +42,7 @@ import com.tingxia.audio.ui.components.StatusBadge
 @Composable
 fun ArticleListScreen(
     onNavigateToDetail: (String) -> Unit,
+    onNavigateToTags: () -> Unit,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
@@ -55,6 +57,10 @@ fun ArticleListScreen(
             TopAppBar(
                 title = { Text("听匣") },
                 actions = {
+                    // CP5.3-C: 标签订阅入口
+                    TextButton(onClick = onNavigateToTags) {
+                        Text("🏷️")
+                    }
                     // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
                     TextButton(onClick = { /* 占位，CP4.6 才接 */ }) {
                         Text("添加")

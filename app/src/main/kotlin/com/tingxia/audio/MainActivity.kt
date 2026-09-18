@@ -37,6 +37,7 @@ import com.tingxia.audio.ui.screens.ArticleDetailScreen
 import com.tingxia.audio.ui.screens.ArticleListScreen
 import com.tingxia.audio.ui.screens.LoginScreen
 import com.tingxia.audio.ui.screens.OnboardingScreen
+import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -139,6 +140,9 @@ private fun AppNavigation() {
                 onNavigateToDetail = { id ->
                     navController.navigate("detail/$id")
                 },
+                onNavigateToTags = {
+                    navController.navigate("tags")
+                },
             )
         }
         composable(
@@ -148,6 +152,11 @@ private fun AppNavigation() {
             val id = backStackEntry.arguments?.getString("id").orEmpty()
             ArticleDetailScreen(
                 articleId = id,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("tags") {
+            TagSubscriptionScreen(
                 onBack = { navController.popBackStack() },
             )
         }
