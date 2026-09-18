@@ -11,12 +11,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -95,18 +104,26 @@ fun ArticleListScreen(
                 title = { Text("听匣") },
                 actions = {
                     // CP5.3-C: 标签订阅入口
-                    TextButton(
+                    IconButton(
                         onClick = onNavigateToTags,
                         modifier = Modifier.semantics { contentDescription = "标签订阅" },
                     ) {
-                        Text("🏷️")
+                        Icon(
+                            imageVector = Icons.Outlined.FavoriteBorder,
+                            contentDescription = "标签订阅",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     // CP5.4-C: 通知中心入口
-                    TextButton(
+                    IconButton(
                         onClick = onNavigateToNotifications,
                         modifier = Modifier.semantics { contentDescription = "通知中心" },
                     ) {
-                        Text("🔔")
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = "通知中心",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     // CP5.5-B1: 收藏入口
                     TextButton(
@@ -187,10 +204,12 @@ fun ArticleListScreen(
 
 @Composable
 private fun ArticleCard(article: Article, onClick: () -> Unit) {
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
