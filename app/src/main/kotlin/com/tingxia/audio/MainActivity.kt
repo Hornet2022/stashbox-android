@@ -37,6 +37,7 @@ import com.tingxia.audio.ui.screens.ArticleDetailScreen
 import com.tingxia.audio.ui.screens.ArticleListScreen
 import com.tingxia.audio.ui.screens.LoginScreen
 import com.tingxia.audio.ui.screens.OnboardingScreen
+import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -143,6 +144,9 @@ private fun AppNavigation() {
                 onNavigateToTags = {
                     navController.navigate("tags")
                 },
+                onNavigateToNotifications = {
+                    navController.navigate("notifications")
+                },
             )
         }
         composable(
@@ -158,6 +162,14 @@ private fun AppNavigation() {
         composable("tags") {
             TagSubscriptionScreen(
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable("notifications") {
+            NotificationCenterScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToArticle = { articleId ->
+                    navController.navigate("detail/$articleId")
+                },
             )
         }
     }

@@ -7,8 +7,10 @@ import com.tingxia.audio.auth.AuthInterceptor
 import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
+import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.NotificationRepository
 import com.tingxia.audio.data.repository.TagRepository
 import com.tingxia.audio.onboarding.OnboardingApi
 import dagger.Module
@@ -107,6 +109,16 @@ object AppModule {
     @Singleton
     fun provideArticleRepository(api: ArticleApi): ArticleRepository =
         ArticleRepository(api)
+
+    @Provides
+    @Singleton
+    fun provideNotificationApi(retrofit: Retrofit): NotificationApi =
+        retrofit.create(NotificationApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideNotificationRepository(api: NotificationApi): NotificationRepository =
+        NotificationRepository(api)
 
     @Provides
     @Singleton
