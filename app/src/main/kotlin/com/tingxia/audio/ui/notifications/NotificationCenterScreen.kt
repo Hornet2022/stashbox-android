@@ -40,6 +40,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.tingxia.audio.ui.theme.NotificationReadBackground
+import com.tingxia.audio.ui.theme.NotificationUnreadBackground
+import com.tingxia.audio.ui.theme.NotificationUnreadDot
+import com.tingxia.audio.ui.theme.TagDefault
+import com.tingxia.audio.ui.theme.TagEntertainment
+import com.tingxia.audio.ui.theme.TagFinance
+import com.tingxia.audio.ui.theme.TagHistory
+import com.tingxia.audio.ui.theme.TagScience
+import com.tingxia.audio.ui.theme.TagSports
+import com.tingxia.audio.ui.theme.TagTech
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -167,9 +177,9 @@ private fun NotificationItem(
     onClick: () -> Unit,
 ) {
     val backgroundColor = if (!notification.read) {
-        Color(0xFFEEF3FF)
+        NotificationUnreadBackground
     } else {
-        Color(0xFFF5F5F5)
+        NotificationReadBackground
     }
 
     Card(
@@ -192,7 +202,7 @@ private fun NotificationItem(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF2196F3)),
+                        .background(NotificationUnreadDot),
                 )
             } else if (notification.tag_slug != null) {
                 TagChip(tagSlug = notification.tag_slug)
@@ -252,13 +262,13 @@ private fun TagChip(tagSlug: String) {
 }
 
 private fun tagSlugToColor(tagSlug: String): Color = when (tagSlug.lowercase()) {
-    "tech" -> Color(0xFF2196F3)
-    "science" -> Color(0xFF4CAF50)
-    "history" -> Color(0xFFFF9800)
-    "finance" -> Color(0xFF9C27B0)
-    "sports" -> Color(0xFFE91E63)
-    "entertainment" -> Color(0xFFFF5722)
-    else -> Color(0xFF607D8B)
+    "tech" -> TagTech
+    "science" -> TagScience
+    "history" -> TagHistory
+    "finance" -> TagFinance
+    "sports" -> TagSports
+    "entertainment" -> TagEntertainment
+    else -> TagDefault
 }
 
 private fun parseArticleId(deeplink: String): String? {

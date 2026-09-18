@@ -33,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
@@ -93,23 +95,38 @@ fun ArticleListScreen(
                 title = { Text("听匣") },
                 actions = {
                     // CP5.3-C: 标签订阅入口
-                    TextButton(onClick = onNavigateToTags) {
+                    TextButton(
+                        onClick = onNavigateToTags,
+                        modifier = Modifier.semantics { contentDescription = "标签订阅" },
+                    ) {
                         Text("🏷️")
                     }
                     // CP5.4-C: 通知中心入口
-                    TextButton(onClick = onNavigateToNotifications) {
+                    TextButton(
+                        onClick = onNavigateToNotifications,
+                        modifier = Modifier.semantics { contentDescription = "通知中心" },
+                    ) {
                         Text("🔔")
                     }
                     // CP5.5-B1: 收藏入口
-                    TextButton(onClick = onNavigateToFavorites) {
+                    TextButton(
+                        onClick = onNavigateToFavorites,
+                        modifier = Modifier.semantics { contentDescription = "我的收藏" },
+                    ) {
                         Text("❤️")
                     }
                     // CP5.5-B1: 稍后听入口
-                    TextButton(onClick = onNavigateToLaterListens) {
+                    TextButton(
+                        onClick = onNavigateToLaterListens,
+                        modifier = Modifier.semantics { contentDescription = "稍后听" },
+                    ) {
                         Text("⏰")
                     }
                     // CP5.5-A3: 反馈入口
-                    TextButton(onClick = { showSettingsMenu = true }) {
+                    TextButton(
+                        onClick = { showSettingsMenu = true },
+                        modifier = Modifier.semantics { contentDescription = "设置与反馈" },
+                    ) {
                         Text("⚙️")
                     }
                     DropdownMenu(

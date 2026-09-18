@@ -15,4 +15,14 @@
     <string name="source_wechat">公众号</string>
     <string name="source_douyin">抖音</string>
     <string name="source_generic">通用</string>
+
+    <!-- Accessibility content descriptions -->
+    <string name="cd_tag_subscription">标签订阅</string>
+    <string name="cd_notification_center">通知中心</string>
+    <string name="cd_favorites">我的收藏</string>
+    <string name="cd_later_listens">稍后听</string>
+    <string name="cd_settings">设置与反馈</string>
+    <string name="cd_play">播放</string>
+    <string name="cd_pause">暂停</string>
+    <string name="cd_audio_player">音频播放器</string>
 </resources>
