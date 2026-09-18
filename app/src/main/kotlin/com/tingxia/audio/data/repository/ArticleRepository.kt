@@ -2,6 +2,7 @@ package com.tingxia.audio.data.repository
 
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.remote.ArticleApi
 
 /**
@@ -19,4 +20,7 @@ class ArticleRepository(private val api: ArticleApi) {
     suspend fun getDistillStatus(taskId: String): DistillStatus = api.getDistillStatus(taskId).status
 
     suspend fun getAudioUrl(id: String): String = api.getAudioUrl(id).audio_url
+
+    // CP5.2-A: 重试失败蒸馏
+    suspend fun retryArticle(id: String): RetryResponse = api.retryArticle(id)
 }

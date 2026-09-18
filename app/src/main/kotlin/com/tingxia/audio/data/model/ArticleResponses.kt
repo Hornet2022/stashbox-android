@@ -25,3 +25,13 @@ data class AudioUrlResponse(
     val audio_url: String,
     val expires_at: String? = null,
 )
+
+// CP5.2-A: POST /api/v1/articles/{article_id}/retry 响应体
+@Serializable
+data class RetryResponse(
+    val article_id: String,
+    val status: String,
+    val retry_count: Int,
+    val queued_at: String,
+    val distill_triggered: Boolean,
+)

@@ -3,11 +3,15 @@ package com.tingxia.audio.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
+import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
@@ -48,6 +53,7 @@ fun ArticleDetailScreen(
     viewModel: ArticleDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val retryState by viewModel.retryState.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
 
@@ -132,6 +138,35 @@ fun ArticleDetailScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
+                    }
+
+                    // CP5.2-A: status=failed 时显示 retry 按钮
+                    if (uiState.status == DistillStatus.FAILED) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.padding(24.dp),
+                        ) {
+                            Text("这篇蒸馏失败了", style = MaterialTheme.typography.titleMedium)
+                            Text("换个源试试？点击重新蒸馏", style = MaterialTheme.typography.bodyMedium)
+                            Button(
+                                onClick = { viewModel.retryArticle(article!!.id) },
+                                enabled = retryState !is RetryState.Loading,
+                            ) {
+                                if (retryState is RetryState.Loading) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text("重试蒸馏")
+                            }
+                            if (retryState is RetryState.Error) {
+                                Text(
+                                    text = (retryState as RetryState.Error).message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
                     }
                 }
             }

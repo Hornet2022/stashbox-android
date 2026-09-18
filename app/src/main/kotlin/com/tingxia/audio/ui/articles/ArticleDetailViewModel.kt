@@ -33,6 +33,10 @@ class ArticleDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ArticleUiState())
     val uiState: StateFlow<ArticleUiState> = _uiState.asStateFlow()
 
+    // CP5.2-A: retry 状态
+    private val _retryState = MutableStateFlow<RetryState>(RetryState.Idle)
+    val retryState: StateFlow<RetryState> = _retryState.asStateFlow()
+
     fun loadArticle(id: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
@@ -111,6 +115,22 @@ class ArticleDetailViewModel @Inject constructor(
         }
     }
 
+    // CP5.2-A: 重试失败蒸馏
+    fun retryArticle(articleId: String) {
+        _retryState.value = RetryState.Loading
+        viewModelScope.launch {
+            runCatching { repository.retryArticle(articleId) }
+                .onSuccess { response ->
+                    _retryState.value = RetryState.Success(response.retry_count)
+                    // 重新加载文章状态
+                    loadArticle(articleId)
+                }
+                .onFailure { e ->
+                    _retryState.value = RetryState.Error(e.message ?: "重试失败")
+                }
+        }
+    }
+
     companion object {
         /** 轮询间隔：3 秒 */
         const val POLL_INTERVAL_MS: Long = 3000L
@@ -129,3 +149,11 @@ data class ArticleUiState(
     val pollError: String? = null,
     val pollTimedOut: Boolean = false,
 )
+
+// CP5.2-A: retry UI 状态
+sealed class RetryState {
+    data object Idle : RetryState()
+    data object Loading : RetryState()
+    data class Success(val retryCount: Int) : RetryState()
+    data class Error(val message: String) : RetryState()
+}

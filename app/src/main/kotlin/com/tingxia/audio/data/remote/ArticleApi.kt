@@ -5,7 +5,9 @@ import com.tingxia.audio.data.model.ArticleListResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.DistillStatusResponse
+import com.tingxia.audio.data.model.RetryResponse
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Path
 
 /**
@@ -30,4 +32,8 @@ interface ArticleApi {
     /** GET /api/v1/articles/{id}/audio-url → 音频直链 */
     @GET("api/v1/articles/{id}/audio-url")
     suspend fun getAudioUrl(@Path("id") id: String): AudioUrlResponse
+
+    // CP5.2-A: POST /api/v1/articles/{article_id}/retry → 重试失败蒸馏
+    @POST("api/v1/articles/{article_id}/retry")
+    suspend fun retryArticle(@Path("article_id") id: String): RetryResponse
 }
