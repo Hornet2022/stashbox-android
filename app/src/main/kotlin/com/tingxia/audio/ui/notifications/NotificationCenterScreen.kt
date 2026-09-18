@@ -2,6 +2,12 @@ package com.tingxia.audio.ui.notifications
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -134,11 +140,14 @@ fun NotificationCenterScreen(
             ) {
                 when {
                     uiState.isLoading && uiState.notifications.isEmpty() -> {
-                        Box(
+                        LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            CircularProgressIndicator()
+                            items(5) {
+                                ShimmerLoadingItem()
+                            }
                         }
                     }
                     displayedNotifications.isEmpty() -> {
@@ -270,7 +279,7 @@ private fun NotificationItem(
                     Text(
                         text = formatTime(notification.created_at),
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Text(
@@ -278,7 +287,7 @@ private fun NotificationItem(
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    color = Color.DarkGray,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -337,5 +346,47 @@ private fun formatTime(isoTime: String): String {
         }
     } catch (_: Exception) {
         isoTime.take(10)
+    }
+}
+
+@Composable
+private fun ShimmerLoadingItem(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
+    val alpha = infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "shimmer_alpha",
+    )
+    val surfaceColor = MaterialTheme.colorScheme.surfaceVariant
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = surfaceColor.copy(alpha = alpha.value)),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(surfaceColor.copy(alpha = alpha.value * 0.6f)),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(surfaceColor.copy(alpha = alpha.value * 0.4f)),
+            )
+        }
     }
 }
