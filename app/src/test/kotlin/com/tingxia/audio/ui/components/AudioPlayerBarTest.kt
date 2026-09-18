@@ -2,6 +2,7 @@ package com.tingxia.audio.ui.components
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.tingxia.audio.audio.PlayerController
@@ -43,7 +44,7 @@ class AudioPlayerBarTest {
             )
         }
         composeTestRule.onNodeWithText("测试音频").assertIsDisplayed()
-        composeTestRule.onNodeWithText("播放").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("播放").assertIsDisplayed()
     }
 
     @Test
@@ -55,8 +56,8 @@ class AudioPlayerBarTest {
                 playerController = controller,
             )
         }
-        composeTestRule.onNodeWithText("播放").performClick()
-        composeTestRule.onNodeWithText("暂停").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("播放").performClick()
+        composeTestRule.onNodeWithContentDescription("暂停").assertIsDisplayed()
         // 验证真实状态机进入 PLAYING
         assertEquals(PlaybackState.PLAYING, controller.state.value)
     }

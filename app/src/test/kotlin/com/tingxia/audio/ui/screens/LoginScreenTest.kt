@@ -37,7 +37,7 @@ class LoginScreenTest {
                 LoginScreen(onMockLogin = { loginClicked = true })
             }
         }
-        composeTestRule.onNodeWithText("👋 听匣").assertIsDisplayed()
+        composeTestRule.onNodeWithText("听匣").assertIsDisplayed()
         composeTestRule.onNodeWithText("微信登录（mock）").assertIsDisplayed()
     }
 
