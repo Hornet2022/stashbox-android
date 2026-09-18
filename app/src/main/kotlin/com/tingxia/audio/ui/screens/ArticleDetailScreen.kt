@@ -1,41 +1,60 @@
 package com.tingxia.audio.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.remote.FolderCount
+import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import kotlinx.coroutines.launch
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import javax.inject.Inject
 
 /**
  * 文章详情页。
@@ -50,6 +69,7 @@ import com.tingxia.audio.ui.components.StatusBadge
 fun ArticleDetailScreen(
     articleId: String,
     onBack: () -> Unit,
+    favoritesRepository: FavoritesRepository? = null,
     viewModel: ArticleDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -57,8 +77,30 @@ fun ArticleDetailScreen(
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
 
+    var showFavoriteSheet by remember { mutableStateOf(false) }
+    var showLaterListenSheet by remember { mutableStateOf(false) }
+    var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
+
     LaunchedEffect(articleId) {
         viewModel.loadArticle(articleId)
+    }
+
+    if (showFavoriteSheet && favoritesRepository != null) {
+        AddFavoriteBottomSheet(
+            articleId = articleId,
+            folders = folders,
+            onFoldersLoaded = { folders = it },
+            favoritesRepository = favoritesRepository,
+            onDismiss = { showFavoriteSheet = false },
+        )
+    }
+
+    if (showLaterListenSheet && favoritesRepository != null) {
+        AddLaterListenBottomSheet(
+            articleId = articleId,
+            favoritesRepository = favoritesRepository,
+            onDismiss = { showLaterListenSheet = false },
+        )
     }
 
     Scaffold(
@@ -67,6 +109,16 @@ fun ArticleDetailScreen(
                 title = { Text(article?.title ?: "详情") },
                 navigationIcon = {
                     TextButton(onClick = onBack) { Text("返回") }
+                },
+                actions = {
+                    if (favoritesRepository != null) {
+                        TextButton(onClick = { showFavoriteSheet = true }) {
+                            Text("❤️")
+                        }
+                        TextButton(onClick = { showLaterListenSheet = true }) {
+                            Text("⏰")
+                        }
+                    }
                 },
             )
         },
@@ -170,6 +222,199 @@ fun ArticleDetailScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddFavoriteBottomSheet(
+    articleId: String,
+    folders: List<FolderCount>,
+    onFoldersLoaded: (List<FolderCount>) -> Unit,
+    favoritesRepository: FavoritesRepository,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState()
+    var selectedFolder by remember { mutableStateOf("default") }
+    var note by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        try {
+            onFoldersLoaded(favoritesRepository.listFolders())
+        } catch (_: Exception) {
+            // ignore
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("添加收藏", style = MaterialTheme.typography.titleLarge)
+
+            Text("选择文件夹", style = MaterialTheme.typography.titleSmall)
+            LazyColumn(
+                modifier = Modifier.height(150.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items(folders) { folder ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = selectedFolder == folder.folder,
+                                onClick = { selectedFolder = folder.folder },
+                                role = Role.RadioButton,
+                            )
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = selectedFolder == folder.folder,
+                            onClick = null,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("${folder.folder} (${folder.count})")
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                label = { Text("笔记（可选）") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+            )
+
+            Button(
+                onClick = {
+                    isSubmitting = true
+                    scope.launch {
+                        try {
+                            favoritesRepository.addFavorite(
+                                articleId = articleId,
+                                folder = selectedFolder,
+                                note = note.ifBlank { null },
+                            )
+                            onDismiss()
+                        } catch (_: Exception) {
+                            // silent fail
+                        } finally {
+                            isSubmitting = false
+                        }
+                    }
+                },
+                enabled = !isSubmitting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("保存")
+            }
+
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddLaterListenBottomSheet(
+    articleId: String,
+    favoritesRepository: FavoritesRepository,
+    onDismiss: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState()
+    var selectedOption by remember { mutableStateOf("tonight") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val options = listOf(
+        "tonight" to "今晚睡前",
+        "tomorrow" to "明天",
+        "weekend" to "本周末",
+        "custom" to "自定义时间",
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("稍后听", style = MaterialTheme.typography.titleLarge)
+
+            options.forEach { (value, label) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = selectedOption == value,
+                            onClick = { selectedOption = value },
+                            role = Role.RadioButton,
+                        )
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = selectedOption == value,
+                        onClick = null,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(label)
+                }
+            }
+
+            Button(
+                onClick = {
+                    isSubmitting = true
+                    scope.launch {
+                        try {
+                            val snoozeUntil = when (selectedOption) {
+                                "tonight" -> ZonedDateTime.now().plusHours(4).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                                "tomorrow" -> ZonedDateTime.now().plusDays(1).withHour(9).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                                "weekend" -> ZonedDateTime.now().plusDays(5).withHour(10).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                                else -> null
+                            }
+                            favoritesRepository.snooze(
+                                articleId = articleId,
+                                snoozeUntil = snoozeUntil,
+                            )
+                            onDismiss()
+                        } catch (_: Exception) {
+                            // silent fail
+                        } finally {
+                            isSubmitting = false
+                        }
+                    }
+                },
+                enabled = !isSubmitting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("保存")
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

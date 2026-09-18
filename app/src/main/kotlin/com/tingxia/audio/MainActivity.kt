@@ -40,6 +40,9 @@ import com.tingxia.audio.ui.screens.OnboardingScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
+import com.tingxia.audio.ui.favorites.FavoritesScreen
+import com.tingxia.audio.ui.laterlistens.LaterListensScreen
+import com.tingxia.audio.data.repository.FavoritesRepository
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
 import javax.inject.Inject
@@ -49,6 +52,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var playerController: PlayerController
+
+    @Inject
+    lateinit var favoritesRepository: FavoritesRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -132,6 +138,9 @@ private fun SplashScreen() {
 @Composable
 private fun AppNavigation() {
     val navController = rememberNavController()
+    val activity = LocalContext.current as MainActivity
+    val favoritesRepository = activity.favoritesRepository
+
     NavHost(
         navController = navController,
         startDestination = "list",
@@ -147,6 +156,12 @@ private fun AppNavigation() {
                 onNavigateToNotifications = {
                     navController.navigate("notifications")
                 },
+                onNavigateToFavorites = {
+                    navController.navigate("favorites")
+                },
+                onNavigateToLaterListens = {
+                    navController.navigate("later-listens")
+                },
             )
         }
         composable(
@@ -157,6 +172,7 @@ private fun AppNavigation() {
             ArticleDetailScreen(
                 articleId = id,
                 onBack = { navController.popBackStack() },
+                favoritesRepository = favoritesRepository,
             )
         }
         composable("tags") {
@@ -168,6 +184,22 @@ private fun AppNavigation() {
             NotificationCenterScreen(
                 onBack = { navController.popBackStack() },
                 onNavigateToArticle = { articleId ->
+                    navController.navigate("detail/$articleId")
+                },
+            )
+        }
+        composable("favorites") {
+            FavoritesScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToDetail = { articleId ->
+                    navController.navigate("detail/$articleId")
+                },
+            )
+        }
+        composable("later-listens") {
+            LaterListensScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToDetail = { articleId ->
                     navController.navigate("detail/$articleId")
                 },
             )

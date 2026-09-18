@@ -7,9 +7,11 @@ import com.tingxia.audio.auth.AuthInterceptor
 import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
+import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.NotificationRepository
 import com.tingxia.audio.data.repository.TagRepository
 import com.tingxia.audio.onboarding.OnboardingApi
@@ -119,6 +121,16 @@ object AppModule {
     @Singleton
     fun provideNotificationRepository(api: NotificationApi): NotificationRepository =
         NotificationRepository(api)
+
+    @Provides
+    @Singleton
+    fun provideFavoritesApi(retrofit: Retrofit): FavoritesApi =
+        retrofit.create(FavoritesApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideFavoritesRepository(api: FavoritesApi): FavoritesRepository =
+        FavoritesRepository(api)
 
     @Provides
     @Singleton

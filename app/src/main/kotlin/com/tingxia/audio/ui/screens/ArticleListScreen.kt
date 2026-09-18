@@ -47,6 +47,8 @@ fun ArticleListScreen(
     onNavigateToDetail: (String) -> Unit,
     onNavigateToTags: () -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToFavorites: () -> Unit,
+    onNavigateToLaterListens: () -> Unit,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
@@ -68,6 +70,14 @@ fun ArticleListScreen(
                     // CP5.4-C: 通知中心入口
                     TextButton(onClick = onNavigateToNotifications) {
                         Text("🔔")
+                    }
+                    // CP5.5-B1: 收藏入口
+                    TextButton(onClick = onNavigateToFavorites) {
+                        Text("❤️")
+                    }
+                    // CP5.5-B1: 稍后听入口
+                    TextButton(onClick = onNavigateToLaterListens) {
+                        Text("⏰")
                     }
                     // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
                     TextButton(onClick = { /* 占位，CP4.6 才接 */ }) {
