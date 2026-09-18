@@ -250,7 +250,7 @@ private fun FavoriteItem(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = "📁 ${favorite.folder}",
+                        text = favorite.folder,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )

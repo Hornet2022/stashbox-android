@@ -14,8 +14,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -125,25 +126,33 @@ fun ArticleListScreen(
                         )
                     }
                     // CP5.5-B1: 收藏入口
-                    TextButton(
+                    IconButton(
                         onClick = onNavigateToFavorites,
                         modifier = Modifier.semantics { contentDescription = "我的收藏" },
                     ) {
-                        Text("❤️")
+                        Icon(
+                            imageVector = Icons.Filled.Favorite,
+                            contentDescription = "我的收藏",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     // CP5.5-B1: 稍后听入口
                     TextButton(
                         onClick = onNavigateToLaterListens,
                         modifier = Modifier.semantics { contentDescription = "稍后听" },
                     ) {
-                        Text("⏰")
+                        Text("稍后听", style = MaterialTheme.typography.labelMedium)
                     }
                     // CP5.5-A3: 反馈入口
-                    TextButton(
+                    IconButton(
                         onClick = { showSettingsMenu = true },
                         modifier = Modifier.semantics { contentDescription = "设置与反馈" },
                     ) {
-                        Text("⚙️")
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "设置与反馈",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     DropdownMenu(
                         expanded = showSettingsMenu,

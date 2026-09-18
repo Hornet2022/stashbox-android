@@ -35,8 +35,8 @@ fun HomeScreen() {
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "👋 听匣 v0.1.0",
-                style = MaterialTheme.typography.headlineMedium
+                text = "听匣 v0.1.0",
+                style = MaterialTheme.typography.headlineMedium,
             )
             Spacer(Modifier.height(8.dp))
             Text(

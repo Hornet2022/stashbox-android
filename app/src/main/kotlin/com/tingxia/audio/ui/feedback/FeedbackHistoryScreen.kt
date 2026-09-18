@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.ui.text.style.TextAlign
@@ -173,10 +174,16 @@ private fun FeedbackItemCard(feedback: FeedbackItem) {
                     color = MaterialTheme.colorScheme.primary,
                 )
                 if (feedback.rating != null) {
-                    Text(
-                        text = "⭐".repeat(feedback.rating),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        repeat(feedback.rating) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
             }
 

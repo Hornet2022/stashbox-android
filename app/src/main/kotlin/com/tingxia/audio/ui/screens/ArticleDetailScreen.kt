@@ -17,10 +17,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -136,16 +141,24 @@ fun ArticleDetailScreen(
                 },
                 actions = {
                     if (favoritesRepository != null) {
-                        TextButton(onClick = { showFavoriteSheet = true }) {
-                            Text("❤️")
+                        IconButton(onClick = { showFavoriteSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = "收藏",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                         TextButton(onClick = { showLaterListenSheet = true }) {
-                            Text("⏰")
+                            Text("稍后听")
                         }
                     }
                     if (feedbackRepository != null) {
-                        TextButton(onClick = { showFeedbackSheet = true }) {
-                            Text("📝")
+                        IconButton(onClick = { showFeedbackSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = "反馈",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                 },

@@ -40,7 +40,7 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text("👋 听匣", style = MaterialTheme.typography.headlineLarge)
+            Text("听匣", style = MaterialTheme.typography.headlineLarge)
             Spacer(Modifier.height(8.dp))
             Text("AI 蒸馏你的音频订阅", style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(48.dp))
