@@ -11,8 +11,7 @@ import retrofit2.http.Path
 /**
  * 听匣后端 API（api-gateway，dev 端口 8100）。
  *
- * 注意：本期（CP4.3）不接 JWT 鉴权（CP4.6 才接），所有请求无 Authorization header。
- * base url 见 [com.tingxia.audio.di.AppModule]（localhost:8100，emulator 端待改 10.0.2.2）。
+ * base url 见 [com.tingxia.audio.di.AppModule]（emulator 默认 10.0.2.2:8100）。
  */
 interface ArticleApi {
 

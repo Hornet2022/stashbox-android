@@ -33,10 +33,13 @@ object AppModule {
 
     /**
      * 后端统一入口（api-gateway，dev 端口 8100）。
-     * TODO(emulator/CP4.4): 模拟器端改用 "http://10.0.2.2:8100/"，
-     * 因为模拟器里 localhost 指向模拟器自身而非宿主机。
+     *
+     * 模拟器里 localhost 指向模拟器自身而非宿主机，emulator 端必须用 10.0.2.2。
+     * 真机端用局域网 IP（待 CP4.7-A2 处理）。
+     *
+     * CP4.7-A1: 切到 emulator 默认值（10.0.2.2）。
      */
-    private const val BASE_URL = "http://localhost:8100/"
+    private const val BASE_URL = "http://10.0.2.2:8100/"
 
     private val json = Json { ignoreUnknownKeys = true }
 
