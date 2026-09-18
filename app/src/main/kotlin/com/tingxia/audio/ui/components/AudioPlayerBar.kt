@@ -5,12 +5,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -90,12 +94,13 @@ fun AudioPlayerBar(
             }
 
             // 真实进度条（由 PlayerController 每 500ms 轮询 ExoPlayer 更新）
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.width(80.dp),
+            Slider(
+                value = progress,
+                onValueChange = { /* seek-only UX, no-op here */ },
+                modifier = Modifier.weight(1f),
             )
 
-            TextButton(
+            IconButton(
                 onClick = {
                     if (isPlaying) {
                         controller.pause()
@@ -103,8 +108,13 @@ fun AudioPlayerBar(
                         audioUrl?.let { controller.play(it) }
                     }
                 },
+                modifier = Modifier.size(40.dp),
             ) {
-                Text(if (isPlaying) "暂停" else "播放")
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Add else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "暂停" else "播放",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }
