@@ -293,7 +293,7 @@ private fun AddFavoriteBottomSheet(
                 modifier = Modifier.height(150.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(folders) { folder ->
+                items(folders, key = { it.folder }) { folder ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
