@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -24,15 +26,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleListViewModel
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 
 /**
  * 文章列表页。
@@ -49,13 +57,34 @@ fun ArticleListScreen(
     onNavigateToNotifications: () -> Unit,
     onNavigateToFavorites: () -> Unit,
     onNavigateToLaterListens: () -> Unit,
+    onNavigateToFeedbackHistory: () -> Unit,
+    feedbackRepository: FeedbackRepository? = null,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val context = LocalContext.current
+
+    var showFeedbackSheet by remember { mutableStateOf(false) }
+    var showSettingsMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.loadArticles()
+    }
+
+    if (showFeedbackSheet && feedbackRepository != null) {
+        val appVersion = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (_: Exception) {
+                "unknown"
+            }
+        }
+        FeedbackBottomSheet(
+            feedbackRepository = feedbackRepository,
+            appVersion = appVersion,
+            onDismiss = { showFeedbackSheet = false },
+        )
     }
 
     Scaffold(
@@ -78,6 +107,29 @@ fun ArticleListScreen(
                     // CP5.5-B1: 稍后听入口
                     TextButton(onClick = onNavigateToLaterListens) {
                         Text("⏰")
+                    }
+                    // CP5.5-A3: 反馈入口
+                    TextButton(onClick = { showSettingsMenu = true }) {
+                        Text("⚙️")
+                    }
+                    DropdownMenu(
+                        expanded = showSettingsMenu,
+                        onDismissRequest = { showSettingsMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("反馈与建议") },
+                            onClick = {
+                                showSettingsMenu = false
+                                showFeedbackSheet = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("反馈历史") },
+                            onClick = {
+                                showSettingsMenu = false
+                                onNavigateToFeedbackHistory()
+                            },
+                        )
                     }
                     // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
                     TextButton(onClick = { /* 占位，CP4.6 才接 */ }) {

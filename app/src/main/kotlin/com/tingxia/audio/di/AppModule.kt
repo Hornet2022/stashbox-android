@@ -8,9 +8,11 @@ import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.FavoritesApi
+import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.NotificationRepository
 import com.tingxia.audio.data.repository.TagRepository
@@ -131,6 +133,16 @@ object AppModule {
     @Singleton
     fun provideFavoritesRepository(api: FavoritesApi): FavoritesRepository =
         FavoritesRepository(api)
+
+    @Provides
+    @Singleton
+    fun provideFeedbackApi(retrofit: Retrofit): FeedbackApi =
+        retrofit.create(FeedbackApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideFeedbackRepository(api: FeedbackApi): FeedbackRepository =
+        FeedbackRepository(api)
 
     @Provides
     @Singleton

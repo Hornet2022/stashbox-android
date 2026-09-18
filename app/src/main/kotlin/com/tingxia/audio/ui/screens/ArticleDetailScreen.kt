@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -46,11 +47,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
+import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -70,15 +73,18 @@ fun ArticleDetailScreen(
     articleId: String,
     onBack: () -> Unit,
     favoritesRepository: FavoritesRepository? = null,
+    feedbackRepository: FeedbackRepository? = null,
     viewModel: ArticleDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val retryState by viewModel.retryState.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
+    val context = LocalContext.current
 
     var showFavoriteSheet by remember { mutableStateOf(false) }
     var showLaterListenSheet by remember { mutableStateOf(false) }
+    var showFeedbackSheet by remember { mutableStateOf(false) }
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
 
     LaunchedEffect(articleId) {
@@ -103,6 +109,22 @@ fun ArticleDetailScreen(
         )
     }
 
+    if (showFeedbackSheet && feedbackRepository != null) {
+        val appVersion = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (_: Exception) {
+                "unknown"
+            }
+        }
+        FeedbackBottomSheet(
+            articleId = articleId,
+            feedbackRepository = feedbackRepository,
+            appVersion = appVersion,
+            onDismiss = { showFeedbackSheet = false },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -117,6 +139,11 @@ fun ArticleDetailScreen(
                         }
                         TextButton(onClick = { showLaterListenSheet = true }) {
                             Text("⏰")
+                        }
+                    }
+                    if (feedbackRepository != null) {
+                        TextButton(onClick = { showFeedbackSheet = true }) {
+                            Text("📝")
                         }
                     }
                 },

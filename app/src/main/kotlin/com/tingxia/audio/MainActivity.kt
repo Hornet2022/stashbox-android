@@ -43,6 +43,8 @@ import com.tingxia.audio.ui.theme.TingxiaTheme
 import com.tingxia.audio.ui.favorites.FavoritesScreen
 import com.tingxia.audio.ui.laterlistens.LaterListensScreen
 import com.tingxia.audio.data.repository.FavoritesRepository
+import com.tingxia.audio.data.repository.FeedbackRepository
+import com.tingxia.audio.ui.feedback.FeedbackHistoryScreen
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
 import javax.inject.Inject
@@ -55,6 +57,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var favoritesRepository: FavoritesRepository
+
+    @Inject
+    lateinit var feedbackRepository: FeedbackRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,6 +145,7 @@ private fun AppNavigation() {
     val navController = rememberNavController()
     val activity = LocalContext.current as MainActivity
     val favoritesRepository = activity.favoritesRepository
+    val feedbackRepository = activity.feedbackRepository
 
     NavHost(
         navController = navController,
@@ -162,6 +168,10 @@ private fun AppNavigation() {
                 onNavigateToLaterListens = {
                     navController.navigate("later-listens")
                 },
+                onNavigateToFeedbackHistory = {
+                    navController.navigate("feedback-history")
+                },
+                feedbackRepository = feedbackRepository,
             )
         }
         composable(
@@ -173,6 +183,7 @@ private fun AppNavigation() {
                 articleId = id,
                 onBack = { navController.popBackStack() },
                 favoritesRepository = favoritesRepository,
+                feedbackRepository = feedbackRepository,
             )
         }
         composable("tags") {
@@ -202,6 +213,11 @@ private fun AppNavigation() {
                 onNavigateToDetail = { articleId ->
                     navController.navigate("detail/$articleId")
                 },
+            )
+        }
+        composable("feedback-history") {
+            FeedbackHistoryScreen(
+                onBack = { navController.popBackStack() },
             )
         }
     }
