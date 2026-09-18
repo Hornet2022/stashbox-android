@@ -1,5 +1,7 @@
 package com.tingxia.audio.ui.screens
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -173,92 +175,98 @@ fun ArticleDetailScreen(
             }
         },
     ) { innerPadding ->
-        when {
-            uiState.isLoading && article == null -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    CircularProgressIndicator()
+        Crossfade(
+            targetState = if (uiState.isLoading && article == null) "loading" else if (uiState.error != null) "error" else "content",
+            animationSpec = tween(300),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            label = "article_detail_fade",
+        ) { state ->
+            when (state) {
+                "loading" -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
-            uiState.error != null -> {
-                ErrorHint(
-                    modifier = Modifier.padding(innerPadding),
-                    message = uiState.error ?: "加载失败",
-                    onBack = onBack,
-                )
-            }
-            article != null -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = article.title,
-                        style = MaterialTheme.typography.headlineSmall,
+                "error" -> {
+                    ErrorHint(
+                        modifier = Modifier,
+                        message = uiState.error ?: "加载失败",
+                        onBack = onBack,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SourceBadge(source = article.source)
-                        StatusBadge(status = uiState.status)
-                    }
-
-                    if (article.url.isNotEmpty()) {
-                        TextButton(
-                            onClick = { clipboardManager.setText(AnnotatedString(article.url)) },
-                        ) {
-                            Text("复制原文链接：${article.url}")
+                }
+                else -> {
+                    val articleNotNull = article!!
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = articleNotNull.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SourceBadge(source = articleNotNull.source)
+                            StatusBadge(status = uiState.status)
                         }
-                    }
 
-                    if (uiState.status == DistillStatus.DISTILLING) {
-                        Text(
-                            text = "蒸馏中…（每 3 秒轮询）",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-
-                    if (uiState.pollError != null) {
-                        Text(
-                            text = uiState.pollError ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-
-                    // CP5.2-A: status=failed 时显示 retry 按钮
-                    if (uiState.status == DistillStatus.FAILED) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(24.dp),
-                        ) {
-                            Text("这篇蒸馏失败了", style = MaterialTheme.typography.titleMedium)
-                            Text("换个源试试？点击重新蒸馏", style = MaterialTheme.typography.bodyMedium)
-                            Button(
-                                onClick = { viewModel.retryArticle(article!!.id) },
-                                enabled = retryState !is RetryState.Loading,
+                        if (articleNotNull.url.isNotEmpty()) {
+                            TextButton(
+                                onClick = { clipboardManager.setText(AnnotatedString(articleNotNull.url)) },
                             ) {
-                                if (retryState is RetryState.Loading) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Text("重试蒸馏")
+                                Text("复制原文链接：${articleNotNull.url}")
                             }
-                            if (retryState is RetryState.Error) {
-                                Text(
-                                    text = (retryState as RetryState.Error).message,
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                        }
+
+                        if (uiState.status == DistillStatus.DISTILLING) {
+                            Text(
+                                text = "蒸馏中…（每 3 秒轮询）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+
+                        if (uiState.pollError != null) {
+                            Text(
+                                text = uiState.pollError ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
+                        if (uiState.status == DistillStatus.FAILED) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.padding(24.dp),
+                            ) {
+                                Text("这篇蒸馏失败了", style = MaterialTheme.typography.titleMedium)
+                                Text("换个源试试？点击重新蒸馏", style = MaterialTheme.typography.bodyMedium)
+                                Button(
+                                    onClick = { viewModel.retryArticle(articleNotNull.id) },
+                                    enabled = retryState !is RetryState.Loading,
+                                ) {
+                                    if (retryState is RetryState.Loading) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text("重试蒸馏")
+                                }
+                                if (retryState is RetryState.Error) {
+                                    Text(
+                                        text = (retryState as RetryState.Error).message,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
                             }
                         }
                     }

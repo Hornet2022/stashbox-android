@@ -1,5 +1,7 @@
 package com.tingxia.audio.ui.screens
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,29 +183,47 @@ fun ArticleListScreen(
             )
         },
     ) { innerPadding ->
-        if (isLoading && articles.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(articles, key = { it.id }) { article ->
-                    ArticleCard(
-                        article = article,
-                        onClick = { onNavigateToDetail(article.id) },
-                    )
+        Crossfade(
+            targetState = if (isLoading && articles.isEmpty()) "loading" else if (articles.isEmpty()) "empty" else "content",
+            animationSpec = tween(300),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            label = "article_list_fade",
+        ) { state ->
+            when (state) {
+                "loading" -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                "empty" -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "暂无文章",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(articles, key = { it.id }) { article ->
+                            ArticleCard(
+                                article = article,
+                                onClick = { onNavigateToDetail(article.id) },
+                            )
+                        }
+                    }
                 }
             }
         }
