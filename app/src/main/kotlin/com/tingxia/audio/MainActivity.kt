@@ -1,6 +1,8 @@
 package com.tingxia.audio
 
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,9 +17,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -31,6 +36,7 @@ import com.tingxia.audio.ui.auth.AuthViewModel
 import com.tingxia.audio.ui.screens.ArticleDetailScreen
 import com.tingxia.audio.ui.screens.ArticleListScreen
 import com.tingxia.audio.ui.screens.LoginScreen
+import com.tingxia.audio.ui.screens.OnboardingScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -67,11 +73,18 @@ class MainActivity : ComponentActivity() {
 
 /**
  * 鉴权路由根：启动检查 token，决定首屏是登录页还是内容页。
+ *
+ * CP5.1 新增：已登录用户看 SharedPreferences has_onboarded 标志，
+ * 未看过引导则显示 OnboardingScreen（3 步），看完设标志。
+ * 引导状态本地存 SharedPreferences（CP6.7 再统一服务端化）。
  */
 @Composable
 private fun AuthRoot() {
     val viewModel: AuthViewModel = hiltViewModel()
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE) }
+    val hasOnboarded = remember { mutableStateOf(prefs.getBoolean("has_onboarded", false)) }
 
     LaunchedEffect(Unit) { viewModel.checkLogin() }
 
@@ -82,7 +95,18 @@ private fun AuthRoot() {
         is AuthState.Error,
         -> LoginScreen(onMockLogin = viewModel::mockWechatLogin)
 
-        is AuthState.LoggedIn -> AppNavigation()
+        is AuthState.LoggedIn -> {
+            if (hasOnboarded.value) {
+                AppNavigation()
+            } else {
+                OnboardingScreen(
+                    onCompleted = {
+                        prefs.edit().putBoolean("has_onboarded", true).apply()
+                        hasOnboarded.value = true
+                    },
+                )
+            }
+        }
     }
 }
 

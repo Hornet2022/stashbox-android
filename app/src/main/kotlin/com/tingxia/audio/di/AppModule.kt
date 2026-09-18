@@ -8,6 +8,7 @@ import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.onboarding.OnboardingApi
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -84,6 +85,11 @@ object AppModule {
     @Singleton
     fun provideAuthApi(retrofit: Retrofit): AuthApi =
         retrofit.create(AuthApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideOnboardingApi(retrofit: Retrofit): OnboardingApi =
+        retrofit.create(OnboardingApi::class.java)
 
     @Provides
     @Singleton
