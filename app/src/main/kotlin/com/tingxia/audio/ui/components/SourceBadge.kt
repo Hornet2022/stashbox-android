@@ -10,7 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.tingxia.audio.R
 
 /**
  * 来源徽章：根据 source 标识展示「公众号 / 抖音 / 通用」。
@@ -18,9 +20,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SourceBadge(source: String, modifier: Modifier = Modifier) {
     val (label, color) = when (source.lowercase()) {
-        "wechat" -> "公众号" to Color(0xFF07C160)
-        "douyin" -> "抖音" to Color(0xFFFE2C55)
-        else -> "通用" to MaterialTheme.colorScheme.outline
+        "wechat" -> stringResource(R.string.source_wechat) to Color(0xFF07C160)
+        "douyin" -> stringResource(R.string.source_douyin) to Color(0xFFFE2C55)
+        else -> stringResource(R.string.source_generic) to MaterialTheme.colorScheme.outline
     }
     Box(
         modifier = modifier

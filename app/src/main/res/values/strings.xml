@@ -3,4 +3,16 @@
     <string name="app_name">听匣</string>
     <string name="audio_player_channel_name">听匣音频播放</string>
     <string name="audio_player_channel_description">通知显示当前正在播放的听匣音频</string>
+
+    <!-- DistillStatus badge labels -->
+    <string name="status_pending">待处理</string>
+    <string name="status_distilling">蒸馏中</string>
+    <string name="status_ready">已就绪</string>
+    <string name="status_failed">失败</string>
+    <string name="status_listened">已听</string>
+
+    <!-- Source badge labels -->
+    <string name="source_wechat">公众号</string>
+    <string name="source_douyin">抖音</string>
+    <string name="source_generic">通用</string>
 </resources>
