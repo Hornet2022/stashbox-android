@@ -303,7 +303,7 @@ private fun AddFavoriteBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
         dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(
@@ -405,7 +405,7 @@ private fun AddLaterListenBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
         dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(

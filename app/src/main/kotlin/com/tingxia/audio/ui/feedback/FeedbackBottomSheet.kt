@@ -71,7 +71,7 @@ fun FeedbackBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
         dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(
@@ -115,20 +115,21 @@ fun FeedbackBottomSheet(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 (1..5).forEach { star ->
                     Text(
-                        text = if (star <= rating) "⭐" else "☆",
+                        text = if (star <= rating) "●" else "○",
                         style = MaterialTheme.typography.titleLarge,
+                        color = if (star <= rating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                         modifier = Modifier.clickable { rating = star },
                     )
                 }
                 if (rating > 0) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "$rating/5",
+                        text = "$rating / 5",
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.align(Alignment.CenterVertically),
                     )
                 }
             }
