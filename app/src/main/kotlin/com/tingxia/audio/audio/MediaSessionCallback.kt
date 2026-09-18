@@ -1,5 +1,6 @@
 package com.tingxia.audio.audio
 
+import android.annotation.SuppressLint
 import androidx.media3.common.Player
 import androidx.media3.session.MediaSession
 
@@ -12,6 +13,7 @@ import androidx.media3.session.MediaSession
  */
 class TingxiaMediaSessionCallback : MediaSession.Callback {
 
+    @SuppressLint("UnsafeOptInUsageError")
     override fun onConnect(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,

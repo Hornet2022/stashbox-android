@@ -3,6 +3,7 @@ package com.tingxia.audio
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.annotation.SuppressLint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -75,6 +76,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("UnsafeOptInUsageError")
     private fun startAudioService() {
         try {
             startService(Intent(this, AudioPlayerService::class.java))
