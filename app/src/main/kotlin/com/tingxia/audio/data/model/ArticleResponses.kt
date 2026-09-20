@@ -10,8 +10,13 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class ArticleListResponse(
-    val articles: List<Article> = emptyList(),
-)
+    // CP10 fix: backend GET /api/v1/articles returns {"items":[...], "total":N}
+    // 之前期待 "articles" → 反序列化失败 → UI "暂无文章" 假象
+    val items: List<Article> = emptyList(),
+    val total: Int = 0,
+) {
+    val articles: List<Article> get() = items
+}
 
 @Serializable
 data class DistillStatusResponse(
