@@ -141,7 +141,9 @@ fun HomeScreen(
             Text(
                 text = "文章列表",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(16.dp, 12.dp, 16.dp, 4.dp)
+                modifier = Modifier
+                    .padding(16.dp, 12.dp, 16.dp, 4.dp)
+                    .clickable { onNavigateToArticleList() }
             )
 
             when {

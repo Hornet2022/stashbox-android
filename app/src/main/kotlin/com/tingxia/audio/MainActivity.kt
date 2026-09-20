@@ -162,8 +162,8 @@ private fun AppNavigation() {
                 onNavigateToAdd = { navController.navigate("add") },
                 onNavigateToCapture = { navController.navigate("capture") },
                 onNavigateToDistill = { navController.navigate("distill") },
-                onNavigateToSubscribe = { navController.navigate("subscribe") },
-                onNavigateToReview = { navController.navigate("review") },
+                onNavigateToSubscribe = { navController.navigate("tags") },
+                onNavigateToReview = { navController.navigate("later-listens") },
                 onNavigateToArticleList = { navController.navigate("list") },
                 onNavigateToFullscreenPlayer = { navController.navigate("fullscreen_player") },
             )
