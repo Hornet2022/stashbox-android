@@ -263,12 +263,6 @@ private fun AppNavigation() {
                 onDistilled = { navController.popBackStack() },
             )
         }
-        composable("subscribe") {
-            PlaceholderScreen(title = "订阅")
-        }
-        composable("review") {
-            PlaceholderScreen(title = "回听")
-        }
         composable("article_list") {
             ArticleListScreen(
                 onNavigateToDetail = { id ->
@@ -306,15 +300,5 @@ private fun AppNavigation() {
                 onAdded = { navController.popBackStack() },
             )
         }
-    }
-}
-
-@Composable
-private fun PlaceholderScreen(title: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(title, style = MaterialTheme.typography.headlineMedium)
     }
 }
