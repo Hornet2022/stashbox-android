@@ -62,7 +62,7 @@ class ArticleDetailViewModel @Inject constructor(
                 // CP4.4：蒸馏已就绪，直接起播（audio_url 已就绪）
                 // CP4.5：把 article.title/source 传给 play()，让锁屏 UI 显示标题/作者
                 initialAudioUrl?.let { url ->
-                    playerController.play(url, title = article.title, author = article.source)
+                    playerController.play(url, title = article.title ?: "", author = article.source)
                 }
                 if (article.taskId != null &&
                     article.status != DistillStatus.READY &&

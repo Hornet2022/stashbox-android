@@ -1,5 +1,6 @@
 package com.tingxia.audio.data.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -12,9 +13,14 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 enum class DistillStatus {
+    @SerialName("pending")
     PENDING,
+    @SerialName("distilling")
     DISTILLING,
+    @SerialName("ready")
     READY,
+    @SerialName("failed")
     FAILED,
+    @SerialName("listened")
     LISTENED,
 }

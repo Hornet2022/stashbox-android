@@ -241,7 +241,7 @@ private fun ArticleCard(article: Article, onClick: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = article.title,
+                text = article.title ?: "无标题",
                 style = MaterialTheme.typography.titleMedium,
             )
             Row(

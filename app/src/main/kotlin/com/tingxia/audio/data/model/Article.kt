@@ -18,7 +18,7 @@ import kotlinx.serialization.Serializable
 data class Article(
     val id: String,
     val url: String = "",
-    val title: String,
+    val title: String? = null,
     val source: String = "general",
     val status: DistillStatus = DistillStatus.PENDING,
     val taskId: String? = null,

@@ -241,7 +241,7 @@ private fun ArticleListItem(article: Article, onClick: () -> Unit) {
     ) {
         Column {
             Text(
-                text = article.title,
+                text = article.title ?: "无标题",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(

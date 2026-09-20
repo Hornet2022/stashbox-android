@@ -170,7 +170,7 @@ fun ArticleDetailScreen(
         bottomBar = {
             if (uiState.status == DistillStatus.READY && article != null) {
                 AudioPlayerBar(
-                    title = article.title,
+                    title = article.title ?: "",
                     audioUrl = uiState.audioUrl,
                     onClick = onOpenFullScreenPlayer,
                 )
@@ -212,7 +212,7 @@ fun ArticleDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
-                            text = articleNotNull.title,
+                            text = articleNotNull.title ?: "",
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
