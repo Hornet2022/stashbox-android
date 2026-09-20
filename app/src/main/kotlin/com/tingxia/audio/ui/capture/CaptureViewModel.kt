@@ -2,6 +2,7 @@ package com.tingxia.audio.ui.capture
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.repository.ArticleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,9 +14,7 @@ import javax.inject.Inject
 /**
  * CP10.4 剪藏页 ViewModel:用户粘贴 URL → [ArticleRepository.createArticle] → 后端自动派蒸馏。
  *
- * CP10.5:成功回调改回 (String) -> Unit(articleId 本身),而非 (Article) -> Unit。
- * 后端响应壳 [com.tingxia.audio.data.model.CreateArticleResponse] 字段全 nullable,
- * 即便 id 缺失 UI 也能拿到 taskId/空串兜底,不再被反序列化阻塞。
+ * CP11.0.2 升级:加"最近剪藏列表"——提交后留在页面看到剪藏记录。
  */
 @HiltViewModel
 class CaptureViewModel @Inject constructor(
@@ -27,21 +26,37 @@ class CaptureViewModel @Inject constructor(
         val isLoading: Boolean = false,
         val error: String? = null,
         val capturedArticleId: String? = null,
+        val recentArticles: List<Article> = emptyList(),
+        val isRecentLoading: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
+    init {
+        loadRecent()
+    }
+
     fun onUrlChanged(value: String) {
         _uiState.value = _uiState.value.copy(url = value, error = null)
     }
 
-    /**
-     * 提交剪藏:成功 → 设 capturedArticleId(UI 监听后弹提示 + popBack)
-     * 失败 → 设 error(UI Toast 提示)
-     *
-     * 回调 [onSuccess] 传 articleId(后端字段缺失时为 ""),不复用 Article。
-     */
+    fun loadRecent() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRecentLoading = true)
+            try {
+                val list = repository.getArticles()
+                _uiState.value = _uiState.value.copy(
+                    isRecentLoading = false,
+                    recentArticles = list.take(20),
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("CaptureViewModel", "loadRecent failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(isRecentLoading = false)
+            }
+        }
+    }
+
     fun capture(onSuccess: (String) -> Unit) {
         val url = _uiState.value.url.trim()
         if (url.isEmpty()) {
@@ -64,8 +79,10 @@ class CaptureViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     capturedArticleId = id.ifEmpty { null },
+                    url = "",
                 )
                 onSuccess(id)
+                loadRecent()
             } catch (e: Exception) {
                 android.util.Log.w("CaptureViewModel", "capture failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(
@@ -76,7 +93,6 @@ class CaptureViewModel @Inject constructor(
         }
     }
 
-    /** 清掉一次性事件(success 已消费) */
     fun consumeCaptured() {
         _uiState.value = _uiState.value.copy(capturedArticleId = null)
     }
