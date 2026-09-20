@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +34,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.tingxia.audio.audio.AudioPlayerService
 import com.tingxia.audio.audio.PlayerController
+import com.tingxia.audio.share.D9Receiver
+import com.tingxia.audio.share.D9Result
 import com.tingxia.audio.ui.auth.AuthState
 import com.tingxia.audio.ui.auth.AuthViewModel
 import com.tingxia.audio.ui.screens.ArticleDetailScreen
@@ -53,6 +57,9 @@ import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.feedback.FeedbackHistoryScreen
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -78,6 +85,32 @@ class MainActivity : ComponentActivity() {
             TingxiaTheme {
                 AuthRoot()
             }
+        }
+        // CP10.9 D9: 冷启动时检查 intent(微信/抖音/浏览器分享唤起)
+        handleD9Intent(intent)
+    }
+
+    /**
+     * CP10.9 D9: singleTask 模式下,App 已在后台运行 → 复用此 Activity,
+     * 新 intent 走 onNewIntent 而非 onCreate。
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleD9Intent(intent)
+    }
+
+    /**
+     * CP10.9 D9: 接 intent → 解析分享 URL → 调 D9 callback。
+     * 非 SEND/VIEW intent 直接忽略。
+     */
+    private fun handleD9Intent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_VIEW) return
+        // 必须异步,不能在 UI 线程跑 HTTP
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = D9Receiver.handleIntent(this@MainActivity, intent)
+            Log.i("MainActivity", "D9 result: $result")
         }
     }
 
