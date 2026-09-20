@@ -40,6 +40,9 @@ import com.tingxia.audio.ui.screens.FullScreenPlayerScreen
 import com.tingxia.audio.ui.screens.HomeScreen
 import com.tingxia.audio.ui.screens.LoginScreen
 import com.tingxia.audio.ui.screens.OnboardingScreen
+import com.tingxia.audio.ui.capture.CaptureScreen
+import com.tingxia.audio.ui.distill.DistillScreen
+import com.tingxia.audio.ui.add.AddScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
@@ -249,10 +252,16 @@ private fun AppNavigation() {
             )
         }
         composable("capture") {
-            PlaceholderScreen(title = "剪藏")
+            CaptureScreen(
+                onBack = { navController.popBackStack() },
+                onCaptured = { navController.popBackStack() },
+            )
         }
         composable("distill") {
-            PlaceholderScreen(title = "蒸馏")
+            DistillScreen(
+                onBack = { navController.popBackStack() },
+                onDistilled = { navController.popBackStack() },
+            )
         }
         composable("subscribe") {
             PlaceholderScreen(title = "订阅")
@@ -292,7 +301,10 @@ private fun AppNavigation() {
             )
         }
         composable("add") {
-            PlaceholderScreen(title = "添加")
+            AddScreen(
+                onBack = { navController.popBackStack() },
+                onAdded = { navController.popBackStack() },
+            )
         }
     }
 }

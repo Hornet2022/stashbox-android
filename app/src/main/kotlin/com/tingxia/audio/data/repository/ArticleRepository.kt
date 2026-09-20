@@ -1,15 +1,16 @@
 package com.tingxia.audio.data.repository
 
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.CreateArticleRequest
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.remote.ArticleApi
 
 /**
- * 文章数据仓库：包装 [ArticleApi] 的 Retrofit 调用，向 UI 层屏蔽网络细节。
+ * 文章数据仓库:包装 [ArticleApi] 的 Retrofit 调用,向 UI 层屏蔽网络细节。
  *
- * 本期（CP4.3）数据来自真后端，但单测使用 fake 实现（见 test 目录），
- * 不在此处做缓存/DB（本地 DB 留待 CP5）。
+ * 本期(CP4.3)数据来自真后端,但单测使用 fake 实现(见 test 目录),
+ * 不在此处做缓存/DB(本地 DB 留待 CP5)。
  */
 class ArticleRepository(private val api: ArticleApi) {
 
@@ -23,4 +24,10 @@ class ArticleRepository(private val api: ArticleApi) {
 
     // CP5.2-A: 重试失败蒸馏
     suspend fun retryArticle(id: String): RetryResponse = api.retryArticle(id)
+
+    // CP10.4: 创建文章 — 后端自动派蒸馏任务
+    suspend fun createArticle(url: String): Article = api.createArticle(CreateArticleRequest(url))
+
+    // CP10.4: 手动触发蒸馏(后端返回任务状态)
+    suspend fun distillArticle(id: String): DistillStatus = api.distillArticle(id).status
 }

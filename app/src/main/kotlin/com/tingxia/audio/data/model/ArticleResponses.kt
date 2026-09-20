@@ -1,11 +1,12 @@
 package com.tingxia.audio.data.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * 听匣后端 API 的响应体（与 [com.tingxia.audio.data.remote.ArticleApi] 对应）。
+ * 听匣后端 API 的响应体(与 [com.tingxia.audio.data.remote.ArticleApi] 对应)。
  *
- * 单独放一个文件、不跟 interface 混在一起，避免 K2 + kotlinx-serialization 插件
+ * 单独放一个文件、不跟 interface 混在一起,避免 K2 + kotlinx-serialization 插件
  * 在同文件内「interface + @Serializable」并存时把 `@Serializable` 解析成内部 typealias 报错。
  */
 @Serializable
@@ -39,4 +40,11 @@ data class RetryResponse(
     val retry_count: Int,
     val queued_at: String,
     val distill_triggered: Boolean,
+)
+
+// CP10.4: POST /api/v1/articles 请求体 — 只接 url(后端 add_article 自动派蒸馏)
+@Serializable
+data class CreateArticleRequest(
+    @SerialName("url")
+    val url: String,
 )
