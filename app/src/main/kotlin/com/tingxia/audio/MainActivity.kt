@@ -36,6 +36,8 @@ import com.tingxia.audio.ui.auth.AuthState
 import com.tingxia.audio.ui.auth.AuthViewModel
 import com.tingxia.audio.ui.screens.ArticleDetailScreen
 import com.tingxia.audio.ui.screens.ArticleListScreen
+import com.tingxia.audio.ui.screens.FullScreenPlayerScreen
+import com.tingxia.audio.ui.screens.HomeScreen
 import com.tingxia.audio.ui.screens.LoginScreen
 import com.tingxia.audio.ui.screens.OnboardingScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
@@ -151,8 +153,21 @@ private fun AppNavigation() {
 
     NavHost(
         navController = navController,
-        startDestination = "list",
+        startDestination = "home",
     ) {
+        composable("home") {
+            HomeScreen(
+                onNavigateToFavorites = { navController.navigate("favorites") },
+                onNavigateToNotifications = { navController.navigate("notifications") },
+                onNavigateToAdd = { navController.navigate("add") },
+                onNavigateToCapture = { navController.navigate("capture") },
+                onNavigateToDistill = { navController.navigate("distill") },
+                onNavigateToSubscribe = { navController.navigate("subscribe") },
+                onNavigateToReview = { navController.navigate("review") },
+                onNavigateToArticleList = { navController.navigate("list") },
+                onNavigateToFullscreenPlayer = { navController.navigate("fullscreen_player") },
+            )
+        }
         composable("list") {
             ArticleListScreen(
                 onNavigateToDetail = { id ->
@@ -184,8 +199,19 @@ private fun AppNavigation() {
             ArticleDetailScreen(
                 articleId = id,
                 onBack = { navController.popBackStack() },
+                onOpenFullScreenPlayer = {
+                    navController.navigate("player")
+                },
                 favoritesRepository = favoritesRepository,
                 feedbackRepository = feedbackRepository,
+            )
+        }
+        composable("player") {
+            FullScreenPlayerScreen(
+                title = "听匣 · 当前播放",
+                author = null,
+                coverUrl = null,
+                onDismiss = { navController.popBackStack() },
             )
         }
         composable("tags") {
@@ -222,5 +248,61 @@ private fun AppNavigation() {
                 onBack = { navController.popBackStack() },
             )
         }
+        composable("capture") {
+            PlaceholderScreen(title = "剪藏")
+        }
+        composable("distill") {
+            PlaceholderScreen(title = "蒸馏")
+        }
+        composable("subscribe") {
+            PlaceholderScreen(title = "订阅")
+        }
+        composable("review") {
+            PlaceholderScreen(title = "回听")
+        }
+        composable("article_list") {
+            ArticleListScreen(
+                onNavigateToDetail = { id ->
+                    navController.navigate("detail/$id")
+                },
+                onNavigateToTags = {
+                    navController.navigate("tags")
+                },
+                onNavigateToNotifications = {
+                    navController.navigate("notifications")
+                },
+                onNavigateToFavorites = {
+                    navController.navigate("favorites")
+                },
+                onNavigateToLaterListens = {
+                    navController.navigate("later-listens")
+                },
+                onNavigateToFeedbackHistory = {
+                    navController.navigate("feedback-history")
+                },
+                feedbackRepository = feedbackRepository,
+            )
+        }
+        composable("fullscreen_player") {
+            FullScreenPlayerScreen(
+                title = "听匣 · 当前播放",
+                author = null,
+                coverUrl = null,
+                onDismiss = { navController.popBackStack() },
+            )
+        }
+        composable("add") {
+            PlaceholderScreen(title = "添加")
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderScreen(title: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(title, style = MaterialTheme.typography.headlineMedium)
     }
 }

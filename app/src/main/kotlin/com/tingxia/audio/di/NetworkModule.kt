@@ -33,7 +33,7 @@ object NetworkModule {
      *
      * CP4.7-A1: 切到 emulator 默认值（10.0.2.2）。
      */
-    private const val BASE_URL = "http://10.0.2.2:8100/"
+    private const val BASE_URL = "http://172.16.5.28:8100/"
 
     private val json = Json { ignoreUnknownKeys = true }
 

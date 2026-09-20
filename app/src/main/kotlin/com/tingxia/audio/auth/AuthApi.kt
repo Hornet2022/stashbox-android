@@ -32,8 +32,8 @@ interface AuthApi {
 @Serializable
 data class AuthResponse(
     val access_token: String,
-    val refresh_token: String,
-    val user_id: Long,
+    val refresh_token: String? = null,  // backend wechat-login 不返回此字段
+    val user_id: String,                // backend 返回 String, 非 Long
     val expires_in: Long,
     val tier: String = "free",
 )

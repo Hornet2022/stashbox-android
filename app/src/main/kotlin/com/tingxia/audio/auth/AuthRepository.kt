@@ -5,8 +5,8 @@ import javax.inject.Inject
 /**
  * 鉴权数据仓库：包装 [AuthApi] 与 [TokenManager]，向 ViewModel 屏蔽网络 / 存储细节。
  *
- * CP4.6 微信登录为 **mock**：[mockWechatLogin] 直接返回固定 token 并落盘，
- * 不真正请求后端（无 OAuth 流程）。CP4.7 接真微信 OAuth 时改为调用 [AuthApi.wechatLogin]。
+ * CP7.4: [mockWechatLogin] 改调 backend POST /api/v1/auth/wechat-login 拿真 JWT。
+ * 不再造假 token (之前 mock token 被 backend require_user 401)。
  */
 class AuthRepository @Inject constructor(
     private val api: AuthApi,
@@ -26,28 +26,23 @@ class AuthRepository @Inject constructor(
     )
 
     /**
-     * Mock 微信登录：返回固定 token（CP4.7 接真 OAuth）。
+     * CP7.4: 改调 backend 真 wechat-login, 拿真 JWT (之前 mock token 被 backend 401)。
      * 固定用户便于本地联调；落盘后 [getAccessToken] 立即可用。
+     * 注意: backend WechatLoginResponse 只有 access_token/user_id/expires_in,
+     * 无 refresh_token, 这里用占位符替代。
      */
     suspend fun mockWechatLogin(): LoginResult {
-        val resp = AuthResponse(
-            access_token = "mock_access_${MOCK_USER_ID}_cp4_6",
-            refresh_token = "mock_refresh_${MOCK_USER_ID}_cp4_6",
-            user_id = MOCK_USER_ID,
-            expires_in = 3600,
-            tier = "free",
-        )
-        tokenManager.saveTokens(resp.access_token, resp.refresh_token, resp.user_id)
-        return LoginResult(resp.access_token, resp.refresh_token, resp.user_id)
+        val resp = api.wechatLogin(WechatLoginRequest(code = "test_cp74_dev_user"))
+        // backend 未返回 refresh_token, 用占位符替代
+        val userId = resp.user_id.toLongOrNull() ?: 0L
+        val refresh = "mock_refresh_${resp.user_id}_cp7_4"
+        tokenManager.saveTokens(resp.access_token, refresh, userId)
+        return LoginResult(resp.access_token, refresh, userId)
     }
 
     /** 登出：尽力通知服务端后清空本地 token。 */
     suspend fun logout() {
         runCatching { api.logout() }
         tokenManager.clear()
-    }
-
-    private companion object {
-        const val MOCK_USER_ID = 10001L
     }
 }

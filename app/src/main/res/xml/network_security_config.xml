@@ -3,6 +3,9 @@
     <!-- dev 环境允许 HTTP（10.0.2.2:8100 是 emulator 走宿主机的 gateway） -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">10.0.2.2</domain>
+        <!-- CP7.4: Hornet Mac 局域网 IP (172.16.5.28 / en8 USB 网卡) -->
+        <domain includeSubdomains="true">172.16.5.28</domain>
+        <domain includeSubdomains="true">172.16.1.90</domain>
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>
     <!-- prod 默认不允许明文 -->

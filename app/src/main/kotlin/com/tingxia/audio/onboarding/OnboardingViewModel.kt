@@ -28,27 +28,41 @@ class OnboardingViewModel @Inject constructor(
     fun onStart() {
         _state.value = OnboardingState.InProgress(currentStep = 1)
         viewModelScope.launch {
+            // CP7.4 修复:soft-warn 模式 — backend 暂时不可达不应卡死 onboarding UI。
             runCatching { repository.start() }
                 .onSuccess { _state.value = OnboardingState.InProgress(currentStep = 1) }
-                .onFailure { _state.value = OnboardingState.Error(it.message ?: "Unknown error") }
+                .onFailure {
+                    android.util.Log.w("OnboardingViewModel", "onStart failed (soft-warn): ${it.message}")
+                    _state.value = OnboardingState.InProgress(currentStep = 1)
+                }
         }
     }
 
     fun onStepViewed(step: Int) {
         viewModelScope.launch {
+            // CP7.4 修复:stepViewed 始终软失败,不切 state。
             runCatching { repository.stepViewed(step) }
-                .onFailure { /* 静默失败：埋点失败不影响 UI 流程 */ }
+                .onFailure {
+                    android.util.Log.w("OnboardingViewModel", "stepViewed failed (soft-warn): ${it.message}")
+                }
         }
     }
 
     fun onComplete(onSuccess: () -> Unit) {
         viewModelScope.launch {
+            // CP7.4 修复:onComplete 也改 soft-warn + fire-and-forget 语义。
+            // 本地 has_onboarded SharedPreferences 是 client-side 真值,
+            // backend /onboarding/done 只是遥测埋点,不应阻塞用户进入首页。
             runCatching { repository.complete() }
                 .onSuccess {
                     _state.value = OnboardingState.Completed
                     onSuccess()
                 }
-                .onFailure { _state.value = OnboardingState.Error(it.message ?: "Unknown error") }
+                .onFailure {
+                    android.util.Log.w("OnboardingViewModel", "onComplete failed (soft-warn): ${it.message}")
+                    _state.value = OnboardingState.Completed
+                    onSuccess()
+                }
         }
     }
 }

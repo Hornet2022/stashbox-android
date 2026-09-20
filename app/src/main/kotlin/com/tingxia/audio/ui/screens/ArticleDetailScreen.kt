@@ -81,6 +81,7 @@ import javax.inject.Inject
 fun ArticleDetailScreen(
     articleId: String,
     onBack: () -> Unit,
+    onOpenFullScreenPlayer: () -> Unit = {},
     favoritesRepository: FavoritesRepository? = null,
     feedbackRepository: FeedbackRepository? = null,
     viewModel: ArticleDetailViewModel = hiltViewModel(),
@@ -171,6 +172,7 @@ fun ArticleDetailScreen(
                 AudioPlayerBar(
                     title = article.title,
                     audioUrl = uiState.audioUrl,
+                    onClick = onOpenFullScreenPlayer,
                 )
             }
         },
