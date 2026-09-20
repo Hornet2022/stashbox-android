@@ -2,7 +2,9 @@ package com.tingxia.audio.data.repository
 
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.CreateArticleRequest
+import com.tingxia.audio.data.model.CreateArticleResponse
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.DistillTriggerResponse
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.remote.ArticleApi
 
@@ -25,9 +27,12 @@ class ArticleRepository(private val api: ArticleApi) {
     // CP5.2-A: 重试失败蒸馏
     suspend fun retryArticle(id: String): RetryResponse = api.retryArticle(id)
 
-    // CP10.4: 创建文章 — 后端自动派蒸馏任务
-    suspend fun createArticle(url: String): Article = api.createArticle(CreateArticleRequest(url))
+    // CP10.5: 创建文章 — 后端自动派蒸馏任务
+    // 返回专门的 [CreateArticleResponse](字段全 nullable),不复用 Article,
+    // 解决 CP10.4 暴露的 "Field 'id' is required" 反序列化失败。
+    suspend fun createArticle(url: String): CreateArticleResponse =
+        api.createArticle(CreateArticleRequest(url))
 
-    // CP10.4: 手动触发蒸馏(后端返回任务状态)
-    suspend fun distillArticle(id: String): DistillStatus = api.distillArticle(id).status
+    // CP10.5: 手动触发蒸馏(后端返回任务触发响应,字段全 nullable)
+    suspend fun distillArticle(id: String): DistillTriggerResponse = api.distillArticle(id)
 }

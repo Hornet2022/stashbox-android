@@ -100,10 +100,10 @@ fun AddScreen(
 
             Button(
                 onClick = {
-                    viewModel.add { article ->
+                    viewModel.add { articleId ->
                         Toast.makeText(context, "添加成功", Toast.LENGTH_SHORT).show()
                         viewModel.consumeAdded()
-                        onAdded(article.id)
+                        onAdded(articleId)
                     }
                 },
                 enabled = !uiState.isLoading && uiState.url.isNotBlank(),

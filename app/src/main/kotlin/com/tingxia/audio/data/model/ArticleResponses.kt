@@ -48,3 +48,30 @@ data class CreateArticleRequest(
     @SerialName("url")
     val url: String,
 )
+
+// CP10.5: POST /api/v1/articles 响应体 — **不复用 Article**
+//
+// 原因:CP10.4 真验发现后端 add_article 返的 157-byte JSON body 缺 `id` 字段,
+// 直接反序列化到 [Article] 报 "Field 'id' is required",导致 add/capture 业务跑不通。
+//
+// 不能把 [Article.id] 改 nullable(会污染所有 GET 调用 — §⑰ 红线),
+// 所以这里专门为 create 接口写一个**字段全 nullable** 的响应壳,
+// 后端任一字段缺失都不会再炸。
+@Serializable
+data class CreateArticleResponse(
+    @SerialName("id") val id: String? = null,
+    @SerialName("article_id") val articleId: String? = null,
+    @SerialName("status") val status: String? = null,
+    @SerialName("task_id") val taskId: String? = null,
+)
+
+// CP10.5: POST /api/v1/articles/{id}/distill 响应体
+//
+// 同 [CreateArticleResponse] 思路:不依赖后端字段固定存在,
+// 全部 nullable + 单独类型,**不**复用 [DistillStatusResponse](后者带必填 task_id)。
+@Serializable
+data class DistillTriggerResponse(
+    @SerialName("status") val status: String? = null,
+    @SerialName("task_id") val taskId: String? = null,
+    @SerialName("article_id") val articleId: String? = null,
+)

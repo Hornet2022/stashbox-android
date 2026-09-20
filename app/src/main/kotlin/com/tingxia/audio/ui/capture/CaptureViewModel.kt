@@ -2,7 +2,6 @@ package com.tingxia.audio.ui.capture
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.repository.ArticleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,7 +13,9 @@ import javax.inject.Inject
 /**
  * CP10.4 剪藏页 ViewModel:用户粘贴 URL → [ArticleRepository.createArticle] → 后端自动派蒸馏。
  *
- * 成功回调 [capturedArticleId] 让 UI 弹 "剪藏成功" 提示并返回首页。
+ * CP10.5:成功回调改回 (String) -> Unit(articleId 本身),而非 (Article) -> Unit。
+ * 后端响应壳 [com.tingxia.audio.data.model.CreateArticleResponse] 字段全 nullable,
+ * 即便 id 缺失 UI 也能拿到 taskId/空串兜底,不再被反序列化阻塞。
  */
 @HiltViewModel
 class CaptureViewModel @Inject constructor(
@@ -38,8 +39,10 @@ class CaptureViewModel @Inject constructor(
     /**
      * 提交剪藏:成功 → 设 capturedArticleId(UI 监听后弹提示 + popBack)
      * 失败 → 设 error(UI Toast 提示)
+     *
+     * 回调 [onSuccess] 传 articleId(后端字段缺失时为 ""),不复用 Article。
      */
-    fun capture(onSuccess: (Article) -> Unit) {
+    fun capture(onSuccess: (String) -> Unit) {
         val url = _uiState.value.url.trim()
         if (url.isEmpty()) {
             _uiState.value = _uiState.value.copy(error = "请输入链接")
@@ -52,12 +55,17 @@ class CaptureViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
-                val article = repository.createArticle(url)
+                val resp = repository.createArticle(url)
+                val id = resp.id ?: resp.articleId ?: resp.taskId ?: ""
+                android.util.Log.i(
+                    "CaptureViewModel",
+                    "capture ok: id=$id status=${resp.status} taskId=${resp.taskId}",
+                )
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    capturedArticleId = article.id,
+                    capturedArticleId = id.ifEmpty { null },
                 )
-                onSuccess(article)
+                onSuccess(id)
             } catch (e: Exception) {
                 android.util.Log.w("CaptureViewModel", "capture failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(

@@ -4,8 +4,10 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.ArticleListResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.CreateArticleRequest
+import com.tingxia.audio.data.model.CreateArticleResponse
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.DistillStatusResponse
+import com.tingxia.audio.data.model.DistillTriggerResponse
 import com.tingxia.audio.data.model.RetryResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -39,11 +41,13 @@ interface ArticleApi {
     @POST("api/v1/articles/{article_id}/retry")
     suspend fun retryArticle(@Path("article_id") id: String): RetryResponse
 
-    // CP10.4: POST /api/v1/articles → 创建文章(后端自动派蒸馏任务)
+    // CP10.5: POST /api/v1/articles → 创建文章(后端自动派蒸馏任务)
+    // 不再用 Article 当返回类型 — 后端响应字段不全,专门的 [CreateArticleResponse]
     @POST("api/v1/articles")
-    suspend fun createArticle(@Body request: CreateArticleRequest): Article
+    suspend fun createArticle(@Body request: CreateArticleRequest): CreateArticleResponse
 
-    // CP10.4: POST /api/v1/articles/{id}/distill → 手动触发蒸馏(后端 add_article 已自动派,这是手动重派)
+    // CP10.5: POST /api/v1/articles/{id}/distill → 手动触发蒸馏(后端 add_article 已自动派,这是手动重派)
+    // 不复用 [DistillStatusResponse](后者 task_id 是必填),专门的 [DistillTriggerResponse]
     @POST("api/v1/articles/{id}/distill")
-    suspend fun distillArticle(@Path("id") id: String): DistillStatusResponse
+    suspend fun distillArticle(@Path("id") id: String): DistillTriggerResponse
 }

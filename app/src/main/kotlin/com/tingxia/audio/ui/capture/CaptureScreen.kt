@@ -103,14 +103,14 @@ fun CaptureScreen(
 
             Button(
                 onClick = {
-                    viewModel.capture { article ->
+                    viewModel.capture { articleId ->
                         Toast.makeText(
                             context,
                             "剪藏成功,正在蒸馏",
                             Toast.LENGTH_SHORT,
                         ).show()
                         viewModel.consumeCaptured()
-                        onCaptured(article.id)
+                        onCaptured(articleId)
                     }
                 },
                 enabled = !uiState.isLoading && uiState.url.isNotBlank(),

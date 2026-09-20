@@ -60,7 +60,11 @@ class DistillViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDistilling = true, error = null)
             try {
-                repository.distillArticle(articleId)
+                val resp = repository.distillArticle(articleId)
+                android.util.Log.i(
+                    "DistillViewModel",
+                    "distill ok: articleId=$articleId status=${resp.status} taskId=${resp.taskId}",
+                )
                 _uiState.value = _uiState.value.copy(
                     pendingArticles = _uiState.value.pendingArticles.filter { it.id != articleId },
                     isDistilling = false,

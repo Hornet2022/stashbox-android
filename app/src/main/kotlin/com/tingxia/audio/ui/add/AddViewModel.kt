@@ -2,7 +2,6 @@ package com.tingxia.audio.ui.add
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.repository.ArticleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +15,9 @@ import javax.inject.Inject
  *
  * 与 [com.tingxia.audio.ui.capture.CaptureViewModel] 功能等价,文案不同("添加文章" vs "剪藏文章")。
  * 业务上两条独立路径(HomeScreen TopAppBar 添加按钮 vs 2x2 grid 剪藏卡),ViewModel 各自持有独立 state。
+ *
+ * CP10.5:与 CaptureViewModel 同改造 — 回调收 articleId(不复用 Article),
+ * 解决 CP10.4 暴露的 "Field 'id' is required" 反序列化失败。
  */
 @HiltViewModel
 class AddViewModel @Inject constructor(
@@ -36,7 +38,7 @@ class AddViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(url = value, error = null)
     }
 
-    fun add(onSuccess: (Article) -> Unit) {
+    fun add(onSuccess: (String) -> Unit) {
         val url = _uiState.value.url.trim()
         if (url.isEmpty()) {
             _uiState.value = _uiState.value.copy(error = "请输入链接")
@@ -49,12 +51,17 @@ class AddViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             try {
-                val article = repository.createArticle(url)
+                val resp = repository.createArticle(url)
+                val id = resp.id ?: resp.articleId ?: resp.taskId ?: ""
+                android.util.Log.i(
+                    "AddViewModel",
+                    "add ok: id=$id status=${resp.status} taskId=${resp.taskId}",
+                )
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    addedArticleId = article.id,
+                    addedArticleId = id.ifEmpty { null },
                 )
-                onSuccess(article)
+                onSuccess(id)
             } catch (e: Exception) {
                 android.util.Log.w("AddViewModel", "add failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(
