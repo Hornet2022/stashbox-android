@@ -27,6 +27,16 @@ captures/
 *.iml
 
 # ==========================================
+# Node / pnpm / WorkBuddy devDeps
+# (防止 git add . 误抓 node_modules 入 commit — cp9.1 教训)
+# ==========================================
+node_modules/
+.pnpm-store/
+.pnp.*
+.yarn/cache
+.pnp.js
+
+# ==========================================
 # WorkBuddy 私域（git 协作相关）
 # ==========================================
 .workbuddy/
