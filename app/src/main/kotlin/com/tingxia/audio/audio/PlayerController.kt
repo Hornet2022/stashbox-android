@@ -3,17 +3,21 @@ package com.tingxia.audio.audio
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.exoplayer.ExoPlayer
 import android.net.Uri
+import com.tingxia.audio.data.remote.ProgressApi
+import com.tingxia.audio.data.remote.ProgressUpdateRequest
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 import javax.inject.Singleton
 
 /**
@@ -31,6 +35,8 @@ enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
  *
  * UI（[com.tingxia.audio.ui.components.AudioPlayerBar]）通过 [PlayerControllerEntryPoint]
  * 在 Compose 内取到本单例并 collect 其 StateFlow。
+ *
+ * CP11.0.1: 断点续听 — 每 10 秒上报 progress（仅播放中）。
  */
 @Singleton
 class PlayerController(context: Context) {
@@ -59,6 +65,58 @@ class PlayerController(context: Context) {
         }
     }
 
+    // CP11.0.1: 断点续听进度上报
+    private var progressApi: ProgressApi? = null
+    private var currentArticleId: String? = null
+    private var lastReportTimeMs = 0L
+    private val progressHandler = Handler(Looper.getMainLooper())
+    private val progressRunnable = object : Runnable {
+        override fun run() {
+            reportProgressIfNeeded()
+            progressHandler.postDelayed(this, PROGRESS_REPORT_INTERVAL_MS)
+        }
+    }
+
+    /** 设置 ProgressApi（由 Hilt 注入，ArticleDetailViewModel 调用）。 */
+    fun setProgressApi(api: ProgressApi) {
+        progressApi = api
+    }
+
+    /** 设置当前播放的文章 ID（开始播放时由调用方设置）。 */
+    fun setCurrentArticleId(articleId: String?) {
+        currentArticleId = articleId
+    }
+
+    private fun reportProgressIfNeeded() {
+        if (_state.value != PlaybackState.PLAYING) return
+        val articleId = currentArticleId ?: return
+        val api = progressApi ?: return
+
+        val positionMs = _position.value
+        val positionSec = (positionMs / 1000).toInt()
+        val now = System.currentTimeMillis()
+
+        // 避免重复上报（只在上次上报后过了足够时间才报）
+        if (now - lastReportTimeMs < PROGRESS_REPORT_INTERVAL_MS) return
+
+        lastReportTimeMs = now
+        Log.i("ProgressApi", "posted position=$positionSec articleId=$articleId")
+
+        // IO 线程执行网络请求
+        Thread {
+            try {
+                runBlocking {
+                    api.updateProgress(
+                        articleId,
+                        ProgressUpdateRequest(position_sec = positionSec, total_sec = null)
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w("ProgressApi", "failed to report progress: ${e.message}")
+            }
+        }.start()
+    }
+
     /** 惰性创建底层 ExoPlayer（仅一次）。需在主线程调用。 */
     fun initialize() {
         if (player != null) return
@@ -67,7 +125,7 @@ class PlayerController(context: Context) {
 
     /**
      * 播放指定音频直链，并携带锁屏/通知所需元数据（CP4.5）。
-     * 若尚未 [initialize]，仅更新状态机（不真正出声）——UI 仍可反映“播放中”。
+     * 若尚未 [initialize]，仅更新状态机（不真正出声）——UI 仍可反映"播放中"。
      *
      * @param audioUrl 音频直链
      * @param title    锁屏/通知标题（文章标题）；默认空串，兼容无标题的手动起播
@@ -100,6 +158,7 @@ class PlayerController(context: Context) {
         p.prepare()
         p.play()
         startPolling()
+        startProgressReporting()
     }
 
     fun pause() {
@@ -111,6 +170,7 @@ class PlayerController(context: Context) {
         _state.value = PlaybackState.STOPPED
         player?.stop()
         stopPolling()
+        stopProgressReporting()
         _position.value = 0L
         _duration.value = 0L
     }
@@ -122,6 +182,7 @@ class PlayerController(context: Context) {
 
     fun release() {
         stopPolling()
+        stopProgressReporting()
         player?.release()
         player = null
         _state.value = PlaybackState.IDLE
@@ -138,8 +199,19 @@ class PlayerController(context: Context) {
         positionHandler.removeCallbacks(positionRunnable)
     }
 
+    private fun startProgressReporting() {
+        lastReportTimeMs = 0L
+        progressHandler.removeCallbacks(progressRunnable)
+        progressHandler.postDelayed(progressRunnable, PROGRESS_REPORT_INTERVAL_MS)
+    }
+
+    private fun stopProgressReporting() {
+        progressHandler.removeCallbacks(progressRunnable)
+    }
+
     companion object {
         private const val POLL_INTERVAL_MS = 500L
+        private const val PROGRESS_REPORT_INTERVAL_MS = 10_000L
     }
 }
 

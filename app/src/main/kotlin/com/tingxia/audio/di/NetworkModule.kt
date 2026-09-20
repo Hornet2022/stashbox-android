@@ -7,6 +7,7 @@ import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.NotificationApi
+import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.onboarding.OnboardingApi
 import dagger.Module
@@ -98,4 +99,9 @@ object NetworkModule {
     @Singleton
     fun provideFeedbackApi(retrofit: Retrofit): FeedbackApi =
         retrofit.create(FeedbackApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideProgressApi(retrofit: Retrofit): ProgressApi =
+        retrofit.create(ProgressApi::class.java)
 }

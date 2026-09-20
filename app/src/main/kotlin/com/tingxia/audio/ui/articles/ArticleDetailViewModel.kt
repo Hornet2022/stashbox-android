@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.ProgressRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -23,10 +25,14 @@ import javax.inject.Inject
  * 2. 若 status != ready 且有 taskId → [startPolling] 每 [POLL_INTERVAL_MS] 秒
  *    GET /api/v1/distill/{task_id}，直到 status == ready / failed
  * 3. ready → 拉 audio_url 并显示播放器；failed/超时 → 标记错误
+ *
+ * CP11.0.1: 断点续听 — 进入时 GET progress，有记录则从断点起播。
  */
 @HiltViewModel
 class ArticleDetailViewModel @Inject constructor(
     private val repository: ArticleRepository,
+    private val progressRepository: ProgressRepository,
+    private val progressApi: ProgressApi,
     private val playerController: PlayerController,
 ) : ViewModel() {
 
@@ -37,10 +43,23 @@ class ArticleDetailViewModel @Inject constructor(
     private val _retryState = MutableStateFlow<RetryState>(RetryState.Idle)
     val retryState: StateFlow<RetryState> = _retryState.asStateFlow()
 
+    private var savedPositionMs: Long? = null
+
     fun loadArticle(id: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
+                // CP11.0.1: 先查断点进度
+                savedPositionMs = null
+                try {
+                    val progress = progressRepository.getProgress(id)
+                    if (progress.position_sec != null && progress.position_sec > 0) {
+                        savedPositionMs = progress.position_sec.toLong() * 1000
+                    }
+                } catch (_: Exception) {
+                    // 忽略 progress 查询失败，不影响主流程
+                }
+
                 val article = repository.getArticle(id)
                 // 文章已就绪（或已听）时，首屏直接取 article.audioUrl，无需轮询
                 val initialAudioUrl =
@@ -61,8 +80,14 @@ class ArticleDetailViewModel @Inject constructor(
                 }
                 // CP4.4：蒸馏已就绪，直接起播（audio_url 已就绪）
                 // CP4.5：把 article.title/source 传给 play()，让锁屏 UI 显示标题/作者
+                // CP11.0.1: 设置 ProgressApi + articleId，有断点则 seekTo
                 initialAudioUrl?.let { url ->
+                    playerController.setProgressApi(progressApi)
+                    playerController.setCurrentArticleId(id)
                     playerController.play(url, title = article.title ?: "", author = article.source)
+                    savedPositionMs?.let { pos ->
+                        playerController.seekTo(pos)
+                    }
                 }
                 if (article.taskId != null &&
                     article.status != DistillStatus.READY &&
@@ -89,13 +114,19 @@ class ArticleDetailViewModel @Inject constructor(
                             val url = runCatching { repository.getAudioUrl(articleId) }.getOrNull()
                             _uiState.update { it.copy(status = DistillStatus.READY, audioUrl = url) }
                             // CP4.4：蒸馏完成，起播；CP4.5：带 title/source 供锁屏显示
+                            // CP11.0.1: 设置 ProgressApi + articleId，有断点则 seekTo
                             val art = _uiState.value.article
                             url?.let {
+                                playerController.setProgressApi(progressApi)
+                                playerController.setCurrentArticleId(articleId)
                                 playerController.play(
                                     it,
                                     title = art?.title ?: "",
                                     author = art?.source,
                                 )
+                                savedPositionMs?.let { pos ->
+                                    playerController.seekTo(pos)
+                                }
                             }
                             return@launch
                         }

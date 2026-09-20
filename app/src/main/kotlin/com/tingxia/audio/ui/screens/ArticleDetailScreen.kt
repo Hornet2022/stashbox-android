@@ -203,7 +203,7 @@ fun ArticleDetailScreen(
                     )
                 }
                 else -> {
-                    val articleNotNull = article!!
+                    val safeArticle = article ?: return@Crossfade
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -212,19 +212,19 @@ fun ArticleDetailScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
-                            text = articleNotNull.title ?: "",
+                            text = safeArticle.title ?: "",
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SourceBadge(source = articleNotNull.source)
+                            SourceBadge(source = safeArticle.source)
                             StatusBadge(status = uiState.status)
                         }
 
-                        if (articleNotNull.url.isNotEmpty()) {
+                        if (safeArticle.url.isNotEmpty()) {
                             TextButton(
-                                onClick = { clipboardManager.setText(AnnotatedString(articleNotNull.url)) },
+                                onClick = { clipboardManager.setText(AnnotatedString(safeArticle.url)) },
                             ) {
-                                Text("复制原文链接：${articleNotNull.url}")
+                                Text("复制原文链接：${safeArticle.url}")
                             }
                         }
 
@@ -253,7 +253,7 @@ fun ArticleDetailScreen(
                                 Text("这篇蒸馏失败了", style = MaterialTheme.typography.titleMedium)
                                 Text("换个源试试？点击重新蒸馏", style = MaterialTheme.typography.bodyMedium)
                                 Button(
-                                    onClick = { viewModel.retryArticle(articleNotNull.id) },
+                                    onClick = { viewModel.retryArticle(safeArticle.id) },
                                     enabled = retryState !is RetryState.Loading,
                                 ) {
                                     if (retryState is RetryState.Loading) {
