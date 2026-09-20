@@ -74,6 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.content.Intent
 import androidx.compose.ui.unit.sp
 import com.tingxia.audio.audio.PlaybackState
 import com.tingxia.audio.audio.PlayerController
@@ -110,6 +111,7 @@ fun FullScreenPlayerScreen(
     onNavigateToTags: () -> Unit = {},
     onFeedback: () -> Unit = {},
     onShare: () -> Unit = {},
+    shareUrl: String? = null,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -241,7 +243,17 @@ fun FullScreenPlayerScreen(
                 onToggleFavorite = onToggleFavorite,
                 onNavigateToTags = onNavigateToTags,
                 onFeedback = onFeedback,
-                onShare = onShare,
+                onShare = {
+                    if (shareUrl != null) {
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "听听这个: $title $shareUrl")
+                        }
+                        context.startActivity(Intent.createChooser(intent, "分享到"))
+                    } else {
+                        onShare()
+                    }
+                },
             )
 
             Spacer(modifier = Modifier.height(16.dp))
