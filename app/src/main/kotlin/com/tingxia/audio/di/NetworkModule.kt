@@ -6,6 +6,7 @@ import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
+import com.tingxia.audio.data.remote.MetricsInterceptor
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.QuotaApi
@@ -48,8 +49,10 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient =
         OkHttpClient.Builder()
-            // JWT 鉴权：自动附加 Authorization: Bearer <token>（CP4.6）
+            // JWT 鉴权：自动附加 Authorization: Bearer ***
             .addInterceptor(authInterceptor)
+            // CP11.0.6 P2.2: 响应时间埋点（放在 auth 后，这样可以拿到最终 URL）
+            .addInterceptor(MetricsInterceptor())
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
                     level = HttpLoggingInterceptor.Level.BASIC
