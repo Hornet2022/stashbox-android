@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -38,6 +40,12 @@ import com.tingxia.audio.data.model.Article
 
 /**
  * CP10.4 蒸馏中心:列出所有 PENDING / FAILED 文章,提供「立即蒸馏」按钮手动重派。
+ *
+ * CP11.0.5 P3.2 升级:用户点 "立即蒸馏" 后,该文章卡片显示:
+ *   - 真倒计时进度条 30s → 0
+ *   - 剩余秒数文本 "蒸馏中,剩余 23 秒"
+ *   - 按钮 disable,防止重复点击
+ *   - 倒计时结束自动从列表移除 + Toast "蒸馏完成"
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,7 +71,7 @@ fun DistillScreen(
         uiState.toast?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             viewModel.consumeToast()
-            onDistilled()
+            // 蒸馏完成的 toast 不再 popBack — 用户留在蒸馏中心看列表刷新
         }
     }
 
@@ -120,6 +128,8 @@ fun DistillScreen(
                             DistillItem(
                                 article = article,
                                 isDistilling = uiState.isDistilling,
+                                // CP11.0.5 P3.2: 倒计时状态(per-article)
+                                countdown = uiState.inProgress[article.id],
                                 onDistill = { viewModel.distill(article.id) },
                             )
                         }
@@ -134,8 +144,10 @@ fun DistillScreen(
 private fun DistillItem(
     article: Article,
     isDistilling: Boolean,
+    countdown: DistillViewModel.DistillInProgress?,
     onDistill: () -> Unit,
 ) {
+    val isInProgress = countdown != null
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -143,31 +155,56 @@ private fun DistillItem(
             containerColor = MaterialTheme.colorScheme.surfaceVariant,
         ),
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = article.title ?: "无标题",
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = article.title ?: "无标题",
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(modifier = Modifier.padding(2.dp))
+                    Text(
+                        text = "${article.source} · ${article.status.name.lowercase()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = onDistill,
+                    // CP11.0.5 P3.2: 倒计时中 OR 派发中都 disable
+                    enabled = !isDistilling && !isInProgress,
+                ) {
+                    Text(if (isInProgress) "蒸馏中" else "立即蒸馏")
+                }
+            }
+
+            // CP11.0.5 P3.2: 倒计时进度条 + 剩余秒数
+            if (isInProgress && countdown != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = {
+                        // remaining 0 → progress 0; remaining 30 → progress 1.0
+                        countdown.remaining.toFloat() / countdown.total.toFloat()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp),
                 )
-                Spacer(modifier = Modifier.padding(2.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "${article.source} · ${article.status.name.lowercase()}",
+                    text = "蒸馏中,剩余 ${countdown.remaining} 秒",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-            Button(
-                onClick = onDistill,
-                enabled = !isDistilling,
-            ) {
-                Text("立即蒸馏")
             }
         }
     }
