@@ -1,6 +1,7 @@
 package com.tingxia.audio.di
 
 import android.content.Context
+import com.tingxia.audio.audio.OfflineDownloadManager
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.auth.AuthApi
 import com.tingxia.audio.auth.AuthRepository
@@ -81,9 +82,9 @@ object AppModule {
      * 播放控制器单例（CP4.4）。
      * 内部持有 ExoPlayer，暴露 StateFlow 给 Compose UI。
      * AudioPlayerService 由系统启动，不走 Hilt，因此不在此处注入。
+     *
+     * CP11.0.7 P2.1: PlayerController 构造时注入 [OfflineDownloadManager]，
+     * ExoPlayer 数据源走 cache factory，支持离线预下载 + 命中秒开。
+     * 注：Hilt 现在自动发现 PlayerController 的 @Inject 构造，不再需要 Provides。
      */
-    @Provides
-    @Singleton
-    fun providePlayerController(@ApplicationContext context: Context): PlayerController =
-        PlayerController(context)
 }

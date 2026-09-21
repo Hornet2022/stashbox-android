@@ -60,6 +60,7 @@ import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
+import com.tingxia.audio.ui.components.DownloadButton
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
@@ -163,6 +164,13 @@ fun ArticleDetailScreen(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
+                    }
+                    // CP11.0.7 P2.1: 离线预下载按钮，仅在音频就绪时显示
+                    if (uiState.status == DistillStatus.READY && uiState.audioUrl != null) {
+                        DownloadButton(
+                            articleId = articleId,
+                            audioUrl = uiState.audioUrl,
+                        )
                     }
                 },
             )

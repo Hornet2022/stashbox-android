@@ -7,17 +7,21 @@ import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import android.net.Uri
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.ProgressUpdateRequest
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
+import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
@@ -37,9 +41,14 @@ enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
  * 在 Compose 内取到本单例并 collect 其 StateFlow。
  *
  * CP11.0.1: 断点续听 — 每 10 秒上报 progress（仅播放中）。
+ * CP11.0.7 P2.1: 离线预下载 — 构造时注入 [OfflineDownloadManager]，
+ *   ExoPlayer 数据源走 cache factory。已下载音频秒开 / 未下载自动缓存。
  */
 @Singleton
-class PlayerController(context: Context) {
+class PlayerController @Inject constructor(
+    @ApplicationContext context: Context,
+    private val offlineDownloadManager: OfflineDownloadManager,
+) {
 
     private val appContext: Context = context.applicationContext
 
@@ -117,10 +126,19 @@ class PlayerController(context: Context) {
         }.start()
     }
 
-    /** 惰性创建底层 ExoPlayer（仅一次）。需在主线程调用。 */
+    /**
+     * 惰性创建底层 ExoPlayer（仅一次）。需在主线程调用。
+     * CP11.0.7 P2.1: 注入 cache data source factory，使所有播放命中本地音频缓存。
+     */
     fun initialize() {
         if (player != null) return
-        player = ExoPlayer.Builder(appContext).build()
+        val cacheFactory: DataSource.Factory = offlineDownloadManager.buildCacheDataSourceFactory()
+        // Media3 1.4.1: ExoPlayer.Builder 通过 setMediaSourceFactory 注入 cache data source
+        val mediaSourceFactory = DefaultMediaSourceFactory(cacheFactory)
+        player = ExoPlayer.Builder(appContext)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
+        Log.i(TAG, "PlayerController initialized with offline cache factory")
     }
 
     /**
@@ -210,6 +228,7 @@ class PlayerController(context: Context) {
     }
 
     companion object {
+        private const val TAG = "PlayerController"
         private const val POLL_INTERVAL_MS = 500L
         private const val PROGRESS_REPORT_INTERVAL_MS = 10_000L
     }
