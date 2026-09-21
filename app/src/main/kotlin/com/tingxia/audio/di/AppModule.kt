@@ -9,11 +9,13 @@ import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.NotificationApi
+import com.tingxia.audio.data.remote.QuotaApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.NotificationRepository
+import com.tingxia.audio.data.repository.QuotaRepository
 import com.tingxia.audio.data.repository.TagRepository
 import dagger.Module
 import dagger.Provides
@@ -61,6 +63,12 @@ object AppModule {
     @Singleton
     fun provideFeedbackRepository(api: FeedbackApi): FeedbackRepository =
         FeedbackRepository(api)
+
+    // CP11.0.4 P1.2: 配额仓库(付费墙)
+    @Provides
+    @Singleton
+    fun provideQuotaRepository(api: QuotaApi): QuotaRepository =
+        QuotaRepository(api)
 
     @Provides
     @Singleton

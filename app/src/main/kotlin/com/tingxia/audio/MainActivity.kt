@@ -52,6 +52,7 @@ import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import com.tingxia.audio.ui.favorites.FavoritesScreen
 import com.tingxia.audio.ui.laterlistens.LaterListensScreen
+import com.tingxia.audio.ui.paywall.PaywallScreen
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.feedback.FeedbackHistoryScreen
@@ -288,6 +289,10 @@ private fun AppNavigation() {
             CaptureScreen(
                 onBack = { navController.popBackStack() },
                 onCaptured = { navController.popBackStack() },
+                onQuotaExhausted = {
+                    // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
+                    navController.navigate("paywall")
+                },
             )
         }
         composable("distill") {
@@ -331,6 +336,21 @@ private fun AppNavigation() {
             AddScreen(
                 onBack = { navController.popBackStack() },
                 onAdded = { navController.popBackStack() },
+                onQuotaExhausted = {
+                    // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
+                    navController.navigate("paywall")
+                },
+            )
+        }
+
+        // CP11.0.4 P1.2: 付费墙
+        composable("paywall") {
+            PaywallScreen(
+                onBack = { navController.popBackStack() },
+                onUpgraded = {
+                    // Mock 升级成功 → 返回上一页
+                    navController.popBackStack()
+                },
             )
         }
     }

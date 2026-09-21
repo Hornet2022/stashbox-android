@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.ui.components.QuotaBanner
 
 /**
  * CP11.0.2 剪藏页:粘贴 URL → 后端自动创建文章 + 派蒸馏任务。
@@ -57,6 +58,7 @@ import com.tingxia.audio.data.model.Article
 fun CaptureScreen(
     onBack: () -> Unit,
     onCaptured: (String) -> Unit,
+    onQuotaExhausted: () -> Unit = {},
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -66,6 +68,14 @@ fun CaptureScreen(
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // CP11.0.4 P1.2: 配额用尽 → 跳 Paywall(一次性事件)
+    LaunchedEffect(uiState.quotaExhausted) {
+        if (uiState.quotaExhausted) {
+            viewModel.consumeQuotaExhausted()
+            onQuotaExhausted()
         }
     }
 
@@ -86,6 +96,16 @@ fun CaptureScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            // CP11.0.4 P1.2 + P3.1: 配额提示条(Low/Exhausted 才显示)
+            if (uiState.quotaTotal != null) {
+                QuotaBanner(
+                    used = uiState.quotaUsed,
+                    total = uiState.quotaTotal,
+                    remaining = uiState.quotaRemaining,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+            }
+
             // 上半部分:URL 输入 + 立即剪藏
             Column(
                 modifier = Modifier

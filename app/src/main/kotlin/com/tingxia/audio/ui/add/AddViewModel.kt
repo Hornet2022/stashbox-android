@@ -3,7 +3,9 @@ package com.tingxia.audio.ui.add
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.QuotaStatus
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.QuotaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,10 +18,13 @@ import javax.inject.Inject
  *
  * CP11.0.2 升级:加"最近添加列表"——用户提交后留在页面,看到自己的剪藏记录。
  * 与 [com.tingxia.audio.ui.capture.CaptureViewModel] 功能等价,文案不同。
+ *
+ * CP11.0.4 P1.2 升级:加 quota 拦截 + quota banner,逻辑与 CaptureViewModel 对齐。
  */
 @HiltViewModel
 class AddViewModel @Inject constructor(
     private val repository: ArticleRepository,
+    private val quotaRepository: QuotaRepository,
 ) : ViewModel() {
 
     data class UiState(
@@ -29,6 +34,11 @@ class AddViewModel @Inject constructor(
         val addedArticleId: String? = null,
         val recentArticles: List<Article> = emptyList(),
         val isRecentLoading: Boolean = false,
+        // CP11.0.4 P1.2: quota banner 字段
+        val quotaUsed: Int? = null,
+        val quotaTotal: Int? = null,
+        val quotaRemaining: Int? = null,
+        val quotaExhausted: Boolean = false,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -36,6 +46,7 @@ class AddViewModel @Inject constructor(
 
     init {
         loadRecent()
+        refreshQuota()
     }
 
     fun onUrlChanged(value: String) {
@@ -58,6 +69,21 @@ class AddViewModel @Inject constructor(
         }
     }
 
+    fun refreshQuota() {
+        viewModelScope.launch {
+            try {
+                val q = quotaRepository.getQuota()
+                _uiState.value = _uiState.value.copy(
+                    quotaUsed = q.usedQuota,
+                    quotaTotal = q.monthlyQuota,
+                    quotaRemaining = q.remaining,
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("AddViewModel", "refreshQuota failed: ${e.message}")
+            }
+        }
+    }
+
     fun add(onSuccess: (String) -> Unit) {
         val url = _uiState.value.url.trim()
         if (url.isEmpty()) {
@@ -70,6 +96,22 @@ class AddViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
+            // CP11.0.4 P1.2: 提交前查 quota,拦截用尽用户
+            try {
+                val status = quotaRepository.getStatus()
+                if (status == QuotaStatus.Exhausted) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        quotaExhausted = true,
+                    )
+                    refreshQuota()
+                    return@launch
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AddViewModel", "pre-add quota check failed: ${e.message}")
+            }
+
             try {
                 val resp = repository.createArticle(url)
                 val id = resp.id ?: resp.articleId ?: resp.taskId ?: ""
@@ -80,11 +122,11 @@ class AddViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     addedArticleId = id.ifEmpty { null },
-                    url = "",  // 清空输入框
+                    url = "",
                 )
                 onSuccess(id)
-                // 刷新最近列表(用户能看到刚添加的)
                 loadRecent()
+                refreshQuota()
             } catch (e: Exception) {
                 android.util.Log.w("AddViewModel", "add failed: ${e.message}")
                 _uiState.value = _uiState.value.copy(
@@ -97,5 +139,9 @@ class AddViewModel @Inject constructor(
 
     fun consumeAdded() {
         _uiState.value = _uiState.value.copy(addedArticleId = null)
+    }
+
+    fun consumeQuotaExhausted() {
+        _uiState.value = _uiState.value.copy(quotaExhausted = false)
     }
 }

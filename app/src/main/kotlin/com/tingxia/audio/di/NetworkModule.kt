@@ -8,6 +8,7 @@ import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.ProgressApi
+import com.tingxia.audio.data.remote.QuotaApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.onboarding.OnboardingApi
 import dagger.Module
@@ -104,4 +105,10 @@ object NetworkModule {
     @Singleton
     fun provideProgressApi(retrofit: Retrofit): ProgressApi =
         retrofit.create(ProgressApi::class.java)
+
+    // CP11.0.4 P1.2: 付费墙配额查询
+    @Provides
+    @Singleton
+    fun provideQuotaApi(retrofit: Retrofit): QuotaApi =
+        retrofit.create(QuotaApi::class.java)
 }
