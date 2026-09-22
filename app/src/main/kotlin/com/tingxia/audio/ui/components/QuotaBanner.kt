@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
  * - Exhausted: 红色条 + "本月配额已用完,升级会员" (但此时通常已被 Paywall 拦)
  * - Unknown: 不显示(避免误伤)
  *
- * 接入:CaptureScreen / AddScreen 顶部。
+ * 接入:CaptureScreen(剪藏)顶部。
  */
 @Composable
 fun QuotaBanner(

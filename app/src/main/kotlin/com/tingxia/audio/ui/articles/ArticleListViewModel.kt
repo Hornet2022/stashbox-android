@@ -45,4 +45,21 @@ class ArticleListViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * 主动重载列表 —— 不显示 loading indicator（避免列表上闪一下）。
+     * 列表进入时由 LaunchedEffect 调用，用于拉取最新文章。
+     */
+    fun reloadArticles() {
+        viewModelScope.launch {
+            try {
+                _articles.value = repository.getArticles()
+                _error.value = null
+                android.util.Log.i("ArticleListViewModel", "reloadArticles ok (${_articles.value.size} items)")
+            } catch (e: Exception) {
+                android.util.Log.w("ArticleListViewModel", "reloadArticles failed: ${e.message}")
+                _error.value = e.message ?: "重载失败"
+            }
+        }
+    }
 }

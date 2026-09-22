@@ -46,7 +46,6 @@ import com.tingxia.audio.ui.screens.LoginScreen
 import com.tingxia.audio.ui.screens.OnboardingScreen
 import com.tingxia.audio.ui.capture.CaptureScreen
 import com.tingxia.audio.ui.distill.DistillScreen
-import com.tingxia.audio.ui.add.AddScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
@@ -147,7 +146,11 @@ private fun AuthRoot() {
         is AuthState.NotLoggedIn,
         is AuthState.Loading,
         is AuthState.Error,
-        -> LoginScreen(onMockLogin = viewModel::mockWechatLogin)
+        -> LoginScreen(
+            onMockLogin = viewModel::mockWechatLogin,
+            errorMessage = (state as? AuthState.Error)?.message,
+            isLoading = state is AuthState.Loading,
+        )
 
         is AuthState.LoggedIn -> {
             if (hasOnboarded.value) {
@@ -196,12 +199,12 @@ private fun AppNavigation() {
             HomeScreen(
                 onNavigateToFavorites = { navController.navigate("favorites") },
                 onNavigateToNotifications = { navController.navigate("notifications") },
-                onNavigateToAdd = { navController.navigate("add") },
                 onNavigateToCapture = { navController.navigate("capture") },
                 onNavigateToDistill = { navController.navigate("distill") },
                 onNavigateToSubscribe = { navController.navigate("tags") },
                 onNavigateToReview = { navController.navigate("later-listens") },
                 onNavigateToArticleList = { navController.navigate("list") },
+                onNavigateToDetail = { id -> navController.navigate("detail/$id") },
                 onNavigateToFullscreenPlayer = { navController.navigate("fullscreen_player") },
             )
         }
@@ -332,17 +335,6 @@ private fun AppNavigation() {
                 onDismiss = { navController.popBackStack() },
             )
         }
-        composable("add") {
-            AddScreen(
-                onBack = { navController.popBackStack() },
-                onAdded = { navController.popBackStack() },
-                onQuotaExhausted = {
-                    // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
-                    navController.navigate("paywall")
-                },
-            )
-        }
-
         // CP11.0.4 P1.2: 付费墙
         composable("paywall") {
             PaywallScreen(

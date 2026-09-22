@@ -71,12 +71,12 @@ val skillItems = listOf(
 fun HomeScreen(
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToNotifications: () -> Unit = {},
-    onNavigateToAdd: () -> Unit = {},
     onNavigateToCapture: () -> Unit = {},
     onNavigateToDistill: () -> Unit = {},
     onNavigateToSubscribe: () -> Unit = {},
     onNavigateToReview: () -> Unit = {},
     onNavigateToArticleList: () -> Unit = {},
+    onNavigateToDetail: (String) -> Unit = {},
     onNavigateToFullscreenPlayer: () -> Unit = {},
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
@@ -98,8 +98,8 @@ fun HomeScreen(
                     IconButton(onClick = onNavigateToNotifications) {
                         Icon(Icons.Filled.Notifications, contentDescription = "通知")
                     }
-                    IconButton(onClick = onNavigateToAdd) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加")
+                    IconButton(onClick = onNavigateToCapture) {
+                        Icon(Icons.Filled.Add, contentDescription = "剪藏")
                     }
                 }
             )
@@ -172,12 +172,7 @@ fun HomeScreen(
                         items(articles, key = { it.id }) { article ->
                             ArticleListItem(
                                 article = article,
-                                onClick = {
-                                    when (skillItems.find { it.route == "review" }?.route) {
-                                        "review" -> onNavigateToFullscreenPlayer()
-                                        else -> onNavigateToArticleList()
-                                    }
-                                }
+                                onClick = { onNavigateToDetail(article.id) },
                             )
                             if (articles.last() != article) {
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
