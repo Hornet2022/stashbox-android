@@ -59,7 +59,10 @@ class ArticleDetailViewModelTest {
             RetryResponse(article_id = id, status = "pending", retry_count = 0, queued_at = "", distill_triggered = false)
     })
 
-    private fun fakeController() = PlayerController(RuntimeEnvironment.getApplication())
+    private fun fakeController() = PlayerController(
+        RuntimeEnvironment.getApplication(),
+        com.tingxia.audio.audio.OfflineDownloadManager(RuntimeEnvironment.getApplication()),
+    )
 
     @Test
     fun loadArticle_ready_setsAudioUrlWithoutPolling() = testScope.runTest {

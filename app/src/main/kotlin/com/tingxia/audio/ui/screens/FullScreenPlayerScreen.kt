@@ -124,6 +124,13 @@ fun FullScreenPlayerScreen(
     val playbackState by controller.state.collectAsState()
     val position by controller.position.collectAsState()
     val duration by controller.duration.collectAsState()
+    // P1-2：真实曲目元数据来自 PlayerController（而非调用方写死的占位标题）
+    val currentTitle by controller.currentTitle.collectAsState()
+    val currentAuthor by controller.currentAuthor.collectAsState()
+    val currentAudioUrl by controller.currentAudioUrl.collectAsState()
+    // 三段兜底：当前曲目 → 调用方传入 → 友好占位文案
+    val displayTitle = currentTitle.ifBlank { title.ifBlank { "未在播放" } }
+    val displayAuthor = currentAuthor.ifBlank { author }
 
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -179,8 +186,8 @@ fun FullScreenPlayerScreen(
 
             // 标题 + 作者 + 质量分
             Metadata(
-                title = title,
-                author = author,
+                title = displayTitle,
+                author = displayAuthor,
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -210,10 +217,18 @@ fun FullScreenPlayerScreen(
             ControlButtons(
                 isPlaying = playbackState == PlaybackState.PLAYING,
                 onPlayPause = {
-                    if (playbackState == PlaybackState.PLAYING) {
-                        controller.pause()
-                    } else {
-                        controller.play("", title, author, coverUrl)
+                    when (playbackState) {
+                        PlaybackState.PLAYING -> controller.pause()
+                        // P1-2：暂停态 → resume（沿用已加载的 MediaItem，不从头播放）
+                        PlaybackState.PAUSED -> controller.resume()
+                        else -> {
+                            // IDLE / STOPPED：仅当控制器已有真实音频源时再 play，
+                            // 避免以空 URL 重建 MediaItem 导致播放失败。
+                            val url = currentAudioUrl.ifBlank { "" }
+                            if (url.isNotEmpty()) {
+                                controller.play(url, displayTitle, displayAuthor, coverUrl)
+                            }
+                        }
                     }
                 },
                 onSkipBackward = {

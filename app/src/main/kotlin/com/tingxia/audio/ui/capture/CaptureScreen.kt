@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.components.QuotaBanner
+import com.tingxia.audio.util.formatRelativeTime
 
 /**
  * CP11.0.2 剪藏页:粘贴 URL → 后端自动创建文章 + 派蒸馏任务。
@@ -62,8 +67,11 @@ fun CaptureScreen(
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val deletingId by viewModel.deletingId.collectAsState()
     val context = LocalContext.current
     var inputValue by remember { mutableStateOf(TextFieldValue(uiState.url)) }
+    // CP-DELETE：最近剪藏删除确认（与列表页/详情页同一交互语义）
+    var deleteTarget by remember { mutableStateOf<Article?>(null) }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -77,6 +85,39 @@ fun CaptureScreen(
             viewModel.consumeQuotaExhausted()
             onQuotaExhausted()
         }
+    }
+
+    // CP-DELETE：删除确认对话框
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除这篇内容？") },
+            text = {
+                Text(
+                    "「${target.title ?: "无标题"}」的蒸馏结果和音频将一并删除，不可恢复。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteTarget = null
+                        viewModel.deleteArticle(target.id)
+                    },
+                    enabled = deletingId == null,
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
+    }
+
+    // P0-4：屏幕停用时主动停掉 ViewModel 内的轮询，避免泄漏
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { viewModel.stopStatusPolling() }
     }
 
     Scaffold(
@@ -200,7 +241,11 @@ fun CaptureScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(uiState.recentArticles, key = { it.id }) { article ->
-                            RecentArticleItem(article = article)
+                            RecentArticleItem(
+                                article = article,
+                                isDeleting = deletingId == article.id,
+                                onDelete = { deleteTarget = article },
+                            )
                             HorizontalDivider()
                         }
                     }
@@ -211,20 +256,53 @@ fun CaptureScreen(
 }
 
 @Composable
-private fun RecentArticleItem(article: Article) {
+private fun RecentArticleItem(
+    article: Article,
+    isDeleting: Boolean = false,
+    onDelete: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = article.title ?: "无标题",
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${article.source ?: "unknown"} · ${article.status ?: "pending"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = article.title ?: "无标题",
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (isDeleting) "删除中…" else
+                        "${article.source ?: "unknown"} · ${article.status ?: "pending"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDeleting) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // CP-TIME：剪藏时间（相对时间）—— 让用户一眼知道这篇是什么时候加的
+                val relative = formatRelativeTime(article.createdAt)
+                if (relative.isNotBlank()) {
+                    Text(
+                        text = "剪藏于 $relative",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // CP-DELETE：每行一个删除按钮（红色垃圾桶），点击弹确认框
+            IconButton(
+                onClick = onDelete,
+                enabled = !isDeleting,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "删除文章",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }

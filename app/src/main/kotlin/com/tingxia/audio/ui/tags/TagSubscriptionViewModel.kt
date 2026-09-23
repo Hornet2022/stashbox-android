@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.Tag
 import com.tingxia.audio.data.repository.TagRepository
+import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,11 +39,13 @@ class TagSubscriptionViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     tags = tags,
+                    // P1-1：从服务端响应回填订阅状态，保证 Switch 立即正确显示并可"取消订阅"。
+                    subscribedIds = tags.filter { it.subscribed }.map { it.id }.toSet(),
                 )
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "加载失败",
+                    error = friendlyError(e, fallback = "加载失败"),
                 )
             }
         }
@@ -73,7 +76,7 @@ class TagSubscriptionViewModel @Inject constructor(
                     } else {
                         _uiState.value.subscribedIds - tagIdOrSlug
                     },
-                    error = e.message ?: "操作失败",
+                    error = friendlyError(e, fallback = "操作失败，请稍后再试"),
                 )
             }
         }

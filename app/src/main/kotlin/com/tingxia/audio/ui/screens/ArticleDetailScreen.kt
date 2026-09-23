@@ -2,8 +2,11 @@ package com.tingxia.audio.ui.screens
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,8 +23,11 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -33,6 +39,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,19 +58,23 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
+import com.tingxia.audio.ui.articles.DeleteState
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.DownloadButton
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
+import com.tingxia.audio.util.formatRelativeTime
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -89,6 +100,7 @@ fun ArticleDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val retryState by viewModel.retryState.collectAsState()
+    val deleteState by viewModel.deleteState.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
     val context = LocalContext.current
@@ -96,10 +108,19 @@ fun ArticleDetailScreen(
     var showFavoriteSheet by remember { mutableStateOf(false) }
     var showLaterListenSheet by remember { mutableStateOf(false) }
     var showFeedbackSheet by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
 
     LaunchedEffect(articleId) {
         viewModel.loadArticle(articleId)
+    }
+
+    // CP-DELETE: 删除成功 → 回列表（列表页 LaunchedEffect 自动刷新，删除项消失）
+    LaunchedEffect(deleteState) {
+        if (deleteState is DeleteState.Success) {
+            showDeleteConfirm = false
+            onBack()
+        }
     }
 
     if (showFavoriteSheet && favoritesRepository != null) {
@@ -133,6 +154,51 @@ fun ArticleDetailScreen(
             feedbackRepository = feedbackRepository,
             appVersion = appVersion,
             onDismiss = { showFeedbackSheet = false },
+        )
+    }
+
+    // CP-DELETE: 删除确认对话框（硬删除二次确认）
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = {
+                if (deleteState !is DeleteState.Loading) showDeleteConfirm = false
+            },
+            title = { Text("删除这篇内容？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "蒸馏结果和音频将一并删除，不可恢复；已消耗的生成配额不返还。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (deleteState is DeleteState.Error) {
+                        Text(
+                            text = (deleteState as DeleteState.Error).message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.deleteArticle(articleId) },
+                    enabled = deleteState !is DeleteState.Loading,
+                ) {
+                    if (deleteState is DeleteState.Loading) {
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("删除中…")
+                    } else {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteConfirm = false },
+                    enabled = deleteState !is DeleteState.Loading,
+                ) { Text("取消") }
+            },
         )
     }
 
@@ -170,6 +236,16 @@ fun ArticleDetailScreen(
                         DownloadButton(
                             articleId = articleId,
                             audioUrl = uiState.audioUrl,
+                        )
+                    }
+                    // CP-DELETE: 删除入口
+                    IconButton(
+                        onClick = { showDeleteConfirm = true },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = "删除文章",
+                            tint = MaterialTheme.colorScheme.error,
                         )
                     }
                 },
@@ -228,13 +304,56 @@ fun ArticleDetailScreen(
                             StatusBadge(status = uiState.status)
                         }
 
+                        // CP-TIME：详情页头部时间三件套（剪藏 → 完成 → 收听位置，依次显示）
+                        val capturedRel = formatRelativeTime(safeArticle.createdAt)
+                        if (capturedRel.isNotBlank()) {
+                            Text(
+                                text = "剪藏于 $capturedRel",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val distilledRel = formatRelativeTime(safeArticle.distilledAt)
+                        if (distilledRel.isNotBlank() && uiState.status == DistillStatus.READY) {
+                            Text(
+                                text = "蒸馏完成于 $distilledRel",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        val failedRel = formatRelativeTime(safeArticle.updatedAt)
+                        if (failedRel.isNotBlank() && uiState.status == DistillStatus.FAILED) {
+                            Text(
+                                text = "最近失败于 $failedRel",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+
                         if (safeArticle.url.isNotEmpty()) {
+                            Text(
+                                text = safeArticle.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
                             TextButton(
                                 onClick = { clipboardManager.setText(AnnotatedString(safeArticle.url)) },
                             ) {
-                                Text("复制原文链接：${safeArticle.url}")
+                                Icon(
+                                    imageVector = Icons.Filled.Link,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("复制原文链接")
                             }
                         }
+
+                        // CP-DISTILL-TEXT：LLM 听感改写稿（整理后的正文）
+                        DistilledScriptCard(scriptText = safeArticle.scriptText)
 
                         if (uiState.status == DistillStatus.DISTILLING) {
                             Text(
@@ -499,5 +618,73 @@ private fun ErrorHint(
     ) {
         Text(text = message, style = MaterialTheme.typography.bodyLarge)
         TextButton(onClick = onBack) { Text("返回") }
+    }
+}
+
+/**
+ * CP-DISTILL-TEXT：LLM 听感改写稿（"整理后的正文"）卡片。
+ *
+ * 排版取向：印刷感 / 留白。首段（hook）放大作导语，其余按空行分段，
+ * 正文用舒适行高 + 段距，整体放进 surfaceVariant 圆角容器。
+ * scriptText 为空（未蒸馏 / 旧数据）时不渲染。
+ */
+@Composable
+private fun DistilledScriptCard(
+    scriptText: String?,
+    modifier: Modifier = Modifier,
+) {
+    if (scriptText.isNullOrBlank()) return
+    val paragraphs = remember(scriptText) {
+        scriptText.trim().split(Regex("\\n{2,}")).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+    if (paragraphs.isEmpty()) return
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(2.dp),
+                        ),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "听感整理稿",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            paragraphs.forEachIndexed { index, para ->
+                if (index == 0) {
+                    // 导语：开场钩子，稍大、稍强调
+                    Text(
+                        text = para,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = 28.sp,
+                    )
+                } else {
+                    Text(
+                        text = para,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                        lineHeight = 26.sp,
+                    )
+                }
+            }
+        }
     }
 }

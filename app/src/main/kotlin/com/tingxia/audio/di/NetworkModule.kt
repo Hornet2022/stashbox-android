@@ -31,12 +31,10 @@ object NetworkModule {
     /**
      * 后端统一入口（api-gateway，dev 端口 8100）。
      *
-     * 模拟器里 localhost 指向模拟器自身而非宿主机，emulator 端必须用 10.0.2.2。
-     * 真机端用局域网 IP（待 CP4.7-A2 处理）。
-     *
-     * CP4.7-A1: 切到 emulator 默认值（10.0.2.2）。
+     * 模拟器里 localhost 指向模拟器自身而非宿主机，emulator 端必须用 10.0.2.2；
+     * 真机端用局域网 IP（172.16.5.28）。base url 由 [BaseUrls] 统一提供（P1-3 去硬编码）。
      */
-    private const val BASE_URL = "http://172.16.5.28:8100/"
+    private val BASE_URL: String = BaseUrls.gatewayBaseUrl()
 
     private val json = Json { ignoreUnknownKeys = true }
 

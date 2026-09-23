@@ -1,12 +1,16 @@
 package com.tingxia.audio.auth
 
+import android.util.Base64
+import com.tingxia.audio.BuildConfig
+import org.json.JSONObject
 import javax.inject.Inject
 
 /**
  * 鉴权数据仓库：包装 [AuthApi] 与 [TokenManager]，向 ViewModel 屏蔽网络 / 存储细节。
  *
- * CP7.4: [mockWechatLogin] 改调 backend POST /api/v1/auth/wechat-login 拿真 JWT。
- * 不再造假 token (之前 mock token 被 backend require_user 401)。
+ * 2026-09-22: [mockWechatLogin] 改走 gateway `/api/v1/auth/token`（dev-only mock 端点），
+ * 因为 user-service `/api/v1/auth/wechat-login` 当前返回 500。客户端从 JWT payload 解析 user_id。
+ * 生产应走 wechatLogin + 真实微信 OAuth（待 user-service 修复后切回）。
  */
 class AuthRepository @Inject constructor(
     private val api: AuthApi,
@@ -26,18 +30,46 @@ class AuthRepository @Inject constructor(
     )
 
     /**
-     * CP7.4: 改调 backend 真 wechat-login, 拿真 JWT (之前 mock token 被 backend 401)。
-     * 固定用户便于本地联调；落盘后 [getAccessToken] 立即可用。
-     * 注意: backend WechatLoginResponse 只有 access_token/user_id/expires_in,
-     * 无 refresh_token, 这里用占位符替代。
+     * 走 gateway `/api/v1/auth/token`（dev-only mock）拿真 JWT。
+     *
+     * - [userId] 留空时回退到 [BuildConfig.DEBUG_USER_ID]（默认 "6892"），
+     *   允许 LoginScreen 在 debug 包内手动指定任意 user_id 以便联调多账号。
+     * - 响应无 user_id 字段，从 JWT payload 解析（`sub` 字段）
+     * - 无 refresh_token，用占位符替代
+     *
+     * TODO: user-service wechat-login 修复后切回 [AuthApi.wechatLogin]
      */
-    suspend fun mockWechatLogin(): LoginResult {
-        val resp = api.wechatLogin(WechatLoginRequest(code = "test_cp74_dev_user"))
-        // backend 未返回 refresh_token, 用占位符替代
-        val userId = resp.user_id.toLongOrNull() ?: 0L
-        val refresh = "mock_refresh_${resp.user_id}_cp7_4"
-        tokenManager.saveTokens(resp.access_token, refresh, userId)
-        return LoginResult(resp.access_token, refresh, userId)
+    suspend fun mockWechatLogin(userId: String? = null): LoginResult {
+        val uid = userId?.takeIf { it.isNotBlank() } ?: BuildConfig.DEBUG_USER_ID
+        val resp = api.issueToken(TokenIssueRequest(user_id = uid))
+        val userIdParsed = parseUserIdFromJwt(resp.access_token)
+        val refresh = "mock_refresh_${userIdParsed}_cp7_4"
+        tokenManager.saveTokens(resp.access_token, refresh, userIdParsed)
+        return LoginResult(resp.access_token, refresh, userIdParsed)
+    }
+
+    /**
+     * 从 JWT payload 解析 `sub` 字段（即 user_id）。
+     *
+     * JWT 格式：`header.payload.signature`，payload 是 base64url 编码的 JSON。
+     * 我们用 android.util.Base64 + org.json 解析，避免引入额外依赖。
+     * 手动补 `=` padding 避免不同 Android 版本 Base64 默认行为差异。
+     */
+    private fun parseUserIdFromJwt(jwt: String): Long {
+        return try {
+            val payloadB64 = jwt.split(".").getOrNull(1)
+                ?: throw IllegalArgumentException("malformed JWT: no payload")
+            // base64url 不带 padding，补齐到 4 的倍数
+            val padded = payloadB64 + "=".repeat((4 - payloadB64.length % 4) % 4)
+            val payloadJson = String(
+                Base64.decode(padded, Base64.URL_SAFE or Base64.NO_WRAP),
+                Charsets.UTF_8,
+            )
+            JSONObject(payloadJson).optString("sub", "0").toLong()
+        } catch (e: Exception) {
+            android.util.Log.w("AuthRepository", "parseUserIdFromJwt failed: ${e.message}")
+            0L
+        }
     }
 
     /** 登出：尽力通知服务端后清空本地 token。 */

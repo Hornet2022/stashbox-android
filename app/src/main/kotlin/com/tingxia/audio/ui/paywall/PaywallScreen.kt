@@ -43,6 +43,7 @@ import com.tingxia.audio.data.model.QuotaResponse
  * CP11.0.4 P1.2 付费墙:
  * - 用户本月配额用尽时拦截提交 → 跳此页
  * - 显示当前配额 + mock 升级按钮(mock:点"升级"只弹 toast,后端无支付)
+ * - P2：离线下载占位说明 — 此版未接通 service download API，仅文案承诺即将开放。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +147,14 @@ fun PaywallScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // P2：离线下载占位说明（不阻塞 — 后端暂未提供下载 API，文案承诺即将开放）
+            Text(
+                text = "升级后还将开放：离线下载 / 主题标签自动蒸馏",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
 
             // 错误信息
             state.error?.let {

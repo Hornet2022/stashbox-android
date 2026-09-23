@@ -140,7 +140,7 @@ private fun LaterListenItem(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = laterListen.article_id,
+                    text = laterListen.article_title?.takeIf { it.isNotBlank() } ?: laterListen.article_id,
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
@@ -148,6 +148,13 @@ private fun LaterListenItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
+                if (laterListen.article_title.isNullOrBlank()) {
+                    Text(
+                        text = laterListen.article_id.take(12),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onPlayNow) {

@@ -3,6 +3,7 @@ package com.tingxia.audio.ui.screens
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -39,6 +41,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +57,7 @@ import com.tingxia.audio.ui.articles.ArticleListViewModel
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
+import com.tingxia.audio.util.formatRelativeTime
 
 /**
  * 文章列表页。
@@ -71,15 +75,67 @@ fun ArticleListScreen(
     onNavigateToFavorites: () -> Unit,
     onNavigateToLaterListens: () -> Unit,
     onNavigateToFeedbackHistory: () -> Unit,
+    // CP-TAG-FILTER：可由 TagSubscriptionScreen 跳过来携带 tag=slug
+    initialTag: String? = null,
     feedbackRepository: FeedbackRepository? = null,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    val activeTag by viewModel.activeTag.collectAsState()
+    val deletingId by viewModel.deletingId.collectAsState()
     val context = LocalContext.current
 
     var showFeedbackSheet by remember { mutableStateOf(false) }
     var showSettingsMenu by remember { mutableStateOf(false) }
+    // CP-DELETE: 长按卡片 → 删除确认
+    var deleteTarget by remember { mutableStateOf<Article?>(null) }
+
+    // CP-TAG-FILTER：初始 tag 来自 TagSubscriptionScreen 跳转（仅消费一次）
+    val initialConsumed = rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialTag) {
+        if (!initialConsumed.value && initialTag != null) {
+            initialConsumed.value = true
+            viewModel.setActiveTag(initialTag)
+        }
+    }
+
+    // CP-DELETE: 错误提示（含删除失败）走 Toast，轻量不打断浏览
+    LaunchedEffect(error) {
+        if (!error.isNullOrBlank()) {
+            android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
+
+    if (deleteTarget != null) {
+        val target = deleteTarget!!
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除这篇内容？") },
+            text = {
+                Text(
+                    "「${target.title ?: "无标题"}」的蒸馏结果和音频将一并删除，不可恢复。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteTarget = null
+                        viewModel.deleteArticle(target.id)
+                    },
+                    enabled = deletingId == null,
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadArticles()
@@ -183,14 +239,21 @@ fun ArticleListScreen(
             )
         },
     ) { innerPadding ->
-        Crossfade(
-            targetState = if (isLoading && articles.isEmpty()) "loading" else if (articles.isEmpty()) "empty" else "content",
-            animationSpec = tween(300),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            label = "article_list_fade",
-        ) { state ->
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // CP-TAG-FILTER：active tag 时显示顶部 chip，"仅看 X ✕ 清除"
+            activeTag?.let { tag ->
+                ActiveTagChip(
+                    tag = tag,
+                    count = articles.size,
+                    onClear = { viewModel.setActiveTag(null) },
+                )
+            }
+            Crossfade(
+                targetState = if (isLoading && articles.isEmpty()) "loading" else if (articles.isEmpty()) "empty" else "content",
+                animationSpec = tween(300),
+                modifier = Modifier.fillMaxSize(),
+                label = "article_list_fade",
+            ) { state ->
             when (state) {
                 "loading" -> {
                     Column(
@@ -220,22 +283,35 @@ fun ArticleListScreen(
                         items(articles, key = { it.id }) { article ->
                             ArticleCard(
                                 article = article,
+                                isDeleting = deletingId == article.id,
                                 onClick = { onNavigateToDetail(article.id) },
+                                onLongClick = { deleteTarget = article },
                             )
                         }
                     }
                 }
             }
-        }
+            }  // Crossfade 闭
+        }  // Column 闭
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ArticleCard(article: Article, onClick: () -> Unit) {
+private fun ArticleCard(
+    article: Article,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    isDeleting: Boolean = false,
+) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                // CP-DELETE: 长按卡片 → 删除确认（避免误触，无滑动删除手势的依赖）
+                onLongClick = onLongClick,
+            ),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
@@ -253,6 +329,61 @@ private fun ArticleCard(article: Article, onClick: () -> Unit) {
             ) {
                 SourceBadge(source = article.source)
                 StatusBadge(status = article.status)
+                if (isDeleting) {
+                    Text(
+                        "删除中…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            // CP-TIME：列表卡片加创建时间（用户问「这个什么时候加的」一眼能答）
+            val relative = formatRelativeTime(article.createdAt)
+            if (relative.isNotBlank()) {
+                Text(
+                    text = "剪藏于 $relative",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * CP-TAG-FILTER：active tag 时的顶部状态条。
+ * 显示当前过滤的 slug + 文章数 + 清除按钮。
+ * 设计：相比 AssistChip 更显眼的"软提示"，让用户清楚当前看到的是 tag 过滤结果而非全量。
+ */
+@Composable
+private fun ActiveTagChip(tag: String, count: Int, onClear: () -> Unit) {
+    androidx.compose.material3.Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "仅看标签：$tag",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "($count 篇)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            TextButton(
+                onClick = onClear,
+            ) {
+                Text("清除", color = MaterialTheme.colorScheme.primary)
             }
         }
     }

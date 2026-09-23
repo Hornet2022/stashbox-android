@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -36,6 +37,7 @@ import com.tingxia.audio.audio.AudioPlayerService
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.share.D9Receiver
 import com.tingxia.audio.share.D9Result
+import com.tingxia.audio.share.D9EventBus
 import com.tingxia.audio.ui.auth.AuthState
 import com.tingxia.audio.ui.auth.AuthViewModel
 import com.tingxia.audio.ui.screens.ArticleDetailScreen
@@ -77,9 +79,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 让 AudioPlayerService（MediaSessionService）常驻，系统方可接管锁屏 / 通知控制
+        // （共享 ExoPlayer 由 Hilt PlayerModule 提供，PlayerController 与 Service 共用同一实例）
         startAudioService()
-        // 惰性创建底层 ExoPlayer，供 PlayerController 后续播放使用
-        playerController.initialize()
         enableEdgeToEdge()
         setContent {
             TingxiaTheme {
@@ -147,7 +148,7 @@ private fun AuthRoot() {
         is AuthState.Loading,
         is AuthState.Error,
         -> LoginScreen(
-            onMockLogin = viewModel::mockWechatLogin,
+            onMockLogin = { uid -> viewModel.mockWechatLogin(uid) },
             errorMessage = (state as? AuthState.Error)?.message,
             isLoading = state is AuthState.Loading,
         )
@@ -190,6 +191,23 @@ private fun AppNavigation() {
     val activity = LocalContext.current as MainActivity
     val favoritesRepository = activity.favoritesRepository
     val feedbackRepository = activity.feedbackRepository
+
+    // P1-3：D9 分享结果订阅 → toast + 跳转文章列表
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        D9EventBus.events.collect { result ->
+            val msg = when (result) {
+                is D9Result.Success -> "已加入蒸馏队列：${result.articleId.take(12)}…"
+                is D9Result.Error -> "分享导入失败：${result.reason}"
+            }
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            // 跳到文章列表让用户能立即看到刚导入的条目
+            navController.navigate("list") {
+                popUpTo(navController.graph.findStartDestination().id) { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -248,7 +266,8 @@ private fun AppNavigation() {
         }
         composable("player") {
             FullScreenPlayerScreen(
-                title = "听匣 · 当前播放",
+                // P1-2：title/author 留空占位 — 屏内 collect PlayerController 状态决定显示
+                title = "",
                 author = null,
                 coverUrl = null,
                 onDismiss = { navController.popBackStack() },
@@ -257,6 +276,10 @@ private fun AppNavigation() {
         composable("tags") {
             TagSubscriptionScreen(
                 onBack = { navController.popBackStack() },
+                // CP-TAG-FILTER：点击 tag 行 → 跳 article_list?tag=slug
+                onTagClick = { slug ->
+                    navController.navigate("article_list?tag=$slug")
+                },
             )
         }
         composable("notifications") {
@@ -304,32 +327,33 @@ private fun AppNavigation() {
                 onDistilled = { navController.popBackStack() },
             )
         }
-        composable("article_list") {
+        // CP-TAG-FILTER：带可选 tag 参数的路由（从 TagSubscriptionScreen 跳转）
+        composable(
+            route = "article_list?tag={tag}",
+            arguments = listOf(
+                navArgument("tag") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { entry ->
+            val tag = entry.arguments?.getString("tag")
             ArticleListScreen(
-                onNavigateToDetail = { id ->
-                    navController.navigate("detail/$id")
-                },
-                onNavigateToTags = {
-                    navController.navigate("tags")
-                },
-                onNavigateToNotifications = {
-                    navController.navigate("notifications")
-                },
-                onNavigateToFavorites = {
-                    navController.navigate("favorites")
-                },
-                onNavigateToLaterListens = {
-                    navController.navigate("later-listens")
-                },
-                onNavigateToFeedbackHistory = {
-                    navController.navigate("feedback-history")
-                },
+                onNavigateToDetail = { id -> navController.navigate("detail/$id") },
+                onNavigateToTags = { navController.navigate("tags") },
+                onNavigateToNotifications = { navController.navigate("notifications") },
+                onNavigateToFavorites = { navController.navigate("favorites") },
+                onNavigateToLaterListens = { navController.navigate("later-listens") },
+                onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
+                initialTag = tag,
                 feedbackRepository = feedbackRepository,
             )
         }
         composable("fullscreen_player") {
             FullScreenPlayerScreen(
-                title = "听匣 · 当前播放",
+                // P1-2：title/author 留空占位 — 屏内 collect PlayerController 状态决定显示
+                title = "",
                 author = null,
                 coverUrl = null,
                 onDismiss = { navController.popBackStack() },

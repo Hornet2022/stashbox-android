@@ -40,3 +40,18 @@ node_modules/
 # WorkBuddy 私域（git 协作相关）
 # ==========================================
 .workbuddy/
+
+# ==========================================
+# APK / 签名 / ProGuard（CP9.x 补齐）
+# ==========================================
+*.apk
+*.aab
+*.ap_
+*.dex
+*.keystore
+*.jks
+google-services.json
+proguard/
+*.pro
+*.mapping
+.kotlin/

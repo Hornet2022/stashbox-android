@@ -10,9 +10,11 @@ import com.tingxia.audio.data.model.DistillStatusResponse
 import com.tingxia.audio.data.model.DistillTriggerResponse
 import com.tingxia.audio.data.model.RetryResponse
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * 听匣后端 API（api-gateway，dev 端口 8100）。
@@ -21,9 +23,13 @@ import retrofit2.http.Path
  */
 interface ArticleApi {
 
-    /** GET /api/v1/articles → 文章列表 */
+    /** GET /api/v1/articles → 文章列表
+ *
+ *  CP-TAG-FILTER：tag 为 null 时拉全量；传入 slug 时按 Tag.slug 过滤（仅已蒸馏过且
+ *  tags 包含对应中文名的文章）。
+ */
     @GET("api/v1/articles")
-    suspend fun getArticles(): ArticleListResponse
+    suspend fun getArticles(@Query("tag") tag: String? = null): ArticleListResponse
 
     /** GET /api/v1/articles/{id} → 单篇文章（含 taskId + status） */
     @GET("api/v1/articles/{id}")
@@ -50,4 +56,9 @@ interface ArticleApi {
     // 不复用 [DistillStatusResponse](后者 task_id 是必填),专门的 [DistillTriggerResponse]
     @POST("api/v1/articles/{id}/distill")
     suspend fun distillArticle(@Path("id") id: String): DistillTriggerResponse
+
+    // CP-DELETE: DELETE /api/v1/articles/{id} → 删除文章(硬删除:蒸馏结果+音频级联清理)
+    // 后端仅 owner 可删;不存在/非 owner 一律 404。Unit 响应体无 schema 需求,返回 Unit。
+    @DELETE("api/v1/articles/{id}")
+    suspend fun deleteArticle(@Path("id") id: String)
 }

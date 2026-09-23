@@ -12,7 +12,7 @@ import retrofit2.http.POST
  */
 interface AuthApi {
 
-    /** POST /api/v1/auth/wechat-login → 微信 code 换 token */
+    /** POST /api/v1/auth/wechat-login → 微信 code 换 token（user-service 实现，当前 500） */
     @POST("api/v1/auth/wechat-login")
     suspend fun wechatLogin(@Body req: WechatLoginRequest): AuthResponse
 
@@ -27,6 +27,15 @@ interface AuthApi {
     /** GET /api/v1/auth/me → 当前用户信息 */
     @GET("api/v1/auth/me")
     suspend fun me(): UserInfoResponse
+
+    /**
+     * POST /api/v1/auth/token → gateway dev-only mock：直接传 user_id 拿真 JWT。
+     *
+     * 仅供 Android 端本地联调，绕过 user-service wechat-login 500 错误（2026-09-22 发现）。
+     * 生产应走 wechatLogin + 真实微信 OAuth。
+     */
+    @POST("api/v1/auth/token")
+    suspend fun issueToken(@Body req: TokenIssueRequest): TokenIssueResponse
 }
 
 @Serializable
@@ -52,4 +61,19 @@ data class UserInfoResponse(
     val user_id: Long,
     val nickname: String,
     val tier: String,
+)
+
+/** POST /api/v1/auth/token 请求体（gateway dev-only mock）。 */
+@Serializable
+data class TokenIssueRequest(val user_id: String)
+
+/**
+ * POST /api/v1/auth/token 响应体（gateway dev-only mock）。
+ *
+ * 注意：响应没有 user_id 字段，客户端需从 JWT 解析（payload.sub）。
+ */
+@Serializable
+data class TokenIssueResponse(
+    val access_token: String,
+    val expires_in: Int,
 )

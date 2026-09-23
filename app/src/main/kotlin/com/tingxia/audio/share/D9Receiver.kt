@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.tingxia.audio.BuildConfig
+import com.tingxia.audio.di.BaseUrls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -31,9 +32,8 @@ object D9Receiver {
     private const val PREFS_NAME = "user_prefs"
     private const val KEY_DEVICE_ID = "device_id"
     private const val D9_PATH = "/api/v1/callback/d9-add-article"
-    // 与 NetworkModule 同源:emulator 10.0.2.2:8100,真机 172.16.5.28:8100
-    // dev 默认走真机 IP(支持 emulator + 真机一致),prod 走 BuildConfig (TODO)
-    private const val BASE_URL = "http://172.16.5.28:8100/"
+    // 与 NetworkModule 同源（P1-3：统一走 BaseUrls，不再散落硬编码 IP）
+    private val BASE_URL: String = BaseUrls.gatewayBaseUrl()
 
     private val client by lazy {
         OkHttpClient.Builder()
@@ -53,9 +53,12 @@ object D9Receiver {
         val source = inferSource(intent)
         val deviceId = ensureDeviceId(context)
         Log.i(TAG, "D9 received url=$url source=$source device=$deviceId")
-        runCatching { postD9Callback(url, source, deviceId) }
+        val result = runCatching { postD9Callback(url, source, deviceId) }
             .onFailure { Log.w(TAG, "D9 callback failed: ${it.message}") }
             .getOrNull()
+        // P1-3：回跳刷新 —— 把结果投到事件总线，由 MainActivity 订阅跳转 + 提示
+        result?.let { D9EventBus.emit(it) }
+        result
     }
 
     private fun extractSharedUrl(intent: Intent): String? {

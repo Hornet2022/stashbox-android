@@ -1,6 +1,7 @@
 package com.tingxia.audio.ui.tags
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,8 @@ import com.tingxia.audio.data.model.Tag
 @Composable
 fun TagSubscriptionScreen(
     onBack: () -> Unit,
+    // CP-TAG-FILTER：点击 tag 行 → 跳 ArticleListScreen?tag=slug
+    onTagClick: (String) -> Unit = {},
     viewModel: TagSubscriptionViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -67,6 +70,7 @@ fun TagSubscriptionScreen(
                     tags = uiState.tags,
                     subscribedIds = uiState.subscribedIds,
                     onToggle = viewModel::toggleTag,
+                    onTagClick = onTagClick,
                     modifier = Modifier.padding(innerPadding),
                 )
             }
@@ -79,6 +83,7 @@ private fun TagList(
     tags: List<Tag>,
     subscribedIds: Set<String>,
     onToggle: (String) -> Unit,
+    onTagClick: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val groupedTags: Map<String, List<Tag>> = tags.groupBy { tag -> tag.category }
@@ -107,6 +112,7 @@ private fun TagList(
                     tag = tag,
                     isSubscribed = subscribedIds.contains(tag.id),
                     onToggle = { onToggle(tag.id) },
+                    onClick = { onTagClick(tag.id) },
                 )
             }
         }
@@ -118,19 +124,35 @@ private fun TagItem(
     tag: Tag,
     isSubscribed: Boolean,
     onToggle: () -> Unit,
+    // CP-TAG-FILTER：点击 card → onTagClick 跳文章流（仅替换 tag id）
+    onClick: () -> Unit = {},
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = tag.name,
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = tag.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                // CP-TAG-FILTER：展示该 tag 下已蒸馏文章数 —— 让"订阅了有什么用"具体可见
+                if (tag.article_count > 0) {
+                    Text(
+                        text = "${tag.article_count} 篇已蒸馏",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Switch(
                 checked = isSubscribed,
                 onCheckedChange = { onToggle() },

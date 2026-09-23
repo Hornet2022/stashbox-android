@@ -4,6 +4,8 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.ArticleListResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
+import com.tingxia.audio.data.model.CreateArticleRequest
+import com.tingxia.audio.data.model.CreateArticleResponse
 import com.tingxia.audio.data.model.DistillStatusResponse
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.remote.ArticleApi
@@ -43,6 +45,9 @@ class ArticleListViewModelTest {
             DistillStatusResponse(task_id = taskId, status = DistillStatus.READY)
         override suspend fun getAudioUrl(id: String) =
             AudioUrlResponse(audio_url = "https://example.com/$id.mp3")
+        // CP10.4: 满足 ArticleApi createArticle 抽象方法
+        override suspend fun createArticle(request: CreateArticleRequest) =
+            CreateArticleResponse(article_id = "art_x", task_id = "task_x", status = "pending")
         // CP5.2-A: 满足 ArticleApi retryArticle 抽象方法（这些测试不测 retry）
         override suspend fun retryArticle(id: String) =
             RetryResponse(article_id = id, status = "pending", retry_count = 0, queued_at = "", distill_triggered = false)

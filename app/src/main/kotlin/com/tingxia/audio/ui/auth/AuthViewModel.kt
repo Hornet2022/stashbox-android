@@ -3,6 +3,7 @@ package com.tingxia.audio.ui.auth
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.auth.AuthRepository
+import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,15 +42,15 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /** 微信登录（CP4.6 mock：直接返回固定 token）。 */
-    fun mockWechatLogin() {
+    /** 微信登录（CP4.6 mock：dev-only 端点返回固定 token）。[userId] 可指定联调账号。 */
+    fun mockWechatLogin(userId: String? = null) {
         viewModelScope.launch {
             _state.value = AuthState.Loading
             try {
-                val resp = authRepository.mockWechatLogin() // mock，CP4.7 接真 OAuth
+                val resp = authRepository.mockWechatLogin(userId) // mock，CP4.7 接真 OAuth
                 _state.value = AuthState.LoggedIn(resp.userId)
             } catch (e: Exception) {
-                _state.value = AuthState.Error(e.message ?: "unknown error")
+                _state.value = AuthState.Error(friendlyError(e, fallback = "登录失败，请稍后再试"))
             }
         }
     }

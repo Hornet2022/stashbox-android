@@ -28,7 +28,8 @@ class PlayerControllerTest {
 
     @Before
     fun setup() {
-        controller = PlayerController(RuntimeEnvironment.getApplication())
+        val app = RuntimeEnvironment.getApplication()
+        controller = PlayerController(app, OfflineDownloadManager(app))
     }
 
     @Test

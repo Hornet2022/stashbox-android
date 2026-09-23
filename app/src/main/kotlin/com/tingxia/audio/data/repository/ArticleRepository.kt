@@ -18,6 +18,9 @@ class ArticleRepository(private val api: ArticleApi) {
 
     suspend fun getArticles(): List<Article> = api.getArticles().articles
 
+    // CP-TAG-FILTER：按 Tag.slug 过滤；slug 为 null 拉全量
+    suspend fun getArticlesByTag(tag: String): List<Article> = api.getArticles(tag).articles
+
     suspend fun getArticle(id: String): Article = api.getArticle(id)
 
     suspend fun getDistillStatus(taskId: String): DistillStatus = api.getDistillStatus(taskId).status
@@ -35,4 +38,8 @@ class ArticleRepository(private val api: ArticleApi) {
 
     // CP10.5: 手动触发蒸馏(后端返回任务触发响应,字段全 nullable)
     suspend fun distillArticle(id: String): DistillTriggerResponse = api.distillArticle(id)
+
+    // CP-DELETE: 删除文章(硬删除)。失败抛异常,由调用方(VM)捕获提示。
+    // 404 = 文章不存在或不属于当前用户(后端对"越权"统一回 404,不泄露存在性)。
+    suspend fun deleteArticle(id: String) = api.deleteArticle(id)
 }

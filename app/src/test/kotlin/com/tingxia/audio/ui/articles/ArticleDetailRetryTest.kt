@@ -70,7 +70,10 @@ class ArticleDetailRetryTest {
         override suspend fun retryArticle(id: String) = retryResponse
     })
 
-    private fun fakeController() = PlayerController(RuntimeEnvironment.getApplication())
+    private fun fakeController() = PlayerController(
+        RuntimeEnvironment.getApplication(),
+        com.tingxia.audio.audio.OfflineDownloadManager(RuntimeEnvironment.getApplication()),
+    )
 
     @Test
     fun test_retryArticle_sendsRequest_andUpdatesState() = testScope.runTest {

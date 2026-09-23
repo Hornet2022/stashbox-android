@@ -16,6 +16,9 @@ data class Favorite(
     val folder: String,
     val note: String?,
     val created_at: String,
+    // P1-4：后端返回的文章标题（content-service 在列表里 join）。
+    // 老后端不返回时仍可工作，UI 降级显示 article_id。
+    val article_title: String? = null,
 )
 
 @Serializable
@@ -65,6 +68,8 @@ data class LaterListen(
     val article_id: String,
     val snooze_until: String?,
     val created_at: String,
+    // P1-4：稍后听项的文章标题（同 list 兜底，后端不返时为 null）。
+    val article_title: String? = null,
 )
 
 @Serializable

@@ -241,7 +241,7 @@ private fun FavoriteItem(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = favorite.article_id,
+                    text = favorite.article_title?.takeIf { it.isNotBlank() } ?: favorite.article_id,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -249,6 +249,14 @@ private fun FavoriteItem(
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // P1-4：标题缺失时仍展示 article_id（缩短）作为副标识，便于用户区分。
+                    if (favorite.article_title.isNullOrBlank()) {
+                        Text(
+                            text = favorite.article_id.take(12),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Text(
                         text = favorite.folder,
                         style = MaterialTheme.typography.labelMedium,

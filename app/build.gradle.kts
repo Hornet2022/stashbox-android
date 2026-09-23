@@ -19,6 +19,9 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 调试用默认联调账号（P0-3：避免写死 6892，允许 LoginScreen 在 debug 包覆盖）
+        buildConfigField("String", "DEBUG_USER_ID", "\"6892\"")
     }
 
     buildTypes {

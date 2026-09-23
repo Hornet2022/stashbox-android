@@ -31,7 +31,10 @@ class AudioPlayerBarTest {
 
     @Before
     fun setup() {
-        controller = PlayerController(RuntimeEnvironment.getApplication())
+        controller = PlayerController(
+            RuntimeEnvironment.getApplication(),
+            com.tingxia.audio.audio.OfflineDownloadManager(RuntimeEnvironment.getApplication()),
+        )
     }
 
     @Test

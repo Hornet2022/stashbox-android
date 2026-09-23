@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.QuotaResponse
 import com.tingxia.audio.data.repository.QuotaRepository
+import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +42,7 @@ class PaywallViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,
-                    error = e.message ?: "加载配额失败",
+                    error = friendlyError(e, fallback = "加载配额失败"),
                 )
             }
         }

@@ -1,26 +1,26 @@
 package com.tingxia.audio.audio
 
-import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import android.net.Uri
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.ProgressUpdateRequest
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,25 +32,23 @@ enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
 /**
  * ExoPlayer 封装 + 真实播放状态（CP4.4）。
  *
- * - 单例（[Singleton]），由 Hilt 通过 [AppModule] 提供
- * - 暴露 [StateFlow] 给 Compose UI：[state] 播放状态、[position] / [duration] 进度
- * - 命令：[play] / [pause] / [stop] / [seekTo]，转发给内部 [ExoPlayer]
- * - 每 500ms 轮询一次 [ExoPlayer.getCurrentPosition] 更新 [position] / [duration]
+ * - 单例（[Singleton]），由 Hilt 通过 [PlayerModule] 注入**共享** ExoPlayer 实例。
+ * - 同一 ExoPlayer 也被 [AudioPlayerService]（MediaSessionService）持有并绑定 MediaSession，
+ *   因此锁屏 / 通知 / 后台播放统一控制这一份播放器（修复双 ExoPlayer 架构断裂）。
+ * - 暴露 [StateFlow] 给 Compose UI：[state] 播放状态、[position] / [duration] 进度，
+ *   [currentTitle] / [currentAuthor] / [currentAudioUrl] 当前曲目元数据（供全屏/迷你条展示）。
+ * - 命令：[play] / [pause] / [stop] / [seekTo] / [resume]，转发给内部 [ExoPlayer]。
+ * - 每 500ms 轮询一次 [ExoPlayer.getCurrentPosition] 更新 [position] / [duration]。
  *
  * UI（[com.tingxia.audio.ui.components.AudioPlayerBar]）通过 [PlayerControllerEntryPoint]
  * 在 Compose 内取到本单例并 collect 其 StateFlow。
  *
  * CP11.0.1: 断点续听 — 每 10 秒上报 progress（仅播放中）。
- * CP11.0.7 P2.1: 离线预下载 — 构造时注入 [OfflineDownloadManager]，
- *   ExoPlayer 数据源走 cache factory。已下载音频秒开 / 未下载自动缓存。
  */
 @Singleton
 class PlayerController @Inject constructor(
-    @ApplicationContext context: Context,
-    private val offlineDownloadManager: OfflineDownloadManager,
+    private val player: ExoPlayer,
 ) {
-
-    private val appContext: Context = context.applicationContext
 
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
@@ -61,12 +59,19 @@ class PlayerController @Inject constructor(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration.asStateFlow()
 
-    private var player: ExoPlayer? = null
+    private val _currentTitle = MutableStateFlow("")
+    val currentTitle: StateFlow<String> = _currentTitle.asStateFlow()
+
+    private val _currentAuthor = MutableStateFlow("")
+    val currentAuthor: StateFlow<String> = _currentAuthor.asStateFlow()
+
+    private val _currentAudioUrl = MutableStateFlow("")
+    val currentAudioUrl: StateFlow<String> = _currentAudioUrl.asStateFlow()
 
     private val positionHandler = Handler(Looper.getMainLooper())
     private val positionRunnable = object : Runnable {
         override fun run() {
-            player?.let { p ->
+            player.let { p ->
                 _position.value = p.currentPosition.coerceAtLeast(0L)
                 _duration.value = if (p.duration == C.TIME_UNSET) 0L else p.duration
             }
@@ -78,13 +83,8 @@ class PlayerController @Inject constructor(
     private var progressApi: ProgressApi? = null
     private var currentArticleId: String? = null
     private var lastReportTimeMs = 0L
-    private val progressHandler = Handler(Looper.getMainLooper())
-    private val progressRunnable = object : Runnable {
-        override fun run() {
-            reportProgressIfNeeded()
-            progressHandler.postDelayed(this, PROGRESS_REPORT_INTERVAL_MS)
-        }
-    }
+    private val progressScope = CoroutineScope(Dispatchers.IO + Job())
+    private var progressJob: Job? = null
 
     /** 设置 ProgressApi（由 Hilt 注入，ArticleDetailViewModel 调用）。 */
     fun setProgressApi(api: ProgressApi) {
@@ -111,44 +111,21 @@ class PlayerController @Inject constructor(
         lastReportTimeMs = now
         Log.i("ProgressApi", "posted position=$positionSec articleId=$articleId")
 
-        // IO 线程执行网络请求
-        Thread {
+        // Dispatchers.IO 协程执行网络请求（不复用 Thread，每 10s 启动一个轻量协程）
+        progressScope.launch {
             try {
-                runBlocking {
-                    api.updateProgress(
-                        articleId,
-                        ProgressUpdateRequest(position_sec = positionSec, total_sec = null)
-                    )
-                }
+                api.updateProgress(
+                    articleId,
+                    ProgressUpdateRequest(position_sec = positionSec, total_sec = null)
+                )
             } catch (e: Exception) {
                 Log.w("ProgressApi", "failed to report progress: ${e.message}")
             }
-        }.start()
-    }
-
-    /**
-     * 惰性创建底层 ExoPlayer（仅一次）。需在主线程调用。
-     * CP11.0.7 P2.1: 注入 cache data source factory，使所有播放命中本地音频缓存。
-     */
-    fun initialize() {
-        if (player != null) return
-        val cacheFactory: DataSource.Factory = offlineDownloadManager.buildCacheDataSourceFactory()
-        // Media3 1.4.1: ExoPlayer.Builder 通过 setMediaSourceFactory 注入 cache data source
-        val mediaSourceFactory = DefaultMediaSourceFactory(cacheFactory)
-        player = ExoPlayer.Builder(appContext)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .build()
-        Log.i(TAG, "PlayerController initialized with offline cache factory")
+        }
     }
 
     /**
      * 播放指定音频直链，并携带锁屏/通知所需元数据（CP4.5）。
-     * 若尚未 [initialize]，仅更新状态机（不真正出声）——UI 仍可反映"播放中"。
-     *
-     * @param audioUrl 音频直链
-     * @param title    锁屏/通知标题（文章标题）；默认空串，兼容无标题的手动起播
-     * @param author   锁屏/通知副标题（文章来源/作者），可空
-     * @param coverUrl 锁屏封面图 URL，可空（CP4.7 接入封面字段）
      */
     fun play(
         audioUrl: String,
@@ -156,12 +133,10 @@ class PlayerController @Inject constructor(
         author: String? = null,
         coverUrl: String? = null,
     ) {
-        val p = player
-        if (p == null) {
-            _state.value = PlaybackState.PLAYING
-            return
-        }
         _state.value = PlaybackState.PLAYING
+        _currentTitle.value = title
+        _currentAuthor.value = author ?: ""
+        _currentAudioUrl.value = audioUrl
         val mediaItem = MediaItem.Builder()
             .setUri(audioUrl)
             .setMediaMetadata(
@@ -172,21 +147,33 @@ class PlayerController @Inject constructor(
                     .build(),
             )
             .build()
-        p.setMediaItem(mediaItem)
-        p.prepare()
-        p.play()
+        player.setMediaItem(mediaItem)
+        player.prepare()
+        player.play()
+        startPolling()
+        startProgressReporting()
+    }
+
+    /**
+     * 恢复播放当前曲目（不重建 MediaItem，避免从头开始）。
+     * 仅当处于 PAUSED 时有效。
+     */
+    fun resume() {
+        if (_state.value != PlaybackState.PAUSED) return
+        _state.value = PlaybackState.PLAYING
+        player.play()
         startPolling()
         startProgressReporting()
     }
 
     fun pause() {
         _state.value = PlaybackState.PAUSED
-        player?.pause()
+        player.pause()
     }
 
     fun stop() {
         _state.value = PlaybackState.STOPPED
-        player?.stop()
+        player.stop()
         stopPolling()
         stopProgressReporting()
         _position.value = 0L
@@ -195,14 +182,16 @@ class PlayerController @Inject constructor(
 
     fun seekTo(positionMs: Long) {
         _position.value = positionMs
-        player?.seekTo(positionMs)
+        player.seekTo(positionMs)
     }
 
+    /**
+     * 复位播放器状态流（注意：共享 ExoPlayer 生命周期随 App，此处不 release 它，
+     * 仅复位状态，避免误杀被 MediaSession 绑定的同一实例）。
+     */
     fun release() {
         stopPolling()
         stopProgressReporting()
-        player?.release()
-        player = null
         _state.value = PlaybackState.IDLE
         _position.value = 0L
         _duration.value = 0L
@@ -218,13 +207,19 @@ class PlayerController @Inject constructor(
     }
 
     private fun startProgressReporting() {
+        progressJob?.cancel()
         lastReportTimeMs = 0L
-        progressHandler.removeCallbacks(progressRunnable)
-        progressHandler.postDelayed(progressRunnable, PROGRESS_REPORT_INTERVAL_MS)
+        progressJob = progressScope.launch {
+            while (true) {
+                delay(PROGRESS_REPORT_INTERVAL_MS)
+                reportProgressIfNeeded()
+            }
+        }
     }
 
     private fun stopProgressReporting() {
-        progressHandler.removeCallbacks(progressRunnable)
+        progressJob?.cancel()
+        progressJob = null
     }
 
     companion object {

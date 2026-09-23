@@ -8,6 +8,7 @@ import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.ProgressRepository
+import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -42,6 +43,13 @@ class ArticleDetailViewModel @Inject constructor(
     // CP5.2-A: retry 状态
     private val _retryState = MutableStateFlow<RetryState>(RetryState.Idle)
     val retryState: StateFlow<RetryState> = _retryState.asStateFlow()
+
+    // CP-DELETE: 删除状态（UI 观察 Success 后回列表）
+    private val _deleteState = MutableStateFlow<DeleteState>(DeleteState.Idle)
+    val deleteState: StateFlow<DeleteState> = _deleteState.asStateFlow()
+
+    // CP-DELETE: 轮询协程句柄 —— 删除时取消，避免对已删文章继续 GET distill/{task_id}
+    private var pollingJob: kotlinx.coroutines.Job? = null
 
     private var savedPositionMs: Long? = null
 
@@ -96,13 +104,14 @@ class ArticleDetailViewModel @Inject constructor(
                     startPolling(article.taskId, article.id)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "加载失败") }
+                _uiState.update { it.copy(isLoading = false, error = friendlyError(e, fallback = "加载失败")) }
             }
         }
     }
 
     private fun startPolling(taskId: String, articleId: String) {
-        viewModelScope.launch {
+        pollingJob?.cancel()
+        pollingJob = viewModelScope.launch {
             var attempts = 0
             while (attempts < MAX_POLL_ATTEMPTS) {
                 delay(POLL_INTERVAL_MS)
@@ -162,6 +171,25 @@ class ArticleDetailViewModel @Inject constructor(
         }
     }
 
+    // CP-DELETE: 删除当前文章（硬删除，后端级联清理蒸馏结果 + 音频文件）。
+    // 时序：先取消轮询 + 停播放器（音频即将失效，继续播/轮询只会报错刷屏），
+    // 再发 DELETE。成功 → Success（UI 侧 LaunchedEffect 观察后 onBack() 回列表，
+    // 列表页 LaunchedEffect(Unit) 会重新 loadArticles，删除项自然消失）。
+    fun deleteArticle(articleId: String) {
+        if (_deleteState.value is DeleteState.Loading) return
+        _deleteState.value = DeleteState.Loading
+        pollingJob?.cancel()
+        runCatching { playerController.stop() }
+        viewModelScope.launch {
+            runCatching { repository.deleteArticle(articleId) }
+                .onSuccess { _deleteState.value = DeleteState.Success }
+                .onFailure { e ->
+                    _deleteState.value =
+                        DeleteState.Error(friendlyError(e, fallback = "删除失败"))
+                }
+        }
+    }
+
     companion object {
         /** 轮询间隔：3 秒 */
         const val POLL_INTERVAL_MS: Long = 3000L
@@ -187,4 +215,12 @@ sealed class RetryState {
     data object Loading : RetryState()
     data class Success(val retryCount: Int) : RetryState()
     data class Error(val message: String) : RetryState()
+}
+
+// CP-DELETE: 删除 UI 状态
+sealed class DeleteState {
+    data object Idle : DeleteState()
+    data object Loading : DeleteState()
+    data object Success : DeleteState()
+    data class Error(val message: String) : DeleteState()
 }
