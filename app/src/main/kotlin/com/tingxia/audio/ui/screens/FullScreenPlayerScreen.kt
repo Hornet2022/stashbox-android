@@ -128,6 +128,7 @@ fun FullScreenPlayerScreen(
     val currentTitle by controller.currentTitle.collectAsState()
     val currentAuthor by controller.currentAuthor.collectAsState()
     val currentAudioUrl by controller.currentAudioUrl.collectAsState()
+    val currentArticleId by controller.currentArticleId.collectAsState()
     // 三段兜底：当前曲目 → 调用方传入 → 友好占位文案
     val displayTitle = currentTitle.ifBlank { title.ifBlank { "未在播放" } }
     val displayAuthor = currentAuthor.ifBlank { author }
@@ -226,7 +227,16 @@ fun FullScreenPlayerScreen(
                             // 避免以空 URL 重建 MediaItem 导致播放失败。
                             val url = currentAudioUrl.ifBlank { "" }
                             if (url.isNotEmpty()) {
-                                controller.play(url, displayTitle, displayAuthor, coverUrl)
+                                // 这里是重建已加载的 MediaItem（IDLE/STOPPED 恢复路径），
+                                // 文章没变 → 把 currentArticleId 原样回传，
+                                // 否则完听判定会认为这次播放不属于任何文章。
+                                controller.play(
+                                    url,
+                                    displayTitle,
+                                    displayAuthor,
+                                    coverUrl,
+                                    articleId = currentArticleId,
+                                )
                             }
                         }
                     }

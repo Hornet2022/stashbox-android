@@ -71,6 +71,22 @@ class PlayerController @Inject constructor(
     private val _currentAudioUrl = MutableStateFlow("")
     val currentAudioUrl: StateFlow<String> = _currentAudioUrl.asStateFlow()
 
+    /**
+     * 当前正在播放的文章 id —— 完听判定的必要条件。
+     *
+     * 真机踩过：`currentArticleId` 是私有裸字段、靠调用方在 [play] 之前**另外**调
+     * [setCurrentArticleId] 赋值，而全项目有 4 个 `play()` 调用点只有 2 个记得调。
+     * 漏掉的后果不是报错而是静默失灵：
+     * - 为 null → [checkListenCompletion] 第一行就 return，`listenCompleted` 永不
+     *   发射 → §2.2 listen-complete 不上报 → **§2.6 评分卡永不自动弹**
+     * - 为**上一首的残留值** → 完听被报到错误 article_id 上
+     *
+     * 所以现在由 [play] 自己接管（参数化 articleId），并暴露成 StateFlow 让
+     * 全屏播放器能把它回传（那条路径只是重建已加载的 MediaItem，不该清空）。
+     */
+    private val _currentArticleId = MutableStateFlow<String?>(null)
+    val currentArticleId: StateFlow<String?> = _currentArticleId.asStateFlow()
+
     // CP3.7.0: 完听事件流（ExoPlayer.STATE_ENDED / 进度 ≥ 90%）
     // VM 收集后触发 §2.2 listen-complete + 弹 §2.6 评分卡
     private val _listenCompleted = MutableStateFlow<Long?>(null)
@@ -101,7 +117,7 @@ class PlayerController @Inject constructor(
     private var listenCompletionFired = false
     private fun checkListenCompletion() {
         if (listenCompletionFired) return
-        if (currentArticleId == null) return
+        if (_currentArticleId.value == null) return
         val pos = _position.value
         val dur = _duration.value
         val ended = player.playbackState == Player.STATE_ENDED
@@ -109,7 +125,7 @@ class PlayerController @Inject constructor(
         if (ended || reached) {
             listenCompletionFired = true
             _listenCompleted.value = System.currentTimeMillis()
-            Log.i(TAG, "listen completed: article=$currentArticleId, ratio=${if (dur > 0L) pos.toFloat() / dur else 0f}")
+            Log.i(TAG, "listen completed: article=${_currentArticleId.value}, ratio=${if (dur > 0L) pos.toFloat() / dur else 0f}")
         }
     }
 
@@ -121,7 +137,6 @@ class PlayerController @Inject constructor(
 
     // CP11.0.1: 断点续听进度上报
     private var progressApi: ProgressApi? = null
-    private var currentArticleId: String? = null
     private var lastReportTimeMs = 0L
     private val progressScope = CoroutineScope(Dispatchers.IO + Job())
     private var progressJob: Job? = null
@@ -131,14 +146,20 @@ class PlayerController @Inject constructor(
         progressApi = api
     }
 
-    /** 设置当前播放的文章 ID（开始播放时由调用方设置）。 */
+    /**
+     * 单独设置当前文章 id。
+     *
+     * 新代码请直接调 [play] 的 `articleId` 参数 —— 单独调这里容易漏，
+     * 漏了就是完听判定静默失灵（见 [currentArticleId] 的说明）。
+     * 保留它只是为了兼容既有调用点。
+     */
     fun setCurrentArticleId(articleId: String?) {
-        currentArticleId = articleId
+        _currentArticleId.value = articleId
     }
 
     private fun reportProgressIfNeeded() {
         if (_state.value != PlaybackState.PLAYING) return
-        val articleId = currentArticleId ?: return
+        val articleId = _currentArticleId.value ?: return
         val api = progressApi ?: return
 
         val positionMs = _position.value
@@ -166,13 +187,21 @@ class PlayerController @Inject constructor(
 
     /**
      * 播放指定音频直链，并携带锁屏/通知所需元数据（CP4.5）。
+     *
+     * @param articleId 当前文章 id。**完听判定的必要条件** —— 不传等于告诉播放器
+     *   "这次播放不属于任何文章"，于是 listen-complete 不上报、听感评分卡不弹。
+     *   只有当确实要重放同一篇文章（换档/重建 MediaItem）时才传 null 沿用旧值。
      */
     fun play(
         audioUrl: String,
         title: String = "",
         author: String? = null,
         coverUrl: String? = null,
+        articleId: String? = null,
     ) {
+        if (articleId != null) {
+            _currentArticleId.value = articleId
+        }
         _state.value = PlaybackState.PLAYING
         _currentTitle.value = title
         _currentAuthor.value = author ?: ""

@@ -2,6 +2,7 @@ package com.tingxia.audio.data.repository
 
 import com.tingxia.audio.data.model.EvaluationRequest
 import com.tingxia.audio.data.model.EvaluationResponse
+import com.tingxia.audio.data.model.MyEvaluationResponse
 import com.tingxia.audio.data.remote.DistillationApi
 import javax.inject.Inject
 
@@ -40,4 +41,16 @@ class EvaluationRepository @Inject constructor(private val api: DistillationApi)
             skipReason = skipReason,
         ),
     )
+
+    /**
+     * 读回当前用户对这篇的最新一条听感评分（评分闭环读侧）。
+     *
+     * 没评过时后端返回 200 + 全 null，**不会抛 404**；
+     * 返回对象的 [MyEvaluationResponse.isRated] 为 false。
+     *
+     * 用途：进详情页先拉一次 —— 已评过就显示"已评分 ★N"并挡住重复提交，
+     * 没评过才允许弹评分卡。提交接口不幂等，没有这个读回就没有防重依据。
+     */
+    suspend fun getMyRating(taskId: String): MyEvaluationResponse =
+        api.getMyEvaluation(taskId)
 }

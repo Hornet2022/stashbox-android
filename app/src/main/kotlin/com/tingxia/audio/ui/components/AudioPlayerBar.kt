@@ -72,6 +72,7 @@ import dagger.hilt.android.EntryPointAccessors
 fun AudioPlayerBar(
     title: String,
     audioUrl: String? = null,
+    articleId: String? = null,
     playerController: PlayerController? = null,
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -221,7 +222,10 @@ fun AudioPlayerBar(
                                 ) {
                                     controller.resume()
                                 } else if (audioUrl != null) {
-                                    controller.play(audioUrl, title)
+                                    // articleId 必须传：不传等于这次播放不属于任何文章，
+                                    // 完听判定会静默失效（listen-complete 不上报、
+                                    // 听感评分卡不弹）。见 PlayerController.currentArticleId。
+                                    controller.play(audioUrl, title, articleId = articleId)
                                 }
                             }
                         },

@@ -3,11 +3,13 @@ package com.tingxia.audio.ui.articles
 import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
+import com.tingxia.audio.data.FakeDistillationApi
 import com.tingxia.audio.data.FakeProgressApi
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -91,6 +93,7 @@ class ArticleDetailRetryTest {
             progressRepository = ProgressRepository(FakeProgressApi()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
     }
@@ -125,6 +128,7 @@ class ArticleDetailRetryTest {
             progressRepository = ProgressRepository(FakeProgressApi()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a1")

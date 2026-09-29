@@ -109,6 +109,7 @@ fun ArticleDetailScreen(
     val retryState by viewModel.retryState.collectAsState()
     val deleteState by viewModel.deleteState.collectAsState()
     val shouldShowEvaluation by viewModel.shouldShowEvaluationDialog.collectAsState()
+    val myRating by viewModel.myRating.collectAsState()
     val taskId by viewModel.taskId.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
@@ -145,7 +146,8 @@ fun ArticleDetailScreen(
     }
 
     // CP3.7.0: 评分弹窗 — 完听后自动弹 + 顶部手动「评分」按钮触发
-    val effectiveShowEval = shouldShowEvaluation || showManualRatingDialog
+    // 已评过就不再自动弹（读回确认），避免同一篇反复索评
+    val effectiveShowEval = (shouldShowEvaluation || showManualRatingDialog) && !viewModel.isRated
     val currentTaskId = taskId  // delegated property → 缓存到 local val 解 smart-cast 限制
     if (effectiveShowEval && currentTaskId != null) {
         EvaluationDialog(
@@ -153,6 +155,14 @@ fun ArticleDetailScreen(
             onDismiss = {
                 viewModel.dismissEvaluationDialog()
                 showManualRatingDialog = false
+            },
+            // 提交成功后详情页立刻显示"已评分 ★N"，不依赖下次进页面重新读回
+            onSubmitted = { resp ->
+                viewModel.markRated(
+                    overallScore = resp.overallScore,
+                    evaluationId = resp.id,
+                    taskId = resp.taskId,
+                )
             },
         )
     }
@@ -270,8 +280,12 @@ fun ArticleDetailScreen(
                         IconButton(onClick = { showManualRatingDialog = true }) {
                             Icon(
                                 imageVector = Icons.Filled.Star,
-                                contentDescription = "评分",
-                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = if (myRating?.isRated == true) "修改评分" else "评分",
+                                tint = if (myRating?.isRated == true) {
+                                    MaterialTheme.colorScheme.tertiary
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
                             )
                         }
                     }
@@ -319,6 +333,9 @@ fun ArticleDetailScreen(
                 AudioPlayerBar(
                     title = article.title ?: "",
                     audioUrl = uiState.audioUrl,
+                    // 播放器据此判定"这次播放属于哪篇文章"→ 完听上报 → 自动弹评分卡。
+                    // 漏传会让听感评分彻底不触发（真机 listen_complete 长期为 0 的根因）。
+                    articleId = article.id,
                     onClick = onOpenFullScreenPlayer,
                 )
             }
@@ -365,6 +382,22 @@ fun ArticleDetailScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SourceBadge(source = safeArticle.source)
                             StatusBadge(status = uiState.status)
+                        }
+
+                        // 评分闭环读侧：已评过就在头部留痕，而不是提交完什么都不剩
+                        myRating?.takeIf { it.isRated }?.let { rated ->
+                            Text(
+                                text = buildString {
+                                    append("你的听感评分：")
+                                    append("★".repeat(rated.overallScore ?: 0))
+                                    append("☆".repeat(5 - (rated.overallScore ?: 0)))
+                                    rated.comment?.takeIf { it.isNotBlank() }?.let {
+                                        append(" · ").append(it)
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
                         }
 
                         // CP3.7.0: 蒸馏质量分 + 标签（§1.3 新字段，详情页头部加一行摘要）

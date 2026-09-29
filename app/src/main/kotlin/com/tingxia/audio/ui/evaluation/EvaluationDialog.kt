@@ -63,6 +63,7 @@ fun EvaluationDialog(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
+    val myRating by viewModel.myRating.collectAsState()
 
     LaunchedEffect(taskId) {
         viewModel.initWithTask(taskId)
@@ -110,6 +111,26 @@ fun EvaluationDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                // 评分闭环读侧：已评过就明说，并提示可以改分
+                myRating?.takeIf { it.isRated }?.let { rated ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            buildString {
+                                append("你已评过这篇：")
+                                rated.overallScore?.let { append("总评 $it 星") }
+                                append("，可以修改")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
 
                 // 4 维
                 ScoreRow(

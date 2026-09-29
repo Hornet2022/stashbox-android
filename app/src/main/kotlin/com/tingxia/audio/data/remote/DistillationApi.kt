@@ -3,6 +3,7 @@ package com.tingxia.audio.data.remote
 import com.tingxia.audio.data.model.AudioVariantsResponse
 import com.tingxia.audio.data.model.EvaluationRequest
 import com.tingxia.audio.data.model.EvaluationResponse
+import com.tingxia.audio.data.model.MyEvaluationResponse
 import com.tingxia.audio.data.model.VariantWarmResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -17,6 +18,7 @@ import retrofit2.http.Path
  * - GET  `/distill/{task_id}/variants`              §3.1 多码率协商
  * - POST `/distill/{task_id}/variants/{bitrate}/warm` §3.2 预热转码
  * - POST `/distill/{task_id}/evaluation`            §2.6 4 维听感评分
+ * - GET  `/distill/{task_id}/evaluation`            §2.6 读回自己的最新评分
  *
  * task_id 形如 `dst_xxx`，来源：[com.tingxia.audio.data.model.Article.taskId]
  * 或 [com.tingxia.audio.data.model.DistillStatusResponse.task_id]（§1.3 状态响应）。
@@ -54,4 +56,16 @@ interface DistillationApi {
         @Path("task_id") taskId: String,
         @Body body: EvaluationRequest,
     ): EvaluationResponse
+
+    /**
+     * §2.6 评分读回：当前用户对这篇的最新一条听感评分（评分闭环读侧）。
+     *
+     * 没评过时后端返回 **200 + 全 null 字段**（不是 404）——
+     * 404 在这个位置语义有歧义（"没评过" vs "这篇不存在/不是你的"），
+     * 两种情况客户端要做的决策完全不同。
+     */
+    @GET("api/v1/distill/{task_id}/evaluation")
+    suspend fun getMyEvaluation(
+        @Path("task_id") taskId: String,
+    ): MyEvaluationResponse
 }

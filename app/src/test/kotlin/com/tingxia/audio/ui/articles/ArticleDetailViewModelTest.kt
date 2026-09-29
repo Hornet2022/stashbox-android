@@ -3,11 +3,13 @@ package com.tingxia.audio.ui.articles
 import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
+import com.tingxia.audio.data.FakeDistillationApi
 import com.tingxia.audio.data.FakeProgressApi
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.ProgressGetResponse
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -76,6 +78,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(progressGet),
             progressApi = FakeProgressApi(progressGet, true),
             playerController = playerController,
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
     }
@@ -122,6 +125,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -148,6 +152,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -175,6 +180,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")

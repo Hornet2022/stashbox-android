@@ -6,8 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.MyEvaluationResponse
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.repository.ProgressRepository
 import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.ui.friendlyError
@@ -41,6 +43,7 @@ class ArticleDetailViewModel @Inject constructor(
     private val progressRepository: ProgressRepository,
     private val progressApi: ProgressApi,
     private val playerController: PlayerController,
+    private val evaluationRepository: EvaluationRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -72,6 +75,32 @@ class ArticleDetailViewModel @Inject constructor(
     private val _shouldShowEvaluationDialog = MutableStateFlow(false)
     val shouldShowEvaluationDialog: StateFlow<Boolean> = _shouldShowEvaluationDialog.asStateFlow()
 
+    /**
+     * 我对当前这篇的最新听感评分（读回）。
+     *
+     * null = 未知（还没拉 / 拉失败 / 没有 taskId）。
+     * 用"未知"而不是"没评过"是有意的：拉取失败不该让用户以为没评过。
+     */
+    private val _myRating = MutableStateFlow<MyEvaluationResponse?>(null)
+    val myRating: StateFlow<MyEvaluationResponse?> = _myRating.asStateFlow()
+
+    /** 已确认评过分（读回成功且有记录）。 */
+    val isRated: Boolean get() = _myRating.value?.isRated == true
+
+    /**
+     * 评分提交成功后由 UI 回调，让详情页立刻显示"已评分 ★N"。
+     *
+     * 不用重新读回：提交响应里已经有 id / task_id / overall_score，够画这一行，
+     * 省一次请求也避免刚提交完还短暂显示成"未评分"。
+     */
+    fun markRated(overallScore: Int, evaluationId: String, taskId: String) {
+        _myRating.value = MyEvaluationResponse(
+            id = evaluationId,
+            taskId = taskId,
+            overallScore = overallScore,
+        )
+    }
+
     // CP-DELETE: 轮询协程句柄 —— 删除时取消，避免对已删文章继续 GET distill/{task_id}
     private var pollingJob: kotlinx.coroutines.Job? = null
 
@@ -85,9 +114,16 @@ class ArticleDetailViewModel @Inject constructor(
         viewModelScope.launch {
             playerController.listenCompleted.collect { ts ->
                 if (ts != null && !listenCompletionReported) {
-                    val articleId = _taskId.value
-                        ?: _uiState.value.article?.id
-                        ?: return@collect
+                    // 只认**文章 id**。
+                    //
+                    // 原写法是 `_taskId.value ?: article?.id`，而 `_taskId` 是蒸馏任务
+                    // id（`distilled_articles.id`），§2.2 的端点要的却是
+                    // `articles/{article_id}/listen-complete`。READY 的文章几乎都有
+                    // taskId，所以这个 ?: 基本永远走第一分支 → 拿任务 id 当文章 id 提交
+                    // → 后端 `_get_owned` 查不到 → 404，上报静默失败。
+                    // 真机证据：feedback 表 type=listen_complete 至今只有 2 条，
+                    // 远低于 audio_play_start 的 71 条。
+                    val articleId = _uiState.value.article?.id ?: return@collect
                     listenCompletionReported = true
                     reportListenComplete(articleId)
                     _shouldShowEvaluationDialog.value = true
@@ -111,6 +147,18 @@ class ArticleDetailViewModel @Inject constructor(
 
                 val article = repository.getArticle(id)
                 _taskId.value = article.taskId
+                // 评分闭环读侧：进页面就拉"我评过没"，UI 才能显示"已评分 ★N"
+                article.taskId?.let { taskId ->
+                    viewModelScope.launch {
+                        runCatching { evaluationRepository.getMyRating(taskId) }
+                            .onSuccess { _myRating.value = it }
+                            .onFailure {
+                                // 拉不到不阻断：当作"未知"，仍允许评分
+                                _myRating.value = null
+                                android.util.Log.w(TAG, "load my rating failed: ${it.message}")
+                            }
+                    }
+                }
                 // 文章已就绪（或已听）时，首屏直接取 article.audioUrl，无需轮询
                 val initialAudioUrl =
                     if (article.status == DistillStatus.READY ||
@@ -131,8 +179,12 @@ class ArticleDetailViewModel @Inject constructor(
                 // CP4.4：蒸馏已就绪，直接起播
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
-                    playerController.setCurrentArticleId(id)
-                    playerController.play(url, title = article.title ?: "", author = authorLabel(article.source))
+                    playerController.play(
+                        url,
+                        title = article.title ?: "",
+                        author = authorLabel(article.source),
+                        articleId = id,
+                    )
                     savedPositionMs?.let { pos ->
                         playerController.seekTo(pos)
                     }
@@ -182,11 +234,11 @@ class ArticleDetailViewModel @Inject constructor(
                             val art = _uiState.value.article
                             url?.let {
                                 playerController.setProgressApi(progressApi)
-                                playerController.setCurrentArticleId(articleId)
                                 playerController.play(
                                     it,
                                     title = art?.title ?: "",
                                     author = authorLabel(art?.source),
+                                    articleId = articleId,
                                 )
                                 savedPositionMs?.let { pos ->
                                     playerController.seekTo(pos)

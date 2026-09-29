@@ -47,3 +47,35 @@ data class EvaluationResponse(
     @SerialName("in_few_shot_pool") val inFewShotPool: Boolean,
     @SerialName("pattern_updated") val patternUpdated: Boolean,
 )
+
+/**
+ * GET §2.6 评分读回响应（`GET /api/v1/distill/{task_id}/evaluation`）。
+ *
+ * 为什么需要这个模型
+ * ------------------
+ * 评分一直是"只写不读"：POST 写进 `distillation_evaluations`，而这张表长期只有
+ * `/api/v1/admin/evaluations` 一个 admin 读入口。于是提交完只能关弹窗，界面上
+ * 没有任何"我评过这篇"的痕迹；重进文章不知道评没评过，接口又不幂等，再点一次
+ * 就多写一行。真机 DB 上 `distillation_evaluations` 长期 0 条、界面也无从确认，
+ * 这就是"提交评分没有闭环"。
+ *
+ * 语义：**没评过返回 200 + 全 null**（不是 404）—— 调用方要能区分
+ * "这篇我还没评"（→ 弹评分卡）和"这篇不存在/不是我的"（→ 报错）。
+ */
+@Serializable
+data class MyEvaluationResponse(
+    /** evaluation 主键；未评过时为 null */
+    val id: String? = null,
+    @SerialName("task_id") val taskId: String? = null,
+    @SerialName("hook_score") val hookScore: Int? = null,
+    @SerialName("section_score") val sectionScore: Int? = null,
+    @SerialName("outro_score") val outroScore: Int? = null,
+    @SerialName("rhythm_score") val rhythmScore: Int? = null,
+    @SerialName("overall_score") val overallScore: Int? = null,
+    val comment: String? = null,
+    @SerialName("skip_reason") val skipReason: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+) {
+    /** 是否已评分（后端返回 null id 即"没评过"）。 */
+    val isRated: Boolean get() = id != null
+}
