@@ -1,9 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- dev 环境允许 HTTP（10.0.2.2:8100 是 emulator 走宿主机的 gateway） -->
+    <!--
+      dev 环境允许明文 HTTP。
+      prod 默认不允许（base-config cleartextTrafficPermitted=false）。
+
+      CP-ANDROID-MDNS：客户端改用 mDNS 主机名 `Mac-mini.local`（不随 DHCP 变化）
+      后，**必须把它加进明文白名单**，否则 Android 会直接拦掉所有明文请求
+      ——症状是 App 能编译能装，但一个接口都调不通（且报错只在运行时出现，
+      编译期和单测都发现不了）。
+
+      保留历史 IP 是为了兼容：设备上若还跑着旧版本 APK，或用 adb 直连调试。
+    -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">10.0.2.2</domain>
-        <!-- CP7.4: Hornet Mac 局域网 IP (172.16.5.28 / en8 USB 网卡) -->
+        <!-- mDNS 主机名：真机访问宿主 Mac mini 的稳定地址 -->
+        <domain includeSubdomains="true">Mac-mini.local</domain>
+        <domain includeSubdomains="true">mac-mini.local</domain>
+        <!-- 历史局域网 IP（172.16.5.28 / en8 USB 网卡），保留兼容旧包与直连调试 -->
         <domain includeSubdomains="true">172.16.5.28</domain>
         <domain includeSubdomains="true">172.16.1.90</domain>
         <domain includeSubdomains="true">localhost</domain>
