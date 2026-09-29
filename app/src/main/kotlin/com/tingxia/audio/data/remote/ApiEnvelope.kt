@@ -46,9 +46,19 @@ class ApiException(
 val ApiException.isAudioNotReady: Boolean
     get() = httpCode == 404 && bizCode == 40400
 
-/** 配额用尽：弹付费墙 */
+/**
+ * 配额用尽：弹付费墙
+ *
+ * CP-QUOTA-CODE：原来判 `httpCode == 429`，但后端 [stashbox QuotaExceededError]
+ * 声明的是 `http_status = 403`（`backend/common/quota_service.py`），实测抛出的
+ * 异常就是 `code=3001, http_status=403`。429 从来不会发生 → 这个判断恒为 false →
+ * 付费墙永远不会被触发。
+ *
+ * 这里按 bizCode 判（3001 在全项目里唯一，配额专用），HTTP 状态码只作为兜底
+ * 放宽条件，不作为必要条件——后端哪天把 403 改成 429 也不至于又静默失效。
+ */
 val ApiException.isQuotaExceeded: Boolean
-    get() = httpCode == 429 && bizCode == 3001
+    get() = bizCode == 3001
 
 /** JWT 过期：refresh-token 失败后重登录 */
 val ApiException.isAuthExpired: Boolean

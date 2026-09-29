@@ -9,18 +9,27 @@ import kotlinx.serialization.Serializable
  * 字段全 nullable,避免后端任一字段缺失导致反序列化失败
  * (同 CP10.5 CreateArticleResponse 的设计思路)。
  *
- * 服务端契约见 backend/user-service/main.py:213 `UserQuotaResponse`
+ * CP-QUOTA-FIELD：原来读 `used_quota`，后端 `_quota_payload` 返的却是
+ * `quota_used`（`backend/user-service/main.py`）。字段名对不上 →
+ * `usedQuota` 恒为 null → 付费墙上「已用」永远显示 0，用户完全不知道
+ * 自己配额用掉了多少。已按后端真实字段名改正。
+ *
+ * 另外后端**根本不返回 plan**（users 表只有一列 tier，既是等级也是管理员角色，
+ * 没有独立的套餐字段），所以 `plan` 恒为 null。保留字段但不再拿它编造套餐名，
+ * 见 `PaywallScreen` 的显示口径。
+ *
+ * 服务端契约见 backend/user-service/main.py `_quota_payload`
  */
 @Serializable
 data class QuotaResponse(
-    @kotlinx.serialization.SerialName("plan")
-    val plan: String? = null,           // "free" | "premium"
     @kotlinx.serialization.SerialName("monthly_quota")
     val monthlyQuota: Int? = null,
-    @kotlinx.serialization.SerialName("used_quota")
+    @kotlinx.serialization.SerialName("quota_used")
     val usedQuota: Int? = null,
     @kotlinx.serialization.SerialName("remaining")
     val remaining: Int? = null,
+    @kotlinx.serialization.SerialName("reset_at")
+    val resetAt: String? = null,
 )
 
 /**

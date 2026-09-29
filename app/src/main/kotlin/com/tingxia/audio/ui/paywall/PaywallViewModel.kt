@@ -6,7 +6,6 @@ import com.tingxia.audio.data.model.QuotaResponse
 import com.tingxia.audio.data.repository.QuotaRepository
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,7 +15,11 @@ import javax.inject.Inject
 /**
  * CP11.0.4 P1.2 付费墙 ViewModel:
  * - refresh(): 拉一次当前配额显示
- * - mockUpgrade(): 后端无真实支付,模拟 800ms 后回调 onUpgraded()
+ *
+ * CP-QUOTA-HONEST：原来的 mockUpgrade() 已被删除。它 delay(800) 后直接回调
+ * "升级成功"，但后端**没有任何支付端点**（orders 表无 migration，业务代码从不
+ * 写它），配额一个字节都没变——用户以为付了钱，实际什么都没发生。
+ * 付费墙改为如实说明"自助升级未开放"，等真接上支付再实现。
  */
 @HiltViewModel
 class PaywallViewModel @Inject constructor(
@@ -26,7 +29,6 @@ class PaywallViewModel @Inject constructor(
     data class UiState(
         val quota: QuotaResponse? = null,
         val isLoading: Boolean = false,
-        val isUpgrading: Boolean = false,
         val error: String? = null,
     )
 
@@ -45,20 +47,6 @@ class PaywallViewModel @Inject constructor(
                     error = friendlyError(e, fallback = "加载配额失败"),
                 )
             }
-        }
-    }
-
-    /**
-     * Mock 升级:
-     * 后端实际无支付接口(plan/premium 由 admin-web 配置),这里只模拟"升级成功" → 回调。
-     * 真接入 Stripe/Apple IAP 时再换实现。
-     */
-    fun mockUpgrade(onUpgraded: () -> Unit) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(isUpgrading = true)
-            delay(800)
-            _state.value = _state.value.copy(isUpgrading = false)
-            onUpgraded()
         }
     }
 }

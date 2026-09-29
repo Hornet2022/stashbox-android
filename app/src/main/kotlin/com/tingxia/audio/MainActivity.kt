@@ -383,10 +383,6 @@ private fun AppNavigation() {
         composable("paywall") {
             PaywallScreen(
                 onBack = { navController.popBackStack() },
-                onUpgraded = {
-                    // Mock 升级成功 → 返回上一页
-                    navController.popBackStack()
-                },
             )
         }
         // CP7.4.0: 通勤预加载（§3.2 warm 客户端入口）

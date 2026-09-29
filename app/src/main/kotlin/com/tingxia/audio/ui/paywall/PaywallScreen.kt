@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,7 +47,6 @@ import com.tingxia.audio.data.model.QuotaResponse
 @Composable
 fun PaywallScreen(
     onBack: () -> Unit,
-    onUpgraded: () -> Unit,
     viewModel: PaywallViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -117,22 +114,34 @@ fun PaywallScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // 升级按钮(mock)
-            Button(
-                onClick = { viewModel.mockUpgrade(onUpgraded) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
+            // CP-QUOTA-HONEST：原来这里是一个写着「立即升级 ¥18/月」的大按钮，
+            // onClick 走 viewModel.mockUpgrade() —— 只弹一个 toast。实测后端
+            // **没有任何支付/下单端点**，orders 表连 migration 都没有，业务代码
+            // 从不写它。一个标价却点不出任何东西的按钮，比没有更糟：用户会
+            // 真的去付钱。
+            //
+            // 现在如实告知「自助升级未开放」+ 说明真正的获取途径（运营在管理
+            // 后台调整配额）。等支付端点真的接上，再把 Button 换回来。
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
-                enabled = !state.isUpgrading,
             ) {
-                Text(
-                    text = if (state.isUpgrading) "升级中..." else "立即升级 ¥18/月",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "自助升级暂未开放",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "目前没有在线支付入口。如需更多配额，请在管理后台由运营调整" +
+                            "你的月配额，调整记录会写入审计日志。配额将在下月 1 日自动重置。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -189,22 +198,30 @@ private fun QuotaCard(quota: QuotaResponse?) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
+                // CP-QUOTA-FIELD：原来三个数字都写 `?: 0`。但"取不到"和"真的是 0"
+                // 是两回事——字段名对不上时 usedQuota 恒 null，这里就会把一个
+                // 取不到的数据伪装成"已用 0 次"，用户完全无从察觉。
+                // 取不到就显示 "—"，让问题暴露出来。
                 QuotaMetric(
                     label = "已用",
-                    value = "${quota?.usedQuota ?: 0}",
+                    value = quota?.usedQuota?.toString() ?: "—",
                 )
                 QuotaMetric(
                     label = "剩余",
-                    value = "${quota?.remaining ?: 0}",
+                    value = quota?.remaining?.toString() ?: "—",
                 )
                 QuotaMetric(
                     label = "月配额",
-                    value = "${quota?.monthlyQuota ?: 0}",
+                    value = quota?.monthlyQuota?.toString() ?: "—",
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
+            // CP-QUOTA-FIELD：原来这里显示 `quota?.plan ?: "free"`。
+            // 后端从来没有 plan 字段（users 表只有一列 tier，既是等级也是管理员
+            // 角色），所以不管什么用户看到的都是"套餐: free"——一个恒为常量的
+            // 假信息。改成显示后端真实提供的重置时间。
             Text(
-                text = "套餐: ${quota?.plan ?: "free"}",
+                text = quota?.resetAt?.let { "配额将于 $it 重置" } ?: "配额按月重置",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
