@@ -146,8 +146,13 @@ fun ArticleDetailScreen(
     }
 
     // CP3.7.0: 评分弹窗 — 完听后自动弹 + 顶部手动「评分」按钮触发
-    // 已评过就不再自动弹（读回确认），避免同一篇反复索评
-    val effectiveShowEval = (shouldShowEvaluation || showManualRatingDialog) && !viewModel.isRated
+    //
+    // 「已评过就不再自动弹」只针对**自动**引导：读回确认评过就不该再索评。
+    // 手动入口必须始终可用 —— 已评过的人正需要它改分（☆ 图标此时显示"修改评分"）。
+    // 真机回归踩到过：写成 `(shouldShowEvaluation || showManualRatingDialog) && !isRated`
+    // 会把手动入口一起堵死，评过分之后按钮点了没反应。
+    val autoPrompt = shouldShowEvaluation && !viewModel.isRated
+    val effectiveShowEval = autoPrompt || showManualRatingDialog
     val currentTaskId = taskId  // delegated property → 缓存到 local val 解 smart-cast 限制
     if (effectiveShowEval && currentTaskId != null) {
         EvaluationDialog(
