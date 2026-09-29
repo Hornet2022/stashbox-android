@@ -91,6 +91,7 @@ class ArticleDetailRetryTest {
             progressRepository = ProgressRepository(FakeProgressApi()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
+            context = RuntimeEnvironment.getApplication(),
         )
     }
 
@@ -124,6 +125,7 @@ class ArticleDetailRetryTest {
             progressRepository = ProgressRepository(FakeProgressApi()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
+            context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a1")
         testScheduler.advanceUntilIdle()

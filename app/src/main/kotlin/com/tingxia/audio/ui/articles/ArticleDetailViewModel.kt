@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui.articles
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.audio.PlayerController
@@ -8,8 +9,10 @@ import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.ProgressRepository
+import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,7 +41,17 @@ class ArticleDetailViewModel @Inject constructor(
     private val progressRepository: ProgressRepository,
     private val progressApi: ProgressApi,
     private val playerController: PlayerController,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    /**
+     * 播放器的"作者"字段用来源中文标签，而不是原始 source 码。
+     *
+     * 这个值最终进 MediaSession，会显示在锁屏卡片和通知栏上；
+     * 直接塞 article.source 的后果是真机通知栏写着 "unknown" / "d9"。
+     */
+    private fun authorLabel(source: String?): String =
+        context.getString(sourceLabelRes(source))
 
     private val _uiState = MutableStateFlow(ArticleUiState())
     val uiState: StateFlow<ArticleUiState> = _uiState.asStateFlow()
@@ -119,7 +132,7 @@ class ArticleDetailViewModel @Inject constructor(
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
                     playerController.setCurrentArticleId(id)
-                    playerController.play(url, title = article.title ?: "", author = article.source)
+                    playerController.play(url, title = article.title ?: "", author = authorLabel(article.source))
                     savedPositionMs?.let { pos ->
                         playerController.seekTo(pos)
                     }
@@ -173,7 +186,7 @@ class ArticleDetailViewModel @Inject constructor(
                                 playerController.play(
                                     it,
                                     title = art?.title ?: "",
-                                    author = art?.source,
+                                    author = authorLabel(art?.source),
                                 )
                                 savedPositionMs?.let { pos ->
                                     playerController.seekTo(pos)

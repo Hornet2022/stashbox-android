@@ -39,11 +39,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.util.formatRelativeTime
+import com.tingxia.audio.ui.components.sourceLabelRes
 
 /**
  * CP10.4 蒸馏中心:列出所有 PENDING / FAILED 文章,提供「立即蒸馏」按钮手动重派。
@@ -275,7 +277,7 @@ private fun DistillItem(
                     )
                     Spacer(modifier = Modifier.padding(2.dp))
                     Text(
-                        text = "${article.source} · ${article.status.name.lowercase()}",
+                        text = "${stringResource(sourceLabelRes(article.source))} · ${article.status.name.lowercase()}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -50,10 +50,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.articles.ArticleListViewModel
+import com.tingxia.audio.ui.components.sourceLabelRes
 
 data class SkillItem(
     val title: String,
@@ -251,7 +253,7 @@ private fun ArticleListItem(article: Article, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                text = article.source ?: "",
+                text = stringResource(sourceLabelRes(article.source)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -42,12 +42,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.components.QuotaBanner
+import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.util.formatRelativeTime
 
 /**
@@ -277,7 +279,7 @@ private fun RecentArticleItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = if (isDeleting) "删除中…" else
-                        "${article.source ?: "unknown"} · ${article.status ?: "pending"}",
+                        "${stringResource(sourceLabelRes(article.source))} · ${article.status ?: "pending"}",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isDeleting) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant,

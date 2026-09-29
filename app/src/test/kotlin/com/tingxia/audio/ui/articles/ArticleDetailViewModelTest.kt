@@ -76,6 +76,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(progressGet),
             progressApi = FakeProgressApi(progressGet, true),
             playerController = playerController,
+            context = RuntimeEnvironment.getApplication(),
         )
     }
 
@@ -121,6 +122,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle()
@@ -146,6 +148,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle()
@@ -172,6 +175,7 @@ class ArticleDetailViewModelTest {
             progressRepository = fakeProgressRepo(),
             progressApi = FakeProgressApi(),
             playerController = playerController,
+            context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
         testScheduler.advanceUntilIdle()

@@ -13,7 +13,12 @@
 
     <!-- Source badge labels -->
     <string name="source_wechat">公众号</string>
+    <string name="source_wechat_mp">公众号文章</string>
     <string name="source_douyin">抖音</string>
+    <string name="source_d9">分享导入</string>
+    <string name="source_browser">浏览器</string>
+    <string name="source_share">分享</string>
+    <string name="source_pdf">PDF</string>
     <string name="source_generic">通用</string>
 
     <!-- Accessibility content descriptions -->
