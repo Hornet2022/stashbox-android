@@ -32,6 +32,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navDeepLink
 import androidx.navigation.navArgument
 import com.tingxia.audio.audio.AudioPlayerService
 import com.tingxia.audio.audio.PlayerController
@@ -49,6 +50,8 @@ import com.tingxia.audio.ui.screens.OnboardingScreen
 import com.tingxia.audio.ui.capture.CaptureScreen
 import com.tingxia.audio.ui.distill.DistillScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
+import com.tingxia.audio.ui.offline.OfflineDownloadScreen
+import com.tingxia.audio.ui.settings.SettingsScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import com.tingxia.audio.ui.favorites.FavoritesScreen
@@ -224,6 +227,8 @@ private fun AppNavigation() {
                 onNavigateToArticleList = { navController.navigate("list") },
                 onNavigateToDetail = { id -> navController.navigate("detail/$id") },
                 onNavigateToFullscreenPlayer = { navController.navigate("fullscreen_player") },
+                onNavigateToOfflineDownload = { navController.navigate("offline_download") },
+                onNavigateToSettings = { navController.navigate("settings") },
             )
         }
         composable("list") {
@@ -252,6 +257,7 @@ private fun AppNavigation() {
         composable(
             route = "detail/{id}",
             arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            deepLinks = listOf(navDeepLink { uriPattern = "stashbox://detail/{id}" }),
         ) { backStackEntry ->
             val id = backStackEntry.arguments?.getString("id").orEmpty()
             ArticleDetailScreen(
@@ -366,6 +372,26 @@ private fun AppNavigation() {
                 onUpgraded = {
                     // Mock 升级成功 → 返回上一页
                     navController.popBackStack()
+                },
+            )
+        }
+        // CP7.4.0: 通勤预加载（§3.2 warm 客户端入口）
+        composable("offline_download") {
+            OfflineDownloadScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        // 设置页（CP5.6.0 / §4 G2 个性化开关 UI 灰置）
+        composable("settings") {
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToOfflineDownload = { navController.navigate("offline_download") },
+                onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
+                onLogout = {
+                    navController.popBackStack("home", inclusive = false)
+                    navController.navigate("login") {
+                        popUpTo("home") { inclusive = true }
+                    }
                 },
             )
         }

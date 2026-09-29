@@ -39,6 +39,18 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 @OptIn(ExperimentalCoroutinesApi::class)
 class AuthFlowE2ETest {
 
+    /** 测试用 NoOp RefreshClient:不发起 refresh 请求 */
+    private val noopRefreshClient: com.tingxia.audio.auth.RefreshClient by lazy {
+        object : com.tingxia.audio.auth.RefreshClient(
+            authApiProvider = javax.inject.Provider {
+                throw IllegalStateException("not used in test")
+            },
+            tokenManager = object : com.tingxia.audio.auth.TokenManager(RuntimeEnvironment.getApplication()) {},
+        ) {
+            override suspend fun refreshIfPossible(): String? = null
+        }
+    }
+
     private val server = MockWebServer()
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -71,16 +83,16 @@ class AuthFlowE2ETest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"access_token":"mock-jwt-abc123","refresh_token":"mock-refresh-xyz","user_id":42,"expires_in":3600}""")
+                .setBody("""{"access_token":"mock-jwt-abc123","refresh_token":"mock-refresh-xyz","user_id":"42","expires_in":3600}""")
         )
 
-        val authInterceptor = AuthInterceptor(tokenManager)
+        val authInterceptor = AuthInterceptor(tokenManager, noopRefreshClient)
         val authApi = makeAuthApi(authInterceptor)
         val response: AuthResponse = authApi.wechatLogin(WechatLoginRequest("test_code_xxx"))
 
         assertEquals("mock-jwt-abc123", response.access_token)
         assertEquals("mock-refresh-xyz", response.refresh_token)
-        assertEquals(42L, response.user_id)
+        assertEquals("42", response.user_id)
 
         // 验证 mock server 真收到请求
         val req: RecordedRequest = server.takeRequest()
@@ -94,13 +106,13 @@ class AuthFlowE2ETest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"access_token":"jwt-attached-test","refresh_token":"r","user_id":42,"expires_in":3600}""")
+                .setBody("""{"access_token":"jwt-attached-test","refresh_token":"r","user_id":"42","expires_in":3600}""")
         )
-        val authInterceptor = AuthInterceptor(tokenManager)
+        val authInterceptor = AuthInterceptor(tokenManager, noopRefreshClient)
         val authApi = makeAuthApi(authInterceptor)
         val loginResp = authApi.wechatLogin(WechatLoginRequest("test_code"))
         // 模拟 AuthRepository：登录成功后保存 token
-        tokenManager.saveTokens(loginResp.access_token, loginResp.refresh_token, loginResp.user_id)
+        tokenManager.saveTokens(loginResp.access_token, loginResp.refresh_token ?: "", loginResp.user_id.toLong())
 
         // 2. 第二次请求应自动带 Authorization header
         server.enqueue(

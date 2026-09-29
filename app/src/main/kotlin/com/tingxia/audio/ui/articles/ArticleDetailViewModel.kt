@@ -11,11 +11,11 @@ import com.tingxia.audio.data.repository.ProgressRepository
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -23,9 +23,12 @@ import javax.inject.Inject
  *
  * 数据流：
  * 1. [loadArticle] → GET /api/v1/articles/{id} 拿 article（含 taskId + status）
- * 2. 若 status != ready 且有 taskId → [startPolling] 每 [POLL_INTERVAL_MS] 秒
- *    GET /api/v1/distill/{task_id}，直到 status == ready / failed
+ * 2. 若 status != ready → [startPolling] 每 [POLL_INTERVAL_MS] 秒
+ *    GET /api/v1/articles/{id}/status（§1.3 新路径），直到 status == ready / failed
  * 3. ready → 拉 audio_url 并显示播放器；failed/超时 → 标记错误
+ * 4. **CP3.7.0 评分闭环**：
+ *    - 监听 [PlayerController.listenCompleted]，触发 §2.2 listen-complete 静默上报
+ *    - 同时置 [shouldShowEvaluationDialog]，UI 侧收集后弹 §2.6 4 维评分卡
  *
  * CP11.0.1: 断点续听 — 进入时 GET progress，有记录则从断点起播。
  */
@@ -48,10 +51,37 @@ class ArticleDetailViewModel @Inject constructor(
     private val _deleteState = MutableStateFlow<DeleteState>(DeleteState.Idle)
     val deleteState: StateFlow<DeleteState> = _deleteState.asStateFlow()
 
+    // CP3.7.0: 蒸馏任务 id（§2.6 evaluation 入参）
+    val taskId: StateFlow<String?> get() = _taskId
+    private val _taskId = MutableStateFlow<String?>(null)
+
+    // CP3.7.0: 是否弹评分卡（完听后 → true）
+    private val _shouldShowEvaluationDialog = MutableStateFlow(false)
+    val shouldShowEvaluationDialog: StateFlow<Boolean> = _shouldShowEvaluationDialog.asStateFlow()
+
     // CP-DELETE: 轮询协程句柄 —— 删除时取消，避免对已删文章继续 GET distill/{task_id}
     private var pollingJob: kotlinx.coroutines.Job? = null
 
+    // CP3.7.0: 听感上报守卫（一篇只报一次）
+    private var listenCompletionReported = false
+
     private var savedPositionMs: Long? = null
+
+    init {
+        // CP3.7.0: 监听完听事件 → 静默上报 §2.2 + 弹评分卡
+        viewModelScope.launch {
+            playerController.listenCompleted.collect { ts ->
+                if (ts != null && !listenCompletionReported) {
+                    val articleId = _taskId.value
+                        ?: _uiState.value.article?.id
+                        ?: return@collect
+                    listenCompletionReported = true
+                    reportListenComplete(articleId)
+                    _shouldShowEvaluationDialog.value = true
+                }
+            }
+        }
+    }
 
     fun loadArticle(id: String) {
         viewModelScope.launch {
@@ -59,16 +89,15 @@ class ArticleDetailViewModel @Inject constructor(
             try {
                 // CP11.0.1: 先查断点进度
                 savedPositionMs = null
-                try {
+                runCatching {
                     val progress = progressRepository.getProgress(id)
                     if (progress.position_sec != null && progress.position_sec > 0) {
                         savedPositionMs = progress.position_sec.toLong() * 1000
                     }
-                } catch (_: Exception) {
-                    // 忽略 progress 查询失败，不影响主流程
                 }
 
                 val article = repository.getArticle(id)
+                _taskId.value = article.taskId
                 // 文章已就绪（或已听）时，首屏直接取 article.audioUrl，无需轮询
                 val initialAudioUrl =
                     if (article.status == DistillStatus.READY ||
@@ -86,9 +115,7 @@ class ArticleDetailViewModel @Inject constructor(
                         isLoading = false,
                     )
                 }
-                // CP4.4：蒸馏已就绪，直接起播（audio_url 已就绪）
-                // CP4.5：把 article.title/source 传给 play()，让锁屏 UI 显示标题/作者
-                // CP11.0.1: 设置 ProgressApi + articleId，有断点则 seekTo
+                // CP4.4：蒸馏已就绪，直接起播
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
                     playerController.setCurrentArticleId(id)
@@ -97,11 +124,12 @@ class ArticleDetailViewModel @Inject constructor(
                         playerController.seekTo(pos)
                     }
                 }
+                // 文章没 ready 且有 taskId → 启动轮询
                 if (article.taskId != null &&
                     article.status != DistillStatus.READY &&
                     article.status != DistillStatus.LISTENED
                 ) {
-                    startPolling(article.taskId, article.id)
+                    startPolling(id, article.taskId)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = friendlyError(e, fallback = "加载失败")) }
@@ -109,7 +137,13 @@ class ArticleDetailViewModel @Inject constructor(
         }
     }
 
-    private fun startPolling(taskId: String, articleId: String) {
+    /**
+     * §1.3 新路径：按 articleId 轮询（取代旧 taskId-only 路径）。
+     *
+     * ready 后 §1.3 响应已自带 audio_url，可省去再调一次 §1.4 的往返（仅在
+     * §1.3 响应缺 audio_url 时回退 §1.4）。
+     */
+    private fun startPolling(articleId: String, taskId: String) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             var attempts = 0
@@ -117,13 +151,21 @@ class ArticleDetailViewModel @Inject constructor(
                 delay(POLL_INTERVAL_MS)
                 attempts++
                 try {
-                    val status = repository.getDistillStatus(taskId)
-                    when (status) {
+                    val resp = repository.getArticleStatus(articleId)
+                    when (resp.status) {
                         DistillStatus.READY -> {
-                            val url = runCatching { repository.getAudioUrl(articleId) }.getOrNull()
-                            _uiState.update { it.copy(status = DistillStatus.READY, audioUrl = url) }
-                            // CP4.4：蒸馏完成，起播；CP4.5：带 title/source 供锁屏显示
-                            // CP11.0.1: 设置 ProgressApi + articleId，有断点则 seekTo
+                            // §1.3 响应若带 audio_url 直接用；否则回退 §1.4
+                            val url = resp.audioUrl
+                                ?: runCatching { repository.getAudioUrl(articleId).audio_url }.getOrNull()
+                            _uiState.update {
+                                it.copy(
+                                    status = DistillStatus.READY,
+                                    audioUrl = url,
+                                    tags = resp.tags.orEmpty(),
+                                    qualityScore = resp.qualityScore,
+                                    audioDurationSec = resp.audioDurationSec,
+                                )
+                            }
                             val art = _uiState.value.article
                             url?.let {
                                 playerController.setProgressApi(progressApi)
@@ -143,7 +185,7 @@ class ArticleDetailViewModel @Inject constructor(
                             _uiState.update { it.copy(status = DistillStatus.FAILED, pollError = "蒸馏失败") }
                             return@launch
                         }
-                        else -> _uiState.update { it.copy(status = status) }
+                        else -> _uiState.update { it.copy(status = resp.status) }
                     }
                 } catch (e: Exception) {
                     _uiState.update { it.copy(pollError = e.message ?: "轮询失败") }
@@ -153,6 +195,101 @@ class ArticleDetailViewModel @Inject constructor(
             // 超过最大尝试次数仍未 ready → 超时
             _uiState.update { it.copy(pollTimedOut = true, pollError = "蒸馏超时（>90s）") }
         }
+    }
+
+    /** §2.2 静默上报 listen-complete。失败不弹错误（后台埋点性质）。 */
+    private fun reportListenComplete(articleId: String) {
+        viewModelScope.launch {
+            runCatching {
+                val durationSec = (playerController.duration.value / 1000L).toInt()
+                    .takeIf { it > 0 }
+                repository.markListened(articleId, durationSec)
+            }
+        }
+    }
+
+    /**
+     * §1.4 URL 过期前刷新：audioUrl 在 [expiresAt] 60s 内即视为过期，重新拉取。
+     * 用于恢复播放 / 切档前调用，避免播到一半拿到 403/Expired URL。
+     */
+    fun refreshAudioUrlIfExpiringSoon(articleId: String) {
+        val state = _uiState.value
+        val currentUrl = state.audioUrl ?: return
+        val existing = audioUrlCache.expiryByArticle[articleId] ?: return
+        if (!existing.isExpiringSoon()) return
+        viewModelScope.launch {
+            runCatching { repository.getAudioUrl(articleId) }
+                .onSuccess { resp ->
+                    audioUrlCache.expiryByArticle[articleId] = ExpiryInfo(
+                        url = resp.audio_url,
+                        expiresAt = resp.expiresAt?.let { runCatching { parseIsoTime(it) }.getOrNull() },
+                    )
+                    val newUrl = resp.audio_url
+                    if (newUrl != currentUrl) {
+                        _uiState.update { it.copy(audioUrl = newUrl) }
+                        playerController.switchVariant(newUrl, playerController.currentBitrate.value)
+                    }
+                }
+        }
+    }
+
+    private fun parseIsoTime(s: String): Long {
+        // 简易解析：ZonedDateTime 兼容带时区 ISO8601；不带时区的退化为 LocalDateTime
+        return runCatching {
+            java.time.ZonedDateTime.parse(s).toInstant().toEpochMilli()
+        }.getOrElse {
+            runCatching {
+                java.time.LocalDateTime.parse(s).atZone(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli()
+            }.getOrDefault(0L)
+        }
+    }
+
+    /** URL + 过期时间的内存缓存（跨详情页进入复用） */
+    private val audioUrlCache = object {
+        val expiryByArticle: MutableMap<String, ExpiryInfo> = mutableMapOf()
+    }
+
+    private data class ExpiryInfo(val url: String, val expiresAt: Long?) {
+        fun isExpiringSoon(): Boolean {
+            val e = expiresAt ?: return false  // 无过期信息 → 不主动刷
+            return System.currentTimeMillis() >= e - URL_REFRESH_LEAD_MS
+        }
+    }
+
+    companion object {
+        private const val TAG = "ArticleDetailViewModel"
+        /** 轮询间隔：3 秒 */
+        const val POLL_INTERVAL_MS: Long = 3000L
+
+        /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
+        const val MAX_POLL_ATTEMPTS: Int = 30
+
+        /** URL 过期前 60 秒主动刷新 */
+        const val URL_REFRESH_LEAD_MS: Long = 60_000L
+    }
+
+    /** §2.3 用户在播放器主动跳过 */
+    fun reportSkip(reason: String = "other") {
+        val articleId = _uiState.value.article?.id ?: return
+        viewModelScope.launch {
+            runCatching { repository.skipArticle(articleId, reason) }
+        }
+    }
+
+    /** §2.1 旧版 1-5 星评分（保留双轨之一，新 UI 主推 §2.6 4 维评分） */
+    fun rateArticle(rating: Int, comment: String? = null) {
+        val articleId = _uiState.value.article?.id ?: return
+        viewModelScope.launch {
+            runCatching { repository.rateArticle(articleId, rating, comment) }
+                .onSuccess { android.util.Log.i(TAG, "rateArticle ok: $rating") }
+                .onFailure { android.util.Log.w(TAG, "rateArticle failed: ${it.message}") }
+        }
+    }
+
+    /** UI 关闭评分弹窗后调用，避免下次进入详情页还显示 */
+    fun dismissEvaluationDialog() {
+        _shouldShowEvaluationDialog.value = false
     }
 
     // CP5.2-A: 重试失败蒸馏
@@ -172,9 +309,6 @@ class ArticleDetailViewModel @Inject constructor(
     }
 
     // CP-DELETE: 删除当前文章（硬删除，后端级联清理蒸馏结果 + 音频文件）。
-    // 时序：先取消轮询 + 停播放器（音频即将失效，继续播/轮询只会报错刷屏），
-    // 再发 DELETE。成功 → Success（UI 侧 LaunchedEffect 观察后 onBack() 回列表，
-    // 列表页 LaunchedEffect(Unit) 会重新 loadArticles，删除项自然消失）。
     fun deleteArticle(articleId: String) {
         if (_deleteState.value is DeleteState.Loading) return
         _deleteState.value = DeleteState.Loading
@@ -189,14 +323,6 @@ class ArticleDetailViewModel @Inject constructor(
                 }
         }
     }
-
-    companion object {
-        /** 轮询间隔：3 秒 */
-        const val POLL_INTERVAL_MS: Long = 3000L
-
-        /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
-        const val MAX_POLL_ATTEMPTS: Int = 30
-    }
 }
 
 data class ArticleUiState(
@@ -207,7 +333,15 @@ data class ArticleUiState(
     val error: String? = null,
     val pollError: String? = null,
     val pollTimedOut: Boolean = false,
-)
+    // CP3.7.0: §1.3 状态响应额外字段（蒸馏完成时填充）
+    val tags: List<String> = emptyList(),
+    val qualityScore: Double? = null,
+    val audioDurationSec: Int? = null,
+) {
+    /** 兼容性 getter：UiState 不存 article.tags（避免字段重复）；UI 可直接读这里 */
+    val tagsIfReady: List<String> get() = tags
+    val qualityScoreIfReady: Double? get() = qualityScore
+}
 
 // CP5.2-A: retry UI 状态
 sealed class RetryState {

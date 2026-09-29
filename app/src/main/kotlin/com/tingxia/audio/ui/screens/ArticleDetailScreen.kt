@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
@@ -62,6 +64,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.tingxia.audio.audio.PlayerController
+import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
@@ -70,11 +74,14 @@ import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.DeleteState
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.components.AudioPlayerBar
+import com.tingxia.audio.ui.components.BitrateSelectorSheet
 import com.tingxia.audio.ui.components.DownloadButton
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import com.tingxia.audio.ui.evaluation.EvaluationDialog
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.util.formatRelativeTime
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -101,6 +108,8 @@ fun ArticleDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     val retryState by viewModel.retryState.collectAsState()
     val deleteState by viewModel.deleteState.collectAsState()
+    val shouldShowEvaluation by viewModel.shouldShowEvaluationDialog.collectAsState()
+    val taskId by viewModel.taskId.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val article = uiState.article
     val context = LocalContext.current
@@ -109,7 +118,19 @@ fun ArticleDetailScreen(
     var showLaterListenSheet by remember { mutableStateOf(false) }
     var showFeedbackSheet by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showManualRatingDialog by remember { mutableStateOf(false) }
+    var showBitrateSheet by remember { mutableStateOf(false) }
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
+
+    // §3 多码率弹窗需要 PlayerController（用于切档不重启）
+    val bitratePlayerController = remember {
+        runCatching {
+            EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                PlayerControllerEntryPoint::class.java,
+            ).playerController()
+        }.getOrNull()
+    }
 
     LaunchedEffect(articleId) {
         viewModel.loadArticle(articleId)
@@ -121,6 +142,28 @@ fun ArticleDetailScreen(
             showDeleteConfirm = false
             onBack()
         }
+    }
+
+    // CP3.7.0: 评分弹窗 — 完听后自动弹 + 顶部手动「评分」按钮触发
+    val effectiveShowEval = shouldShowEvaluation || showManualRatingDialog
+    val currentTaskId = taskId  // delegated property → 缓存到 local val 解 smart-cast 限制
+    if (effectiveShowEval && currentTaskId != null) {
+        EvaluationDialog(
+            taskId = currentTaskId,
+            onDismiss = {
+                viewModel.dismissEvaluationDialog()
+                showManualRatingDialog = false
+            },
+        )
+    }
+
+    // §3.1 码率选择弹窗
+    if (showBitrateSheet && currentTaskId != null && bitratePlayerController != null) {
+        BitrateSelectorSheet(
+            taskId = currentTaskId,
+            playerController = bitratePlayerController,
+            onDismiss = { showBitrateSheet = false },
+        )
     }
 
     if (showFavoriteSheet && favoritesRepository != null) {
@@ -222,6 +265,26 @@ fun ArticleDetailScreen(
                             Text("稍后听")
                         }
                     }
+                    // CP3.7.0: 评分入口（音频就绪后可见）
+                    if (uiState.status == DistillStatus.READY && uiState.audioUrl != null && taskId != null) {
+                        IconButton(onClick = { showManualRatingDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = "评分",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    // §3.1 码率切换入口
+                    if (uiState.status == DistillStatus.READY && taskId != null) {
+                        IconButton(onClick = { showBitrateSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Speed,
+                                contentDescription = "音质",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                     if (feedbackRepository != null) {
                         IconButton(onClick = { showFeedbackSheet = true }) {
                             Icon(
@@ -302,6 +365,14 @@ fun ArticleDetailScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SourceBadge(source = safeArticle.source)
                             StatusBadge(status = uiState.status)
+                        }
+
+                        // CP3.7.0: 蒸馏质量分 + 标签（§1.3 新字段，详情页头部加一行摘要）
+                        if (uiState.status == DistillStatus.READY) {
+                            QualityTagsRow(
+                                tags = uiState.tagsIfReady,
+                                qualityScore = uiState.qualityScoreIfReady,
+                            )
                         }
 
                         // CP-TIME：详情页头部时间三件套（剪藏 → 完成 → 收听位置，依次显示）
@@ -618,6 +689,52 @@ private fun ErrorHint(
     ) {
         Text(text = message, style = MaterialTheme.typography.bodyLarge)
         TextButton(onClick = onBack) { Text("返回") }
+    }
+}
+
+/**
+ * CP3.7.0：蒸馏质量分 + 标签（§1.3 新字段展示）。
+ * qualityScore ∈ [0,10]，tags 是 LLM 自动生成的中文名标签（最多 5 个）。
+ */
+@Composable
+private fun QualityTagsRow(tags: List<String>, qualityScore: Double?) {
+    if (tags.isEmpty() && qualityScore == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (qualityScore != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "蒸馏质量 ${"%.1f".format(qualityScore)} / 10",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        if (tags.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                tags.take(5).forEach { tag ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(6.dp),
+                    ) {
+                        Text(
+                            "#$tag",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

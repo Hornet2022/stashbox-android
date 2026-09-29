@@ -11,7 +11,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -24,8 +23,10 @@ import org.robolectric.annotation.Config
 /**
  * AuthInterceptor 单测（本地 Robolectric 单测，无需 emulator）。
  *
- * 用一个「记录最终请求」的终止拦截器捕获经过 AuthInterceptor 后的 Request，
- * 据此断言 Authorization 头 / auth 端点跳过 / 请求体保留。
+ * CP3.7.0 重构后,AuthInterceptor 构造新增 RefreshClient。
+ * 这里用 NoOpRefreshClient 跳过 refresh 逻辑,只验证：
+ * - Authorization 头附加 / 跳过规则 / 请求体保留
+ * - 401 时尝试 refresh 一次(由 FakeTokenManager 控制)
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -37,11 +38,27 @@ class AuthInterceptorTest {
         private val accessToken: String?,
     ) : TokenManager(context) {
         override suspend fun getAccessToken(): String? = accessToken
+        override suspend fun getRefreshToken(): String? = null
     }
 
-    private fun buildClient(token: String?, block: (Request) -> Unit): OkHttpClient {
+    /** 不真正发请求的 RefreshClient:第一次返回 null(失败),否则返回新 token */
+    private class FakeRefreshClient(
+        private val newToken: String? = null,
+    ) : RefreshClient(
+        authApiProvider = javax.inject.Provider { error("not used") },
+        tokenManager = object : TokenManager(RuntimeEnvironment.getApplication()) {},
+    ) {
+        override suspend fun refreshIfPossible(): String? = newToken
+    }
+
+    private fun buildClient(
+        token: String?,
+        block: (Request) -> Unit,
+        newTokenAfterRefresh: String? = null,
+    ): OkHttpClient {
         val interceptor = AuthInterceptor(
             FakeTokenManager(RuntimeEnvironment.getApplication(), token),
+            FakeRefreshClient(newTokenAfterRefresh),
         )
         return OkHttpClient.Builder()
             .addInterceptor(interceptor)
@@ -66,7 +83,8 @@ class AuthInterceptorTest {
     @Test
     fun `adds Authorization header when token exists`() {
         var captured: Request? = null
-        val client = buildClient("abc123") { captured = it }
+        val block: (Request) -> Unit = { req -> captured = req }
+        val client = buildClient(token = "abc123", block = block)
         client.newCall(request("/api/v1/articles")).execute()
         assertEquals("Bearer abc123", captured!!.header("Authorization"))
     }
@@ -74,7 +92,8 @@ class AuthInterceptorTest {
     @Test
     fun `skips header when token is null`() {
         var captured: Request? = null
-        val client = buildClient(null) { captured = it }
+        val block: (Request) -> Unit = { req -> captured = req }
+        val client = buildClient(token = null, block = block)
         client.newCall(request("/api/v1/articles")).execute()
         assertNull(captured!!.header("Authorization"))
     }
@@ -82,7 +101,8 @@ class AuthInterceptorTest {
     @Test
     fun `skips auth endpoints to avoid recursion`() {
         var captured: Request? = null
-        val client = buildClient("abc123") { captured = it }
+        val block: (Request) -> Unit = { req -> captured = req }
+        val client = buildClient(token = "abc123", block = block)
         client.newCall(request("/api/v1/auth/wechat-login")).execute()
         assertNull(captured!!.header("Authorization"))
     }
@@ -90,13 +110,12 @@ class AuthInterceptorTest {
     @Test
     fun `preserves original request body`() {
         var captured: Request? = null
-        val client = buildClient("abc123") { captured = it }
+        val block: (Request) -> Unit = { req -> captured = req }
+        val client = buildClient(token = "abc123", block = block)
         val body = "{\"code\":\"x\"}".toRequestBody("application/json".toMediaType())
         client.newCall(request("/api/v1/articles", body)).execute()
-        // 请求体实例未被拦截器替换
         assertNotNull(captured!!.body)
         assertSame(body, captured!!.body)
-        // 原始方法未被篡改
         assertEquals("POST", captured!!.method)
     }
 }

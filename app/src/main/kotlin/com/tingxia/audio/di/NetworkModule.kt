@@ -4,6 +4,7 @@ import com.tingxia.audio.auth.AuthApi
 import com.tingxia.audio.auth.AuthInterceptor
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
+import com.tingxia.audio.data.remote.DistillationApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.MetricsInterceptor
@@ -40,8 +41,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideAuthInterceptor(tokenManager: TokenManager): AuthInterceptor =
-        AuthInterceptor(tokenManager)
+    fun provideAuthInterceptor(
+        tokenManager: TokenManager,
+        refreshClient: com.tingxia.audio.auth.RefreshClient,
+    ): AuthInterceptor =
+        AuthInterceptor(tokenManager, refreshClient)
 
     @Provides
     @Singleton
@@ -56,6 +60,12 @@ object NetworkModule {
                     level = HttpLoggingInterceptor.Level.BASIC
                 },
             )
+            // 接口文档 v1.2 §0.1：全局 read timeout ≥ 35s；
+            // §3.1 variants 首次按需转码可能 60s，统一拉到 65s 兼容两种场景。
+            // 另设 connect/write 同等超时。
+            .connectTimeout(java.time.Duration.ofSeconds(65))
+            .readTimeout(java.time.Duration.ofSeconds(65))
+            .writeTimeout(java.time.Duration.ofSeconds(65))
             .build()
 
     @Provides
@@ -71,6 +81,12 @@ object NetworkModule {
     @Singleton
     fun provideArticleApi(retrofit: Retrofit): ArticleApi =
         retrofit.create(ArticleApi::class.java)
+
+    // 任务级接口：variants / evaluation / warm（§2.6 / §3.1 / §3.2）
+    @Provides
+    @Singleton
+    fun provideDistillationApi(retrofit: Retrofit): DistillationApi =
+        retrofit.create(DistillationApi::class.java)
 
     @Provides
     @Singleton

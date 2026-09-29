@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.ProgressUpdateRequest
@@ -18,8 +19,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -68,6 +71,15 @@ class PlayerController @Inject constructor(
     private val _currentAudioUrl = MutableStateFlow("")
     val currentAudioUrl: StateFlow<String> = _currentAudioUrl.asStateFlow()
 
+    // CP3.7.0: 完听事件流（ExoPlayer.STATE_ENDED / 进度 ≥ 90%）
+    // VM 收集后触发 §2.2 listen-complete + 弹 §2.6 评分卡
+    private val _listenCompleted = MutableStateFlow<Long?>(null)
+    val listenCompleted: SharedFlow<Long?> = _listenCompleted.asStateFlow()
+
+    // CP3.7.0: 当前 variant 码率（kbps，128 默认；§3 多码率协商后由 VM 更新）
+    private val _currentBitrate = MutableStateFlow(128)
+    val currentBitrate: StateFlow<Int> = _currentBitrate.asStateFlow()
+
     private val positionHandler = Handler(Looper.getMainLooper())
     private val positionRunnable = object : Runnable {
         override fun run() {
@@ -75,8 +87,36 @@ class PlayerController @Inject constructor(
                 _position.value = p.currentPosition.coerceAtLeast(0L)
                 _duration.value = if (p.duration == C.TIME_UNSET) 0L else p.duration
             }
+            // CP3.7.0: 完听判定 —— ExoPlayer STATE_ENDED（已到末尾）
+            // 或进度 ≥ 90% 视为完听（手动拖到末尾也算）
+            checkListenCompletion()
             positionHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
+    }
+
+    /**
+     * 判定是否完听：STATE_ENDED 或 position ≥ 90% duration。
+     * 一篇只触发一次（用 [listenCompletionFired] 守门）。
+     */
+    private var listenCompletionFired = false
+    private fun checkListenCompletion() {
+        if (listenCompletionFired) return
+        if (currentArticleId == null) return
+        val pos = _position.value
+        val dur = _duration.value
+        val ended = player.playbackState == Player.STATE_ENDED
+        val reached = dur > 0L && pos.toFloat() / dur.toFloat() >= LISTEN_COMPLETE_RATIO
+        if (ended || reached) {
+            listenCompletionFired = true
+            _listenCompleted.value = System.currentTimeMillis()
+            Log.i(TAG, "listen completed: article=$currentArticleId, ratio=${if (dur > 0L) pos.toFloat() / dur else 0f}")
+        }
+    }
+
+    /** 重置完听标记（切歌时调） */
+    private fun resetListenCompletionFlag() {
+        listenCompletionFired = false
+        _listenCompleted.value = null
     }
 
     // CP11.0.1: 断点续听进度上报
@@ -150,8 +190,35 @@ class PlayerController @Inject constructor(
         player.setMediaItem(mediaItem)
         player.prepare()
         player.play()
+        resetListenCompletionFlag()
         startPolling()
         startProgressReporting()
+    }
+
+    /**
+     * §3 多码率切换：替换当前 MediaItem 的 URI 但**保持当前播放位置**。
+     *
+     * 用法：用户在 BitrateSelectorSheet 选档 → VM 拿到新 URL → 调本方法切换；
+     * 不重置 position 到 0，避免「切档从头来」。
+     */
+    fun switchVariant(newAudioUrl: String, newBitrate: Int) {
+        if (_currentAudioUrl.value == newAudioUrl) return  // 同一档不切换
+        val savedPos = _position.value
+        val mediaItem = MediaItem.Builder()
+            .setUri(newAudioUrl)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(_currentTitle.value)
+                    .setArtist(_currentAuthor.value.ifBlank { null })
+                    .build(),
+            )
+            .build()
+        player.setMediaItem(mediaItem, savedPos)
+        player.prepare()
+        player.play()
+        _currentAudioUrl.value = newAudioUrl
+        _currentBitrate.value = newBitrate
+        resetListenCompletionFlag()
     }
 
     /**
@@ -178,6 +245,7 @@ class PlayerController @Inject constructor(
         stopProgressReporting()
         _position.value = 0L
         _duration.value = 0L
+        resetListenCompletionFlag()
     }
 
     fun seekTo(positionMs: Long) {
@@ -226,6 +294,9 @@ class PlayerController @Inject constructor(
         private const val TAG = "PlayerController"
         private const val POLL_INTERVAL_MS = 500L
         private const val PROGRESS_REPORT_INTERVAL_MS = 10_000L
+
+        /** 完听判定：进度 ≥ 90% 视为完听 */
+        private const val LISTEN_COMPLETE_RATIO = 0.9f
     }
 }
 

@@ -51,6 +51,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="tingxia" android:host="add" />
             </intent-filter>
+
+            <!-- CP3.7.0 测试: stashbox://detail/{id} 深链跳详情页(e2e 验收用) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="stashbox" android:host="detail" />
+            </intent-filter>
         </activity>
 
         <!-- CP4.4 后台播放：MediaSessionService + ExoPlayer + MediaSession -->

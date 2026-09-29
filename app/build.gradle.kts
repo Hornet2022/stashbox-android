@@ -109,6 +109,13 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // 真机端到端：Compose TestRule 直接 dispatch 语义动作（performClick），
+    // 不经过 InputManager 注入 → 不受 MIUI「USB 调试(安全设置)」限制。
+    // 注意：UiAutomator 的 injectInputEvent 在 MIUI 上即使 instrumentation
+    // 身份也会被拒（实测 SecurityException），故不用它驱动点击。
+    // Compose BOM 需显式作用于 androidTest classpath，否则 ui-test-junit4 版本解析为空
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }
 
 // Robolectric 本地 Compose UI 测试需要 Android 资源

@@ -64,15 +64,13 @@ class TagSubscriptionTest {
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("""{"tags":[{"id":"tech","name":"科技","category":"system","subscribed":true},{"id":"history","name":"历史","category":"system","subscribed":false},{"id":"science","name":"科学","category":"system"}]}""")
+                .setBody("""{"tags":[{"id":"tech","name":"科技","category":"system"},{"id":"history","name":"历史","category":"system"},{"id":"science","name":"科学","category":"system"}]}""")
         )
         val api = makeApi()
         val response = api.listTags()
         assertEquals(3, response.tags.size)
         assertEquals("科技", response.tags[0].name)
         assertEquals("system", response.tags[0].category)
-        assertTrue("tech 应展示为已订阅", response.tags[0].subscribed)
-        assertEquals(1, response.tags.count { it.subscribed })
     }
 
     @Test

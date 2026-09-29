@@ -72,7 +72,7 @@ class ArticleListE2ETest {
             MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("""{"articles":[{"id":"1","title":"文章A"},{"id":"2","title":"文章B"}]}""")
+                .setBody("""{"items":[{"id":"1","title":"文章A"},{"id":"2","title":"文章B"}]}""")
         )
         val api = makeApi()
         val response = api.getArticles()
@@ -85,11 +85,11 @@ class ArticleListE2ETest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"task_id":"t1","status":"READY"}""")
+                .setBody("""{"task_id":"t1","status":"ready"}""")
         )
         val api = makeApi()
-        val response = api.getDistillStatus("t1")
-        assertEquals("t1", response.task_id)
+        val response = api.getDistillStatusByTaskId("t1")
+        assertEquals("t1", response.taskId)
         assertEquals(DistillStatus.READY, response.status)
     }
 
@@ -110,7 +110,7 @@ class ArticleListE2ETest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"articles":[{"id":"1","title":"文章X"}]}""")
+                .setBody("""{"items":[{"id":"1","title":"文章X"}]}""")
         )
         val api = makeApi()
         val repo = ArticleRepository(api)

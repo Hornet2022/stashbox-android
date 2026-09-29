@@ -20,10 +20,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +66,7 @@ val skillItems = listOf(
     SkillItem("蒸馏", Icons.Default.Headphones, "distill"),
     SkillItem("订阅", Icons.Default.Subscriptions, "subscribe"),
     SkillItem("回听", Icons.Default.Headphones, "review"),
+    SkillItem("通勤预加载", Icons.Default.CloudDownload, "offline"),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +81,8 @@ fun HomeScreen(
     onNavigateToArticleList: () -> Unit = {},
     onNavigateToDetail: (String) -> Unit = {},
     onNavigateToFullscreenPlayer: () -> Unit = {},
+    onNavigateToOfflineDownload: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
@@ -97,6 +102,9 @@ fun HomeScreen(
                     }
                     IconButton(onClick = onNavigateToNotifications) {
                         Icon(Icons.Filled.Notifications, contentDescription = "通知")
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "设置")
                     }
                     IconButton(onClick = onNavigateToCapture) {
                         Icon(Icons.Filled.Add, contentDescription = "剪藏")
@@ -129,6 +137,7 @@ fun HomeScreen(
                                 "distill" -> onNavigateToDistill()
                                 "subscribe" -> onNavigateToSubscribe()
                                 "review" -> onNavigateToReview()
+                                "offline" -> onNavigateToOfflineDownload()
                             }
                         }
                     )

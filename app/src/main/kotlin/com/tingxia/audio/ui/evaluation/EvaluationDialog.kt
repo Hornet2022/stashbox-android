@@ -1,0 +1,318 @@
+package com.tingxia.audio.ui.evaluation
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.tingxia.audio.data.model.EvaluationResponse
+
+/**
+ * §2.6 4 维听感评分弹窗（CP3.7.0 评分 UI）。
+ *
+ * 触发时机：
+ * - 完听后自动弹（[com.tingxia.audio.ui.articles.ArticleDetailViewModel] 监听 PLAYBACK_COMPLETE + 进度 ≥ 90%）
+ * - 列表项长按可补评
+ * - 「稍后再说」关闭弹窗 → **不调用评分接口**，仅记一次"已弹"（[RatingPolicy.recordPromptShown]）
+ *
+ * UI：
+ * - 4 维评分（hook / section / outro / rhythm），每维 1-5 星或「跳过」
+ * - 总评（必填 1-5）
+ * - 跳过原因 selector（可选）
+ * - 评论（≤500 字符）
+ *
+ * @param taskId 蒸馏任务 id（来自 §1.3 状态响应），不可空
+ */
+@Composable
+fun EvaluationDialog(
+    taskId: String,
+    onDismiss: () -> Unit,
+    onSubmitted: (EvaluationResponse) -> Unit = {},
+    viewModel: EvaluationViewModel = hiltViewModel(),
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val submitState by viewModel.submitState.collectAsState()
+
+    LaunchedEffect(taskId) {
+        viewModel.initWithTask(taskId)
+    }
+
+    LaunchedEffect(submitState) {
+        if (submitState is EvaluationViewModel.SubmitState.Success) {
+            val resp = (submitState as EvaluationViewModel.SubmitState.Success).response
+            onSubmitted(resp)
+            viewModel.reset()
+            onDismiss()
+        }
+    }
+
+    var commentExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = {
+            if (submitState !is EvaluationViewModel.SubmitState.Loading) {
+                viewModel.markPromptShown()
+                viewModel.reset()
+                onDismiss()
+            }
+        },
+        properties = DialogProperties(
+            dismissOnBackPress = submitState !is EvaluationViewModel.SubmitState.Loading,
+            dismissOnClickOutside = submitState !is EvaluationViewModel.SubmitState.Loading,
+        ),
+        title = {
+            Text(
+                "听感评分",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    "用 1-5 星为这篇打分（也可点「跳过」）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                // 4 维
+                ScoreRow(
+                    label = "开场吸引力",
+                    value = uiState.hookScore,
+                    onSet = viewModel::setHookScore,
+                    onClear = { viewModel.setHookScore(null) },
+                )
+                ScoreRow(
+                    label = "章节节奏",
+                    value = uiState.sectionScore,
+                    onSet = viewModel::setSectionScore,
+                    onClear = { viewModel.setSectionScore(null) },
+                )
+                ScoreRow(
+                    label = "结尾收束",
+                    value = uiState.outroScore,
+                    onSet = viewModel::setOutroScore,
+                    onClear = { viewModel.setOutroScore(null) },
+                )
+                ScoreRow(
+                    label = "语速节拍",
+                    value = uiState.rhythmScore,
+                    onSet = viewModel::setRhythmScore,
+                    onClear = { viewModel.setRhythmScore(null) },
+                )
+
+                // 总评（必填）
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            "总评（必填）",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        ScoreRow(
+                            label = "",
+                            value = uiState.overallScore.takeIf { it in 1..5 },
+                            onSet = viewModel::setOverallScore,
+                            showSkip = false,
+                        )
+                    }
+                }
+
+                // 跳过原因
+                Text(
+                    "跳过这篇的（≤32 字符，可选）",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    EvaluationViewModel.SKIP_REASONS.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            row.forEach { (key, label) ->
+                                FilterChip(
+                                    selected = uiState.skipReason == key,
+                                    onClick = {
+                                        viewModel.setSkipReason(
+                                            if (uiState.skipReason == key) null else key,
+                                        )
+                                    },
+                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 评论（可折叠）
+                if (!commentExpanded) {
+                    TextButton(onClick = { commentExpanded = true }) {
+                        Text("+ 添加评论（可选）")
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = uiState.comment,
+                        onValueChange = viewModel::setComment,
+                        label = { Text("评论") },
+                        placeholder = { Text("说说你的真实感受…") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4,
+                        supportingText = {
+                            Text(
+                                "${uiState.comment.length} / ${EvaluationViewModel.MAX_COMMENT_LEN}",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        },
+                    )
+                }
+
+                // 错误提示
+                if (submitState is EvaluationViewModel.SubmitState.Error) {
+                    Text(
+                        (submitState as EvaluationViewModel.SubmitState.Error).message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = viewModel::submit,
+                enabled = submitState !is EvaluationViewModel.SubmitState.Loading && viewModel.isValid(),
+            ) {
+                if (submitState is EvaluationViewModel.SubmitState.Loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("提交评分")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    viewModel.markPromptShown()
+                    viewModel.reset()
+                    onDismiss()
+                },
+                enabled = submitState !is EvaluationViewModel.SubmitState.Loading,
+            ) { Text("稍后再说") }
+        },
+    )
+}
+
+/**
+ * 单维度评分行：5 颗星 + 「跳过」按钮。
+ *
+ * @param value 当前分数（null = 跳过该维；1-5 表示打分）
+ * @param onSet 设置分数；onClear 设为 null 表示跳过
+ * @param showSkip 是否显示「跳过」按钮（总评行不显示，因为必填）
+ */
+@Composable
+private fun ScoreRow(
+    label: String,
+    value: Int?,
+    onSet: (Int) -> Unit,
+    onClear: (() -> Unit)? = null,
+    showSkip: Boolean = true,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        if (label.isNotEmpty()) {
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.width(88.dp),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            (1..5).forEach { star ->
+                val filled = value != null && star <= value
+                Box(
+                    modifier = Modifier
+                        .size(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (filled) "★" else "☆",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = if (filled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .padding(2.dp)
+                            .clickableNoRipple { onSet(star) },
+                    )
+                }
+            }
+        }
+        if (showSkip && onClear != null) {
+            TextButton(
+                onClick = onClear,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    if (value == null) "已跳过" else "跳过",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
+
+/** 简易 clickable 包装，避免点击扩散到 row 其它部分 */
+@Composable
+private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier {
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    return this.clickable(
+        interactionSource = interactionSource,
+        indication = null,
+        onClick = onClick,
+    )
+}

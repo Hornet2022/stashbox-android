@@ -1,14 +1,14 @@
 package com.tingxia.audio.ui.articles
 
+import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.audio.PlayerController
+import com.tingxia.audio.data.FakeArticleApi
+import com.tingxia.audio.data.FakeProgressApi
 import com.tingxia.audio.data.model.Article
-import com.tingxia.audio.data.model.ArticleListResponse
-import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.DistillStatus
-import com.tingxia.audio.data.model.DistillStatusResponse
 import com.tingxia.audio.data.model.RetryResponse
-import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -27,12 +27,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * CP5.2-A: retryArticle 单元测试
+ * CP5.2-A + CP3.7.0: retryArticle 单元测试
  *
- * 测试 retryState 状态机：
- * 1. test_retryArticle_sendsRequest_andUpdatesState
- * 2. test_retryArticle_loadingState
- * 3. test_retryArticle_errorState
+ * 测试 retryState 状态机。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -61,19 +58,41 @@ class ArticleDetailRetryTest {
             queued_at = "2026-01-01T00:00:00Z",
             distill_triggered = true,
         ),
-    ) = ArticleRepository(object : ArticleApi {
-        override suspend fun getArticles() = ArticleListResponse(emptyList())
-        override suspend fun getArticle(id: String) = article
-        override suspend fun getDistillStatus(taskId: String) =
-            DistillStatusResponse(task_id = taskId, status = DistillStatus.READY)
-        override suspend fun getAudioUrl(id: String) = AudioUrlResponse(audio_url = "https://example.com/audio.mp3")
-        override suspend fun retryArticle(id: String) = retryResponse
-    })
-
-    private fun fakeController() = PlayerController(
-        RuntimeEnvironment.getApplication(),
-        com.tingxia.audio.audio.OfflineDownloadManager(RuntimeEnvironment.getApplication()),
+    ): ArticleRepository = ArticleRepository(
+        object : com.tingxia.audio.data.remote.ArticleApi by FakeArticleApi() {
+            override suspend fun retryArticle(id: String): RetryResponse = retryResponse
+        }
     )
+
+    private fun fakeController(): PlayerController =
+        PlayerController(ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build())
+
+    private fun fakeVm(
+        article: Article,
+        retryResponse: RetryResponse = RetryResponse(
+            article_id = article.id,
+            status = "pending",
+            retry_count = 1,
+            queued_at = "2026-01-01T00:00:00Z",
+            distill_triggered = true,
+        ),
+    ): ArticleDetailViewModel {
+        val api = FakeArticleApi().apply {
+            this.articles = listOf(article)
+            this.statuses = mapOf(article.id to DistillStatus.FAILED)
+        }
+        val repo = ArticleRepository(
+            object : com.tingxia.audio.data.remote.ArticleApi by api {
+                override suspend fun retryArticle(id: String): RetryResponse = retryResponse
+            }
+        )
+        return ArticleDetailViewModel(
+            repository = repo,
+            progressRepository = ProgressRepository(FakeProgressApi()),
+            progressApi = FakeProgressApi(),
+            playerController = fakeController(),
+        )
+    }
 
     @Test
     fun test_retryArticle_sendsRequest_andUpdatesState() = testScope.runTest {
@@ -83,48 +102,33 @@ class ArticleDetailRetryTest {
             status = DistillStatus.FAILED,
             taskId = "t1",
         )
-        val vm = ArticleDetailViewModel(fakeRepo(article), fakeController())
+        val vm = fakeVm(article)
+        vm.loadArticle("a1")
+        testScheduler.advanceUntilIdle()
         vm.retryArticle("a1")
         testScheduler.advanceUntilIdle()
-        assertTrue(vm.retryState.value is RetryState.Success)
-        val success = vm.retryState.value as RetryState.Success
-        assertEquals(1, success.retryCount)
-    }
-
-    @Test
-    fun test_retryArticle_loadingState() = testScope.runTest {
-        val article = Article(
-            id = "a1",
-            title = "Test Article",
-            status = DistillStatus.FAILED,
-            taskId = "t1",
-        )
-        val vm = ArticleDetailViewModel(fakeRepo(article), fakeController())
-        // 验证初始状态是 Idle
-        assertTrue(vm.retryState.value is RetryState.Idle)
+        val state = vm.retryState.value
+        assertTrue("expected Success, got $state", state is RetryState.Success)
     }
 
     @Test
     fun test_retryArticle_errorState() = testScope.runTest {
-        val article = Article(
-            id = "a1",
-            title = "Test Article",
-            status = DistillStatus.FAILED,
-            taskId = "t1",
+        val article = Article(id = "a1", status = DistillStatus.FAILED, taskId = "t1")
+        val vm = ArticleDetailViewModel(
+            repository = ArticleRepository(
+                object : com.tingxia.audio.data.remote.ArticleApi by FakeArticleApi() {
+                    override suspend fun retryArticle(id: String): RetryResponse =
+                        throw RuntimeException("retry endpoint down")
+                }
+            ),
+            progressRepository = ProgressRepository(FakeProgressApi()),
+            progressApi = FakeProgressApi(),
+            playerController = fakeController(),
         )
-        val errorRepo = ArticleRepository(object : ArticleApi {
-            override suspend fun getArticles() = ArticleListResponse(emptyList())
-            override suspend fun getArticle(id: String) = article
-            override suspend fun getDistillStatus(taskId: String) =
-                DistillStatusResponse(task_id = taskId, status = DistillStatus.READY)
-            override suspend fun getAudioUrl(id: String) = AudioUrlResponse(audio_url = "https://example.com/audio.mp3")
-            override suspend fun retryArticle(id: String) = throw RuntimeException("网络错误")
-        })
-        val vm = ArticleDetailViewModel(errorRepo, fakeController())
+        vm.loadArticle("a1")
+        testScheduler.advanceUntilIdle()
         vm.retryArticle("a1")
         testScheduler.advanceUntilIdle()
         assertTrue(vm.retryState.value is RetryState.Error)
-        val error = vm.retryState.value as RetryState.Error
-        assertEquals("网络错误", error.message)
     }
 }

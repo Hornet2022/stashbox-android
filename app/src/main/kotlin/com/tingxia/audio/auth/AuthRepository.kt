@@ -35,7 +35,7 @@ class AuthRepository @Inject constructor(
      * - [userId] 留空时回退到 [BuildConfig.DEBUG_USER_ID]（默认 "6892"），
      *   允许 LoginScreen 在 debug 包内手动指定任意 user_id 以便联调多账号。
      * - 响应无 user_id 字段，从 JWT payload 解析（`sub` 字段）
-     * - 无 refresh_token，用占位符替代
+     * - 优先用服务端下发的 refresh_token，缺失才回落占位符（兼容旧服务端）
      *
      * TODO: user-service wechat-login 修复后切回 [AuthApi.wechatLogin]
      */
@@ -43,7 +43,8 @@ class AuthRepository @Inject constructor(
         val uid = userId?.takeIf { it.isNotBlank() } ?: BuildConfig.DEBUG_USER_ID
         val resp = api.issueToken(TokenIssueRequest(user_id = uid))
         val userIdParsed = parseUserIdFromJwt(resp.access_token)
-        val refresh = "mock_refresh_${userIdParsed}_cp7_4"
+        // CP 修复：gateway 现下发真实 refresh_token，用它做续期；缺失回落占位符
+        val refresh = resp.refresh_token ?: "mock_refresh_${userIdParsed}_cp7_4"
         tokenManager.saveTokens(resp.access_token, refresh, userIdParsed)
         return LoginResult(resp.access_token, refresh, userIdParsed)
     }

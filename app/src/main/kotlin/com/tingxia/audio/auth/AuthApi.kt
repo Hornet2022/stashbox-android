@@ -16,8 +16,8 @@ interface AuthApi {
     @POST("api/v1/auth/wechat-login")
     suspend fun wechatLogin(@Body req: WechatLoginRequest): AuthResponse
 
-    /** POST /api/v1/auth/refresh → 用 refresh token 换新 access token */
-    @POST("api/v1/auth/refresh")
+    /** POST /api/v1/auth/refresh-token → 用 refresh token 换新 access token（网关路由到 user-service） */
+    @POST("api/v1/auth/refresh-token")
     suspend fun refresh(@Body req: RefreshRequest): AuthResponse
 
     /** POST /api/v1/auth/logout → 服务端失效 token */
@@ -75,5 +75,6 @@ data class TokenIssueRequest(val user_id: String)
 @Serializable
 data class TokenIssueResponse(
     val access_token: String,
+    val refresh_token: String? = null,
     val expires_in: Int,
 )

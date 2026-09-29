@@ -1,14 +1,7 @@
 package com.tingxia.audio.ui.articles
 
+import com.tingxia.audio.data.FakeArticleApi
 import com.tingxia.audio.data.model.Article
-import com.tingxia.audio.data.model.DistillStatus
-import com.tingxia.audio.data.model.ArticleListResponse
-import com.tingxia.audio.data.model.AudioUrlResponse
-import com.tingxia.audio.data.model.CreateArticleRequest
-import com.tingxia.audio.data.model.CreateArticleResponse
-import com.tingxia.audio.data.model.DistillStatusResponse
-import com.tingxia.audio.data.model.RetryResponse
-import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,20 +31,9 @@ class ArticleListViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun fakeRepo(articles: List<Article>) = ArticleRepository(object : ArticleApi {
-        override suspend fun getArticles() = ArticleListResponse(articles)
-        override suspend fun getArticle(id: String) = articles.first { it.id == id }
-        override suspend fun getDistillStatus(taskId: String) =
-            DistillStatusResponse(task_id = taskId, status = DistillStatus.READY)
-        override suspend fun getAudioUrl(id: String) =
-            AudioUrlResponse(audio_url = "https://example.com/$id.mp3")
-        // CP10.4: 满足 ArticleApi createArticle 抽象方法
-        override suspend fun createArticle(request: CreateArticleRequest) =
-            CreateArticleResponse(article_id = "art_x", task_id = "task_x", status = "pending")
-        // CP5.2-A: 满足 ArticleApi retryArticle 抽象方法（这些测试不测 retry）
-        override suspend fun retryArticle(id: String) =
-            RetryResponse(article_id = id, status = "pending", retry_count = 0, queued_at = "", distill_triggered = false)
-    })
+    private fun fakeRepo(articles: List<Article>) = ArticleRepository(
+        FakeArticleApi().apply { this.articles = articles },
+    )
 
     @Test
     fun initialState_isEmpty() = testScope.runTest {
@@ -78,5 +60,19 @@ class ArticleListViewModelTest {
         vm.loadArticles()
         testScheduler.advanceUntilIdle()
         assertEquals(false, vm.isLoading.value)
+    }
+
+    @Test
+    fun deleteArticle_removesFromList() = testScope.runTest {
+        val sample = listOf(
+            Article(id = "1", title = "A"),
+            Article(id = "2", title = "B"),
+        )
+        val vm = ArticleListViewModel(fakeRepo(sample))
+        vm.loadArticles()
+        testScheduler.advanceUntilIdle()
+        vm.deleteArticle("1")
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(sample[1]), vm.articles.value)
     }
 }
