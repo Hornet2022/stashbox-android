@@ -123,7 +123,11 @@ fun SettingsScreen(
                     subtitle = "清空本地 token，回到登录页",
                     destructive = true,
                     onClick = {
-                        viewModel.logout()
+                        // 只交给 onLogout（由 MainActivity 调 AuthViewModel.logout()）。
+                        // 这里原本还额外调了 viewModel.logout() —— 那是 settings 作用域的
+                        // SettingsViewModel，它清了 token 却碰不到 AuthRoot 持有的
+                        // AuthState，UI 仍停在已登录态；而且它跟着当前 NavBackStackEntry
+                        // 一起被销毁，viewModelScope 会在网络请求返回前被取消。
                         onLogout()
                     },
                 )
@@ -334,9 +338,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun logout() {
-        viewModelScope.launch { authRepository.logout() }
-    }
+    // 登出入口改由 MainActivity 注入的 onLogout 处理（见上方"退出登录"行注释）：
+    // 设置页不再自己清 token，避免清了 token 却切不动 AuthRoot 的登录态。
+    // 登出逻辑唯一实现在 AuthViewModel.logout()。
 
     data class UiState(
         val userId: Long? = null,

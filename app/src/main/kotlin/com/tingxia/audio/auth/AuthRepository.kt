@@ -2,6 +2,9 @@ package com.tingxia.audio.auth
 
 import android.util.Base64
 import com.tingxia.audio.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -73,9 +76,28 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    /** 登出：尽力通知服务端后清空本地 token。 */
+    /**
+     * 登出：尽力通知服务端，然后 **无条件** 清空本地 token。
+     *
+     * 这里原来写的是 `runCatching { api.logout() }` + `tokenManager.clear()`，
+     * 有一个必然踩中的坑：`runCatching` 捕获 `Throwable`，连 `CancellationException`
+     * 一起吞掉；而 tokenManager.clear() 走 DataStore 写盘，在协程已取消时会在第一个
+     * 挂起点再次抛 CancellationException —— 于是本地 token 永远清不掉，
+     * 表现为「点了退出登录，账户还登着」。
+     *
+     * 取消也可能来自"用户点完就离开该页面"（协程作用域被回收），所以：
+     * - 被取消 → 在 NonCancellable 里清完 token 再把取消信号继续抛上去（不吞协程契约）
+     * - 普通网络失败 → 服务端注销失败不该阻塞本地登出，照样清
+     */
     suspend fun logout() {
-        runCatching { api.logout() }
+        try {
+            api.logout()
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) { tokenManager.clear() }
+            throw e
+        } catch (_: Exception) {
+            // 服务端注销失败不阻塞本地登出
+        }
         tokenManager.clear()
     }
 }

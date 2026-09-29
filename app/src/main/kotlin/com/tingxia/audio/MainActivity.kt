@@ -195,6 +195,20 @@ private fun AppNavigation() {
     val favoritesRepository = activity.favoritesRepository
     val feedbackRepository = activity.feedbackRepository
 
+    // 退出登录必须操作 **AuthRoot 那个** AuthViewModel（Activity 作用域），
+    // 这里的 hiltViewModel() 在 NavHost 之外解析，拿到的仍是同一实例。
+    //
+    // 关键：退出登录 **不做任何导航**。登录页不是 NavHost 的 destination，
+    // 它是 AuthRoot 根据 state 分支渲染的（见 AuthRoot 的 when）。
+    // 之前写成 navController.navigate("login") 有两个致命问题：
+    //   1. 导航图里根本没有 "login" 路由 → navigate 抛 IllegalArgumentException
+    //      → 进程直接崩，点一次退出登录 App 就没了；
+    //   2. 就算路由存在，导航也切不动登录态 —— AuthRoot 仍持有 AuthState.LoggedIn。
+    //
+    // 正确做法：清 token + 置 AuthState.NotLoggedIn，AuthRoot 自动换回 LoginScreen，
+    // 同时整个 AppNavigation 子树被销毁。
+    val authViewModel: AuthViewModel = hiltViewModel()
+
     // P1-3：D9 分享结果订阅 → toast + 跳转文章列表
     val context = LocalContext.current
     LaunchedEffect(Unit) {
@@ -387,12 +401,7 @@ private fun AppNavigation() {
                 onBack = { navController.popBackStack() },
                 onNavigateToOfflineDownload = { navController.navigate("offline_download") },
                 onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
-                onLogout = {
-                    navController.popBackStack("home", inclusive = false)
-                    navController.navigate("login") {
-                        popUpTo("home") { inclusive = true }
-                    }
-                },
+                onLogout = { authViewModel.logout() },
             )
         }
     }
