@@ -30,6 +30,12 @@ import androidx.compose.ui.unit.dp
  * - Unknown: 不显示(避免误伤)
  *
  * 接入:CaptureScreen(剪藏)顶部。
+ *
+ * CP-QUOTA-ZERO-SEMANTICS：早先这里是 `total <= 0 return`，把
+ * `monthly_quota = 0`（后端语义 = **停用该用户**）当成"无限制/未知"而隐藏，
+ * 与 [com.tingxia.audio.data.model.status] 的同款 bug 一模一样。
+ * 后果：管理员停用用户后 App 端零提示，用户点了剪藏才被 403。
+ * 现在只有 `total < 0`（-1 = 不限，pro 套餐）才不显示。
  */
 @Composable
 fun QuotaBanner(
@@ -38,7 +44,21 @@ fun QuotaBanner(
     remaining: Int?,
     modifier: Modifier = Modifier,
 ) {
-    if (used == null || total == null || remaining == null || total <= 0) return
+    if (used == null || total == null || remaining == null) return
+    // -1 = 不限（pro）：没有"用完"这回事，不提示。
+    if (total < 0) return
+    // 0 = 停用：直接走 Exhausted 分支，别去算 pct（会除零）
+    if (total == 0) {
+        BannerBlock(
+            color = MaterialTheme.colorScheme.errorContainer,
+            iconTint = MaterialTheme.colorScheme.error,
+            icon = Icons.Filled.Warning,
+            title = "本月配额已用完",
+            subtitle = "升级会员,继续剪藏 · 蒸馏",
+            modifier = modifier,
+        )
+        return
+    }
 
     val pct = (remaining.toFloat() / total.toFloat())
     when {

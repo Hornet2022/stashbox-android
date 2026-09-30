@@ -38,19 +38,39 @@ data class QuotaResponse(
  * 状态机:
  * - [Healthy]   remaining > 10% — 正常
  * - [Low]       remaining <= 10% — UI 变橙色(见 P3.1)
- * - [Exhausted] remaining == 0    — 拦截提交,跳 Paywall
+ * - [Exhausted] remaining <= 0    — 拦截提交,跳 Paywall
+ * - [Unknown]   字段缺失 — 放行,避免误拦截
  *
- * remaining 是 NaN(null)时 — 视为 Healthy,避免误拦截。
+ * CP-QUOTA-ZERO-SEMANTICS：`total <= 0 → Unknown` 是错的。
+ *
+ * 后端把 `monthly_quota` 的取值分三种（`backend/user-service/main.py`
+ * 的 `admin_quota_adjust` docstring + `subscription/plans`）：
+ *
+ *   -1 = 不限（pro 套餐）
+ *    0 = **额度耗尽 / 停用该用户**（CP-USERS-REALITY 明确：0 是系统里的真实值，
+ *        管理员把用户设成 0 是合法操作，`consume` 会抛 3001）
+ *   >0 = 正常配额
+ *
+ * 把 0 和 -1 一起当 Unknown，后果是：管理员在后台停用一个用户后，
+ * App 端**零提示** —— 配额条不显示（QuotaBanner 同样 `total <= 0 → return`）、
+ * 提交前不拦截（Unknown 不拦），用户一直以为一切正常，直到点了「立即剪藏」
+ * 被后端 403 才一头雾水。实测链路：
+ *
+ *   后台配额设为 0 → App 剪藏页无任何提示 → 提交 → 403 {"code":3001}
+ *
+ * 正确口径：只有 **-1**（不限）才是 Healthy，`0` 是 Exhausted。
  */
 enum class QuotaStatus { Healthy, Low, Exhausted, Unknown }
 
 fun QuotaResponse.status(): QuotaStatus {
     val r = remaining ?: return QuotaStatus.Unknown
     val total = monthlyQuota ?: return QuotaStatus.Unknown
-    if (total <= 0) return QuotaStatus.Unknown
+    // -1 = 不限（pro）；此时 remaining 无意义，一律按健康处理。
+    // 刻意用 `== -1` 而不是 `< 0`：0 是「停用」，必须判为 Exhausted 走拦截。
+    if (total < 0) return QuotaStatus.Healthy
     return when {
-        r <= 0 -> QuotaStatus.Exhausted
-        r * 10 <= total -> QuotaStatus.Low       // remaining <= 10% total
+        total == 0 || r <= 0 -> QuotaStatus.Exhausted
+        r * 10 <= total -> QuotaStatus.Low // remaining <= 10% total
         else -> QuotaStatus.Healthy
     }
 }
