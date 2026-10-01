@@ -66,6 +66,7 @@ fun CaptureScreen(
     onBack: () -> Unit,
     onCaptured: (String) -> Unit,
     onQuotaExhausted: () -> Unit = {},
+    onNavigateToDetail: (String) -> Unit = {},
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -247,6 +248,7 @@ fun CaptureScreen(
                                 article = article,
                                 isDeleting = deletingId == article.id,
                                 onDelete = { deleteTarget = article },
+                                onClick = { onNavigateToDetail(article.id) },
                             )
                             HorizontalDivider()
                         }
@@ -262,8 +264,17 @@ private fun RecentArticleItem(
     article: Article,
     isDeleting: Boolean = false,
     onDelete: () -> Unit,
+    onClick: () -> Unit = {},
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // BUG#10（2026-09-30 自测）：这一行原先**没有任何点击处理**，
+    // 整张卡片只有右上角垃圾桶可点 —— 「最近剪藏」长得就是个能点的列表，
+    // 点了却毫无反应，是条死路。（其他列表页如收藏/稍后听都有 onNavigateToDetail，
+    // 只有剪藏页漏了。）
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isDeleting, onClick = onClick)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

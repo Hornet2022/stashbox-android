@@ -12,6 +12,7 @@ import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.QuotaApi
 import com.tingxia.audio.data.remote.TagApi
+import com.tingxia.audio.data.remote.TtsApi
 import com.tingxia.audio.onboarding.OnboardingApi
 import dagger.Module
 import dagger.Provides
@@ -128,4 +129,10 @@ object NetworkModule {
     @Singleton
     fun provideQuotaApi(retrofit: Retrofit): QuotaApi =
         retrofit.create(QuotaApi::class.java)
+
+    // CP-TTS-VOICE: 音色列表 + 音色/语速偏好
+    @Provides
+    @Singleton
+    fun provideTtsApi(retrofit: Retrofit): TtsApi =
+        retrofit.create(TtsApi::class.java)
 }

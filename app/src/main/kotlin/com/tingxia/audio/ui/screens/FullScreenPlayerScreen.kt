@@ -80,6 +80,11 @@ import com.tingxia.audio.audio.PlaybackState
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.ui.theme.WarmOchre
+import androidx.hilt.navigation.compose.hiltViewModel
+import android.widget.Toast
+import com.tingxia.audio.ui.friendlyError
+import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
+import com.tingxia.audio.ui.tts.formatSpeedLabel
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.launch
 
@@ -129,6 +134,10 @@ fun FullScreenPlayerScreen(
     val currentAuthor by controller.currentAuthor.collectAsState()
     val currentAudioUrl by controller.currentAudioUrl.collectAsState()
     val currentArticleId by controller.currentArticleId.collectAsState()
+    // CP-TTS-VOICE: 语速的真实来源。档位由服务端下发，不再在 UI 里硬编码五档。
+    val speed by controller.speed.collectAsState()
+    val availableSpeeds by controller.availableSpeeds.collectAsState()
+    val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
     // 三段兜底：当前曲目 → 调用方传入 → 友好占位文案
     val displayTitle = currentTitle.ifBlank { title.ifBlank { "未在播放" } }
     val displayAuthor = currentAuthor.ifBlank { author }
@@ -257,6 +266,23 @@ fun FullScreenPlayerScreen(
 
             // 速度切换行
             SpeedRow(
+                currentSpeed = speed,
+                onSpeedSelected = { value ->
+                    // 与 sheet 走同一套逻辑：先改播放器(立即生效)再同步云端
+                    controller.setSpeed(value)
+                    scope.launch {
+                        runCatching { ttsViewModel.persistSpeed(value) }
+                            .onFailure {
+                                // 注意：以前这里写成 .onFailure { friendlyError(...) }，
+                                // 文案算出来就被丢掉 = 静默吞掉失败。必须真的提示。
+                                Toast.makeText(
+                                    context,
+                                    friendlyError(it, "语速已生效，但同步到云端失败"),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                    }
+                },
                 onShowSpeedSheet = { showSpeedSheet = true },
             )
 
@@ -291,8 +317,30 @@ fun FullScreenPlayerScreen(
             sheetState = speedSheetState,
             containerColor = MaterialTheme.colorScheme.surface,
         ) {
+            // CP-TTS-VOICE: 接真播放器 + 服务端下发的档位。
+            // 此前这里是 onSpeedSelected = { hide sheet } —— 点了什么都不发生,
+            // 语速只是 FullScreenPlayerScreen 内一个 remember 的本地值,
+            // 播放器速度从未被改过(假闭环)。
             SpeedSheetContent(
-                onSpeedSelected = {
+                currentSpeed = speed,
+                availableSpeeds = availableSpeeds,
+                onSpeedSelected = { value ->
+                    // 1) 立刻改播放器(零延迟,用户马上听到变化)
+                    controller.setSpeed(value)
+                    // 2) 同步到服务端(多端一致);失败只提示不回滚本地 ——
+                    //    播放速度已经生效了,不该因为存不上去而把体验退回去
+                    scope.launch {
+                        runCatching { ttsViewModel.persistSpeed(value) }
+                            .onFailure {
+                                // 注意：以前这里写成 .onFailure { friendlyError(...) }，
+                                // 文案算出来就被丢掉 = 静默吞掉失败。必须真的提示。
+                                Toast.makeText(
+                                    context,
+                                    friendlyError(it, "语速已生效，但同步到云端失败"),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                    }
                     scope.launch {
                         speedSheetState.hide()
                         showSpeedSheet = false
@@ -645,24 +693,28 @@ private fun PlayPauseButton(
 
 @Composable
 private fun SpeedRow(
+    currentSpeed: Float,
+    onSpeedSelected: (Float) -> Unit,
     onShowSpeedSheet: () -> Unit,
 ) {
-    var currentSpeed by remember { mutableStateOf("1.0x") }
-
+    // CP-TTS-VOICE: 原来是 `var currentSpeed by remember { mutableStateOf("1.0x") }`
+    // —— 纯粹本地 state,点哪个 chip 都只改这个变量,播放器速度纹丝不动,
+    // 切屏/重启即丢。这条链路从 UI 到 ExoPlayer 根本没接上。
+    // 现在 currentSpeed 由 PlayerController 的 StateFlow 驱动,点击直接落到播放器。
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SpeedChip(label = "0.75x", selected = currentSpeed == "0.75x", onClick = { currentSpeed = "0.75x" })
-        Spacer(modifier = Modifier.width(8.dp))
-        SpeedChip(label = "1.0x", selected = currentSpeed == "1.0x", onClick = { currentSpeed = "1.0x" })
-        Spacer(modifier = Modifier.width(8.dp))
-        SpeedChip(label = "1.25x", selected = currentSpeed == "1.25x", onClick = { currentSpeed = "1.25x" })
-        Spacer(modifier = Modifier.width(8.dp))
-        SpeedChip(label = "1.5x", selected = currentSpeed == "1.5x", onClick = { currentSpeed = "1.5x" })
-        Spacer(modifier = Modifier.width(8.dp))
-        SpeedChip(label = "2.0x", selected = currentSpeed == "2.0x", onClick = { currentSpeed = "2.0x" })
+        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        speeds.forEachIndexed { index, value ->
+            if (index > 0) Spacer(modifier = Modifier.width(8.dp))
+            SpeedChip(
+                label = formatSpeedLabel(value),
+                selected = kotlin.math.abs(value - currentSpeed) < 0.01f,
+                onClick = { onSpeedSelected(value) },
+            )
+        }
         Spacer(modifier = Modifier.width(8.dp))
         PressableIconButton(
             onClick = onShowSpeedSheet,
@@ -798,7 +850,9 @@ private fun BottomActions(
 
 @Composable
 private fun SpeedSheetContent(
-    onSpeedSelected: () -> Unit,
+    currentSpeed: Float,
+    availableSpeeds: List<Float>,
+    onSpeedSelected: (Float) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -810,16 +864,35 @@ private fun SpeedSheetContent(
             text = "播放速度",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
+        Text(
+            // 变速在播放端完成,不改已生成的音频 —— 调速**不会**重跑蒸馏
+            // (实测单篇约 23 分钟,让用户等一刻钟换语速不可接受)。
+            // 代价说清楚: 变速后音调会跟着变。
+            text = "立即生效，不影响已生成的音频；变速后音调会随之变化",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 16.dp),
         )
-        listOf("0.75x", "1.0x", "1.25x", "1.5x", "2.0x").forEach { speed ->
-            SpeedSheetRow(label = speed, onClick = onSpeedSelected)
+        // 档位由服务端下发,不再硬编码 —— 后台改了就改了全端行为
+        val speeds = availableSpeeds.ifEmpty { PlayerController.DEFAULT_AVAILABLE_SPEEDS }
+        speeds.forEach { speed ->
+            SpeedSheetRow(
+                label = formatSpeedLabel(speed),
+                selected = kotlin.math.abs(speed - currentSpeed) < 0.01f,
+                onClick = { onSpeedSelected(speed) },
+            )
         }
     }
 }
 
 @Composable
-private fun SpeedSheetRow(label: String, onClick: () -> Unit) {
+private fun SpeedSheetRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -831,14 +904,21 @@ private fun SpeedSheetRow(label: String, onClick: () -> Unit) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+            // 选中行加重 + 用主色,用户能看出「现在是这个速度」
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
         )
-        Icon(
-            imageVector = Icons.Default.Speed,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Speed,
+                contentDescription = "当前速度",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

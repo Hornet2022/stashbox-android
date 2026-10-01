@@ -40,4 +40,9 @@ data class Article(
     // CP-DISTILL-TEXT：LLM 听感改写稿正文（hook/body/outro 以空行分段）。
     // 详情页展示"整理后的正文"；列表页为 120 字摘要。蒸馏未完成时为 null。
     @SerialName("script_text") val scriptText: String? = null,
+    // CP-TTS-VOICE 溯源：这段音频当时用哪个音色合成的。
+    // null 有两种含义，客户端不必区分：迁移前跑的历史文章（无从得知）、
+    // 以及用全局 TTS 配置合成的（来源不可溯源，服务端刻意不塞假音色）。
+    // **只有详情页会带这个字段**，列表接口恒为 null（见 backend 的 schema 注释）。
+    @SerialName("tts_voice") val ttsVoice: TtsVoiceBrief? = null,
 )

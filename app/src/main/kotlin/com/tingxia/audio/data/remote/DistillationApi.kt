@@ -1,6 +1,8 @@
 package com.tingxia.audio.data.remote
 
 import com.tingxia.audio.data.model.AudioVariantsResponse
+import com.tingxia.audio.data.model.DistillStartRequest
+import com.tingxia.audio.data.model.DistillStartResponse
 import com.tingxia.audio.data.model.EvaluationRequest
 import com.tingxia.audio.data.model.EvaluationResponse
 import com.tingxia.audio.data.model.MyEvaluationResponse
@@ -28,6 +30,20 @@ interface DistillationApi {
     /** §3.1 查询可用码率（128/96/64）。首次可能触发服务端按需转码（≥ 65s 超时）。 */
     @GET("api/v1/distill/{task_id}/variants")
     suspend fun getVariants(@Path("task_id") taskId: String): AudioVariantsResponse
+
+    /**
+     * CP-TTS-VOICE: 触发/重新触发蒸馏 —— 同时也是「用当前音色重新生成」的入口。
+     *
+     * 刻意**不另开** `/re-distill` 端点：本项目在 CP-DISTILL-START-HARDEN 第 2 条上
+     * 吃过亏（`/articles/{id}/distill` 扣配额而 `/distill/start` 不扣，同一件事两种
+     * 计费口径）。再开一个入口只会重演 —— 要么不扣费造成不一致，要么重复扣费。
+     *
+     * `url` **不用传**（后端一律取库里的值，传什么蒸馏什么等于允许把 A 的产物写到 B）。
+     *
+     * @return 响应的 `voice_name` 是「这次会用哪个音色」，用来在确认弹窗里告诉用户
+     */
+    @POST("api/v1/distill/start")
+    suspend fun startDistill(@Body body: DistillStartRequest): DistillStartResponse
 
     /**
      * §3.2 预热指定码率。

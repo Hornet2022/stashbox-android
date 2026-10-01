@@ -96,6 +96,47 @@ class PlayerController @Inject constructor(
     private val _currentBitrate = MutableStateFlow(128)
     val currentBitrate: StateFlow<Int> = _currentBitrate.asStateFlow()
 
+    // CP-TTS-VOICE: 播放语速。
+    //
+    // 此前 App 有一个**假闭环**：FullScreenPlayerScreen 里有 0.75x~2.0x 五档 UI，
+    // 但 currentSpeed 是 `remember { mutableStateOf("1.0x") }` 纯本地状态，
+    // 而本类从来没有 setSpeed —— 点了播放器速度纹丝不动，切页面/重启即丢。
+    // 现在真正落到 ExoPlayer.setPlaybackSpeed。
+    //
+    // 为什么变速放播放端而不是合成端：改语速不重跑蒸馏。实测单篇蒸馏约 23 分钟，
+    // 让用户为了调速等一刻钟是不可接受的。代价是变速后音调会跟着变
+    // （变调不变速需要额外的 pitch correction，本项目没有）。
+    private val _speed = MutableStateFlow(DEFAULT_SPEED)
+    val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    /** 可选档位由服务端下发（common/models/tts_voice.py: DEFAULT_PLAYBACK_SPEEDS）。 */
+    private val _availableSpeeds = MutableStateFlow(DEFAULT_AVAILABLE_SPEEDS)
+    val availableSpeeds: StateFlow<List<Float>> = _availableSpeeds.asStateFlow()
+
+    /**
+     * 设置播放语速。
+     *
+     * @param value 倍速，落在 MIN~MAX 之外时**夹紧**而不是抛异常 ——
+     *   语速是个滑块，用户拖过头不该让播放器崩掉。
+     */
+    fun setSpeed(value: Float) {
+        val clamped = value.coerceIn(MIN_SPEED, MAX_SPEED)
+        _speed.value = clamped
+        player.setPlaybackSpeed(clamped)
+    }
+
+    /**
+     * 拉取服务端下发的语速档位与用户偏好并应用。
+     *
+     * 放在这里而不是单独 Repository：语速是**播放器参数**，且必须在
+     * ExoPlayer 上生效才叫「配了」。只在启动/登录后调一次即可
+     * （App 生命周期内 PlayerController 是单例）。
+     */
+    fun applySpeedPreference(preferred: Float, options: List<Float>) {
+        if (options.isNotEmpty()) _availableSpeeds.value = options
+        setSpeed(preferred)
+    }
+
     private val positionHandler = Handler(Looper.getMainLooper())
     private val positionRunnable = object : Runnable {
         override fun run() {
@@ -218,6 +259,11 @@ class PlayerController @Inject constructor(
             .build()
         player.setMediaItem(mediaItem)
         player.prepare()
+        // CP-TTS-VOICE: setPlaybackSpeed 是 player 级参数，理论上前后换 MediaItem
+        // 不会丢。但这里显式重放一次 —— 漏掉的代价是「用户设了 1.5x，点开下一篇
+        // 悄悄变回 1.0x」，而这种静默失灵本项目已经吃过很多次（见
+        // backend/tests/e2e/README.md 的踩坑清单）。重放一次是幂等且零成本的。
+        player.setPlaybackSpeed(_speed.value)
         player.play()
         resetListenCompletionFlag()
         startPolling()
@@ -326,6 +372,16 @@ class PlayerController @Inject constructor(
 
         /** 完听判定：进度 ≥ 90% 视为完听 */
         private const val LISTEN_COMPLETE_RATIO = 0.9f
+
+        // CP-TTS-VOICE: 语速边界与默认档位。
+        // 与服务端 common/models/tts_voice.py 的 MIN/MAX_PLAYBACK_SPEED 保持一致 ——
+        // 服务端会校验越界值并返 400，这里只是客户端侧的兜底夹紧。
+        const val DEFAULT_SPEED = 1.0f
+        const val MIN_SPEED = 0.5f
+        const val MAX_SPEED = 3.0f
+
+        /** 服务端不可达时的兜底档位；正常以服务端下发的 available_speeds 为准 */
+        val DEFAULT_AVAILABLE_SPEEDS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
     }
 }
 

@@ -339,6 +339,10 @@ private fun AppNavigation() {
                     // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
                     navController.navigate("paywall")
                 },
+                // BUG#10：最近剪藏的卡片原先不可点，补上详情跳转
+                onNavigateToDetail = { articleId ->
+                    navController.navigate("detail/$articleId")
+                },
             )
         }
         composable("distill") {

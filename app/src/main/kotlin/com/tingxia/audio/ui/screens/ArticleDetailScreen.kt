@@ -22,11 +22,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -64,9 +66,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.tingxia.audio.ui.friendlyError
+import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
+import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.TtsVoiceBrief
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
@@ -112,6 +118,7 @@ fun ArticleDetailScreen(
     val myRating by viewModel.myRating.collectAsState()
     val taskId by viewModel.taskId.collectAsState()
     val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
     val article = uiState.article
     val context = LocalContext.current
 
@@ -121,6 +128,10 @@ fun ArticleDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showManualRatingDialog by remember { mutableStateOf(false) }
     var showBitrateSheet by remember { mutableStateOf(false) }
+    // CP-TTS-VOICE：换音色 / 重新生成
+    var showVoiceSheet by remember { mutableStateOf(false) }
+    var showRegenerateConfirm by remember { mutableStateOf(false) }
+    var regenerateTargetId by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
 
     // §3 多码率弹窗需要 PlayerController（用于切档不重启）
@@ -212,6 +223,67 @@ fun ArticleDetailScreen(
             feedbackRepository = feedbackRepository,
             appVersion = appVersion,
             onDismiss = { showFeedbackSheet = false },
+        )
+    }
+
+    // CP-TTS-VOICE：换音色 + 用新音色重新生成这一篇。
+    // 这是「回溯重跑」在 App 里**唯一可达的入口** —— 它需要文章上下文。
+    if (showVoiceSheet) {
+        VoicePickerSheet(
+            currentArticleId = articleId,
+            onDismiss = { showVoiceSheet = false },
+            onRequestRegenerate = { targetArticleId ->
+                showVoiceSheet = false
+                showRegenerateConfirm = true
+                regenerateTargetId = targetArticleId
+            },
+        )
+    }
+
+    // 重新生成确认框：实测单篇约 23 分钟，不能一键静默重跑
+    if (showRegenerateConfirm && regenerateTargetId != null) {
+        val ttsVm: TtsPreferenceViewModel = hiltViewModel()
+        AlertDialog(
+            onDismissRequest = { showRegenerateConfirm = false },
+            title = { Text("用新音色重新生成？") },
+            text = {
+                Text(
+                    "将用「${ttsVm.uiState.value.preference?.effectiveVoiceName ?: "系统默认音色"}」" +
+                        "重新生成这一篇。\n\n" +
+                        "耗时约 20 分钟，期间可以继续听旧音频；生成成功后才替换。不会重复扣配额。"
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val id = regenerateTargetId
+                        showRegenerateConfirm = false
+                        regenerateTargetId = null
+                        if (id != null) {
+                            coroutineScope.launch {
+                                runCatching { ttsVm.regenerateWithCurrentVoice(id) }
+                                    .onSuccess {
+                                        Toast.makeText(
+                                            context,
+                                            "已加入队列，完成后自动替换",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    .onFailure {
+                                        Toast.makeText(
+                                            context,
+                                            friendlyError(it, "重新生成失败"),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                            }
+                        }
+                    }
+                ) { Text("开始生成") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRegenerateConfirm = false }) { Text("取消") }
+            },
         )
     }
 
@@ -309,6 +381,21 @@ fun ArticleDetailScreen(
                             Icon(
                                 imageVector = Icons.Filled.Edit,
                                 contentDescription = "反馈",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    // CP-TTS-VOICE：换音色 + 用新音色重新生成这一篇。
+                    //
+                    // 放在详情页而不是设置页，因为只有这里有**文章上下文** ——
+                    // 「重新生成」重跑的是这一篇，设置页给不出 article_id。
+                    // 自测时发现这个入口原先只在设置页可达（且参数没传），
+                    // 导致整条回溯重跑链路在 App 里是死的。
+                    if (uiState.status == DistillStatus.READY) {
+                        IconButton(onClick = { showVoiceSheet = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.RecordVoiceOver,
+                                contentDescription = "换音色",
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -460,6 +547,11 @@ fun ArticleDetailScreen(
                                 Text("复制原文链接")
                             }
                         }
+
+                        // CP-TTS-VOICE 溯源：这段音频是谁念的。
+                        // 紧挨着上面的「换音色」按钮 —— 点之前先让人知道现在是谁在念，
+                        // 重生成之后也能一眼看出换没换成功。
+                        VoiceCreditRow(voice = safeArticle.ttsVoice)
 
                         // CP-DISTILL-TEXT：LLM 听感改写稿（整理后的正文）
                         DistilledScriptCard(scriptText = safeArticle.scriptText)
@@ -727,6 +819,38 @@ private fun ErrorHint(
     ) {
         Text(text = message, style = MaterialTheme.typography.bodyLarge)
         TextButton(onClick = onBack) { Text("返回") }
+    }
+}
+
+/**
+ * CP-TTS-VOICE 溯源行：「本期由 婷婷 朗读」。
+ *
+ * 为什么详情页必须有这一行：服务端把「这段音频是谁念的」写进了
+ * `distilled_articles.tts_voice_id`，但**自测发现它只写不读** ——
+ * 三端都看不到。于是「换音色 → 重新生成」这条闭环只闭环了一半：
+ * 确认框承诺「将用音色 X」，生成完却无从判断到底换没换。
+ *
+ * `available=false`（音色已下架/删除）时**照样显示名字**，只多一个「已下架」后缀：
+ * 这段音频确实是它合成的，藏掉名字等于让历史音频变成「来源不明」。
+ */
+@Composable
+private fun VoiceCreditRow(voice: TtsVoiceBrief?) {
+    if (voice == null || voice.name.isBlank()) return
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.RecordVoiceOver,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = if (voice.available) "本期由 ${voice.name} 朗读" else "本期由 ${voice.name} 朗读（音色已下架）",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

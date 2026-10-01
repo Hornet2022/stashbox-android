@@ -24,7 +24,9 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -41,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,9 +53,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.BuildConfig
+import com.tingxia.audio.audio.PlayerControllerEntryPoint
+import com.tingxia.audio.auth.AuthRepository
+import com.tingxia.audio.ui.friendlyError
+import com.tingxia.audio.ui.tts.PlaybackSpeedSheet
+import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
+import com.tingxia.audio.ui.tts.VoicePickerSheet
+import com.tingxia.audio.ui.tts.formatSpeedLabel
+import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,6 +95,18 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     var showPersonalizationInfo by remember { mutableStateOf(false) }
+    // CP-TTS-VOICE: 音色 + 语速
+    var showVoicePicker by remember { mutableStateOf(false) }
+    val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
+    val ttsState by ttsViewModel.uiState.collectAsStateWithLifecycle()
+    val playerController = remember {
+        EntryPointAccessors
+            .fromApplication(context.applicationContext, PlayerControllerEntryPoint::class.java)
+            .playerController()
+    }
+    val speed by playerController.speed.collectAsStateWithLifecycle()
+    var showSpeedSheet by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -130,6 +153,43 @@ fun SettingsScreen(
                         // 一起被销毁，viewModelScope 会在网络请求返回前被取消。
                         onLogout()
                     },
+                )
+            }
+
+            // ── CP-TTS-VOICE: 朗读音色 + 播放速度 ──
+            SettingsSection("朗读") {
+                SettingsRow(
+                    icon = Icons.Filled.RecordVoiceOver,
+                    title = "朗读音色",
+                    // 显示**实际生效**的音色而不是「我选中的」：用户从没设过偏好时
+                    // 生效的是全局默认音色，只显示自己那栏会出现「未选择音色但听着
+                    // 明显是某个人念的」这种说不通的界面。
+                    //
+                    // ⚠️ 加载失败时**不能**回落到「跟随系统默认音色」（BUG#9）：
+                    // 那时 preference 是 null，和「加载成功且确实跟随默认」长得
+                    // 一模一样，后端挂了界面却一脸笃定，是典型的静默失败。
+                    // 语音/语速两条都受 load() 一次成败影响，所以一起降级。
+                    subtitle = ttsState.error
+                        ?.let { "加载失败：$it，点此重试" }
+                        ?: ttsState.effectiveVoiceName
+                        ?: "跟随系统默认音色",
+                    subtitleIsError = ttsState.error != null,
+                    // 出错时这一行是「重试」而不是「打开选择器」—— 副标题既然
+                    // 写了「点此重试」就必须点得动。加载成功后恢复正常语义。
+                    onClick = {
+                        if (ttsState.error != null) ttsViewModel.load() else showVoicePicker = true
+                    },
+                )
+                SettingsRow(
+                    icon = Icons.Filled.Speed,
+                    title = "播放速度",
+                    // 同上：拿不到偏好时 speed 会停在本地默认 1.0x，
+                    // 但那不是「用户设的就是 1.0x」，不能当成已知的值显示。
+                    // 这里不承诺重试 —— PlaybackSpeedSheet 自带本地档位兜底，
+                    // 断网时照样能调，点开就是有用的。
+                    subtitle = ttsState.error?.let { "加载失败：$it" } ?: speedSubtitle(speed),
+                    subtitleIsError = ttsState.error != null,
+                    onClick = { showSpeedSheet = true },
                 )
             }
 
@@ -211,6 +271,32 @@ fun SettingsScreen(
         }
     }
 
+    // CP-TTS-VOICE: 音色选择 + 播放速度两个 sheet。
+    // 设置页没有文章上下文 → currentArticleId 传 null，
+    // 于是「用新音色重新生成这一篇」那行不显示（重生成入口在文章详情页）。
+    if (showVoicePicker) {
+        VoicePickerSheet(
+            onDismiss = { showVoicePicker = false },
+            currentArticleId = null,
+            onRequestRegenerate = { /* 设置页无文章上下文，不会走到这里 */ },
+        )
+    }
+    if (showSpeedSheet) {
+        PlaybackSpeedSheet(
+            currentSpeed = speed,
+            availableSpeeds = ttsState.preference?.availableSpeeds.orEmpty(),
+            onDismiss = { showSpeedSheet = false },
+            onSpeedSelected = { value ->
+                // 与全屏播放器同一套：先改播放器(立即生效)再同步云端
+                playerController.setSpeed(value)
+                scope.launch {
+                    runCatching { ttsViewModel.persistSpeed(value) }
+                        .onFailure { friendlyError(it, "语速已生效，但同步到云端失败") }
+                }
+            },
+        )
+    }
+
     if (showPersonalizationInfo) {
         AlertDialog(
             onDismissRequest = { showPersonalizationInfo = false },
@@ -256,6 +342,10 @@ fun SettingsScreen(
     }
 }
 
+/** 播放速度的副标题文案（抽出来是为了和 BUG#9 的降级分支对称）。 */
+private fun speedSubtitle(speed: Float): String =
+    "${formatSpeedLabel(speed)} — 立即生效，不影响已生成的音频"
+
 @Composable
 private fun SettingsSection(title: String, content: @Composable () -> Unit) {
     Column(modifier = Modifier.padding(top = 16.dp)) {
@@ -284,6 +374,14 @@ private fun SettingsRow(
     title: String,
     subtitle: String? = null,
     destructive: Boolean = false,
+    /**
+     * 副标题是不是「错误信息」而不是「一个值」。
+     *
+     * 存在的原因（BUG#9）：加载失败时若照常渲染一个笃定的值（比如
+     * 「跟随系统默认音色」「1.0x」），界面就和「加载成功且恰好是这个值」
+     * 完全无法区分 —— 后端挂了用户却看不出来。用 error 色区分。
+     */
+    subtitleIsError: Boolean = false,
     trailing: @Composable (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
@@ -313,7 +411,8 @@ private fun SettingsRow(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (subtitleIsError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
