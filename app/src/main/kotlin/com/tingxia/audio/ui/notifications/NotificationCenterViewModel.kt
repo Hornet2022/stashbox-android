@@ -59,11 +59,22 @@ class NotificationCenterViewModel @Inject constructor(
                         notifications = _uiState.value.notifications.map {
                             if (it.id == id) it.copy(read = true) else it
                         },
+                        error = null,
                     )
                     _unreadCount.value = maxOf(0, _unreadCount.value - 1)
+                } else {
+                    // 服务端明确拒绝：告诉用户，而不是让角标卡住不动
+                    _uiState.value = _uiState.value.copy(error = "标记已读失败，请稍后重试")
                 }
-            } catch (_: Exception) {
-                // 静默失败，不影响 UI
+            } catch (e: Exception) {
+                // 2026-10-02: 原来是 `catch (_: Exception) { }` 空吞。
+                // 配合网关缺 POST /notifications/{id}/mark-read 这条路由，
+                // 这个点**必然** 404 —— 角标永远不减少，用户看到的是
+                // 「点多少次都没用，也没任何提示」，像 App 坏了。
+                // 根因已修（路由补上），这里也把失败显性化。
+                _uiState.value = _uiState.value.copy(
+                    error = "标记已读失败：${e.message ?: "网络异常"}"
+                )
             }
         }
     }

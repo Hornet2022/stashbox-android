@@ -258,8 +258,12 @@ fun FullScreenPlayerScreen(
                     val target = if (duration > 0L) (position + 30_000L).coerceAtMost(duration) else position + 30_000L
                     controller.seekTo(target)
                 },
-                onSkipPrevious = { /* 占位：未来接播放列表 */ },
-                onSkipNext = { /* 占位：未来接播放列表 */ },
+                // 2026-10-02：从占位改成真切换。
+                // 队列由列表页灌入（见 ArticleListScreen 的 LaunchedEffect），
+                // 播放器维护游标；到头/到尾时返回 false，这里据此禁用按钮 ——
+                // 宁可灰掉，也不给一个点了没反应的死按钮。
+                onSkipPrevious = { controller.playPrevious() },
+                onSkipNext = { controller.playNext() },
             )
 
             Spacer(modifier = Modifier.height(16.dp))

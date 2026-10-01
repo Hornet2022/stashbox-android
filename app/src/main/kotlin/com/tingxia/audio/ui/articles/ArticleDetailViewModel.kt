@@ -136,14 +136,11 @@ class ArticleDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // CP11.0.1: 先查断点进度
-                savedPositionMs = null
-                runCatching {
-                    val progress = progressRepository.getProgress(id)
-                    if (progress.position_sec != null && progress.position_sec > 0) {
-                        savedPositionMs = progress.position_sec.toLong() * 1000
-                    }
-                }
+                // 断点续听：本地优先（断网可用），本地没有才回源。
+                // 2026-10-02 改：之前是 `runCatching { 远端 }`，网络一失败就
+                // savedPositionMs 保持 null，后面 seekTo 整段跳过 → 地铁里
+                // 断网重开文章必然从头播，用户听到的是"我明明听到 20 分钟了"。
+                savedPositionMs = progressRepository.getResumePositionMs(id)
 
                 val article = repository.getArticle(id)
                 _taskId.value = article.taskId
@@ -179,6 +176,7 @@ class ArticleDetailViewModel @Inject constructor(
                 // CP4.4：蒸馏已就绪，直接起播
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
+                    playerController.setProgressRepository(progressRepository)
                     playerController.play(
                         url,
                         title = article.title ?: "",
@@ -234,6 +232,7 @@ class ArticleDetailViewModel @Inject constructor(
                             val art = _uiState.value.article
                             url?.let {
                                 playerController.setProgressApi(progressApi)
+                    playerController.setProgressRepository(progressRepository)
                                 playerController.play(
                                     it,
                                     title = art?.title ?: "",

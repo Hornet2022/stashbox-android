@@ -60,6 +60,7 @@ import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.ui.friendlyError
 import com.tingxia.audio.ui.tts.PlaybackSpeedSheet
+import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
 import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.ui.tts.formatSpeedLabel
@@ -90,6 +91,9 @@ fun SettingsScreen(
     onNavigateToOfflineDownload: () -> Unit = {},
     onNavigateToFeedbackHistory: () -> Unit = {},
     onLogout: () -> Unit = {},
+    // 2026-10-02: 供「意见反馈」打开通用反馈 sheet（由 MainActivity 注入传入，
+    // 与 ArticleListScreen 同一套取法）
+    feedbackRepository: com.tingxia.audio.data.repository.FeedbackRepository? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -97,6 +101,9 @@ fun SettingsScreen(
     var showPersonalizationInfo by remember { mutableStateOf(false) }
     // CP-TTS-VOICE: 音色 + 语速
     var showVoicePicker by remember { mutableStateOf(false) }
+    // 2026-10-02: 「意见反馈」不再是死按钮，直接复用已存在的通用反馈 sheet
+    var showFeedbackSheet by remember { mutableStateOf(false) }
+
     val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
     val ttsState by ttsViewModel.uiState.collectAsStateWithLifecycle()
     val playerController = remember {
@@ -107,6 +114,20 @@ fun SettingsScreen(
     val speed by playerController.speed.collectAsStateWithLifecycle()
     var showSpeedSheet by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    if (showFeedbackSheet && feedbackRepository != null) {
+        val appVersion = remember {
+            runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull() ?: "unknown"
+        }
+        FeedbackBottomSheet(
+            articleId = null, // 通用反馈，不针对具体文章
+            feedbackRepository = feedbackRepository,
+            appVersion = appVersion,
+            onDismiss = { showFeedbackSheet = false },
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -128,11 +149,13 @@ fun SettingsScreen(
         ) {
             // ── 用户区 ──
             SettingsSection("账号") {
+                // 2026-10-02：原来这里是 `onClick = { /* TODO: 跳用户详情 */ }`，
+                // 是个点下去毫无反应的死按钮 —— 而「用户详情」页根本不存在。
+                // 与其编一个假目的地，不如如实展示：这一行是信息，不是入口。
                 SettingsRow(
                     icon = Icons.Filled.Person,
                     title = "用户",
                     subtitle = "uid=${uiState.userId ?: "未登录"}",
-                    onClick = { /* TODO: 跳用户详情 */ },
                 )
                 SettingsRow(
                     icon = Icons.Filled.History,
@@ -245,11 +268,19 @@ fun SettingsScreen(
                         Toast.makeText(context, "构建 ${uiState.commitHash.take(7)}", Toast.LENGTH_SHORT).show()
                     },
                 )
+                // 2026-10-02：原来是死按钮。这里接上**已经存在**的
+                // FeedbackBottomSheet（articleId 传 null = 不针对具体文章的
+                // 通用反馈）—— 不必新造一个「反馈页」，那个 sheet 本来就能用。
                 SettingsRow(
                     icon = Icons.Filled.HelpOutline,
                     title = "意见反馈",
                     subtitle = "通过反馈页提交 bug/建议",
-                    onClick = { /* TODO: 跳反馈页 */ },
+                    // 仓库没注入时这一行不可点（而不是点了没反应）
+                    onClick = if (feedbackRepository != null) {
+                        { showFeedbackSheet = true }
+                    } else {
+                        null
+                    },
                 )
             }
 
@@ -383,12 +414,18 @@ private fun SettingsRow(
      */
     subtitleIsError: Boolean = false,
     trailing: @Composable (() -> Unit)? = null,
-    onClick: () -> Unit,
+    /**
+     * null = 纯信息行，**不渲染可点击态**（2026-10-02）。
+     *
+     * 之前这里是必填，于是「没有对应页面」的行只能塞 `{}` 或注释掉的 TODO，
+     * 两者都表现为「点下去毫无反应」的死按钮。信息就该是信息。
+     */
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

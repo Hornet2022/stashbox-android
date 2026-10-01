@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.tingxia.audio.data.model.DistillStatus
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -78,9 +79,26 @@ fun ArticleListScreen(
     // CP-TAG-FILTER：可由 TagSubscriptionScreen 跳过来携带 tag=slug
     initialTag: String? = null,
     feedbackRepository: FeedbackRepository? = null,
+    // 2026-10-02: 供「上一首/下一首」用。把列表当播放队列灌进去。
+    playerController: com.tingxia.audio.audio.PlayerController? = null,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
+
+    // 把「已就绪且有音频」的文章排成播放队列（2026-10-02）。
+    // 播放器的上一首/下一首靠它工作 —— 之前播放器里根本没有队列概念。
+    LaunchedEffect(articles, playerController) {
+        val items = articles
+            .filter { it.status == DistillStatus.READY && !it.audioUrl.isNullOrBlank() }
+            .map {
+                com.tingxia.audio.audio.PlayerController.QueueItem(
+                    articleId = it.id,
+                    audioUrl = it.audioUrl!!,
+                    title = it.title,
+                )
+            }
+        playerController?.setQueue(items)
+    }
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val activeTag by viewModel.activeTag.collectAsState()

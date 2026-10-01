@@ -60,6 +60,11 @@ android {
     }
 }
 
+// Room 的 schema 导出：迁移时要用（没有它 Room 只能靠 recreate 丢数据）
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
 
@@ -98,6 +103,17 @@ dependencies {
     // DataStore — CP4.6 JWT 持久化（tokenManager 用 preferencesDataStore）
     implementation("androidx.datastore:datastore-preferences:1.1.1")
 
+    // 本地库 — 2026-10-02 真正启用。
+    // 之前版本目录里声明了 room 但 app 没引，依赖是"看起来有、实际没有"，
+    // 于是播放进度只能走网络，断网即丢（表现为地铁里重开文章从头播）。
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // 后台预加载 — 通勤时段把下一集拉下来
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
     implementation(libs.kotlinx.coroutines.android)
 
     // Test

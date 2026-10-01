@@ -400,11 +400,13 @@ fun ArticleDetailScreen(
                             )
                         }
                     }
-                    // CP11.0.7 P2.1: 离线预下载按钮，仅在音频就绪时显示
+                    // 离线下载：点一下真下载，已下载时点一下删除（2026-10-02 从装饰品改成可用）
                     if (uiState.status == DistillStatus.READY && uiState.audioUrl != null) {
                         DownloadButton(
                             articleId = articleId,
                             audioUrl = uiState.audioUrl,
+                            title = uiState.article?.title,
+                            durationSec = uiState.audioDurationSec,
                         )
                     }
                     // CP-DELETE: 删除入口

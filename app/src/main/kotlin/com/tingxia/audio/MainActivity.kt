@@ -80,8 +80,24 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var feedbackRepository: FeedbackRepository
 
+    /** 倍速/音色偏好的启动期加载（2026-10-02）——见 PlaybackPreferenceInitializer。 */
+    @Inject
+    lateinit var playbackPreferenceInitializer: com.tingxia.audio.data.repository.PlaybackPreferenceInitializer
+
+    @Inject
+    lateinit var prefetchScheduler: com.tingxia.audio.data.sync.PrefetchScheduler
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // 播放偏好必须在**启动时**加载，而不是等某个界面构造 ViewModel。
+        // 放在这里是为了让「从任何入口播放」都拿到用户设过的倍速。
+        lifecycleScope.launch {
+            playbackPreferenceInitializer.ensureLoaded()
+            // 顺手补传断网期间攒下的播放进度 + 校准下载台账
+            prefetchScheduler.syncNow()
+        }
+
         // 让 AudioPlayerService（MediaSessionService）常驻，系统方可接管锁屏 / 通知控制
         // （共享 ExoPlayer 由 Hilt PlayerModule 提供，PlayerController 与 Service 共用同一实例）
         startAudioService()
@@ -196,6 +212,8 @@ private fun AppNavigation() {
     val activity = LocalContext.current as MainActivity
     val favoritesRepository = activity.favoritesRepository
     val feedbackRepository = activity.feedbackRepository
+    // 2026-10-02: 播放队列需要它（上一首/下一首）
+    val playerController = activity.playerController
 
     // 退出登录必须操作 **AuthRoot 那个** AuthViewModel（Activity 作用域），
     // 这里的 hiltViewModel() 在 NavHost 之外解析，拿到的仍是同一实例。
@@ -249,6 +267,7 @@ private fun AppNavigation() {
         }
         composable("list") {
             ArticleListScreen(
+                playerController = playerController,
                 onNavigateToDetail = { id ->
                     navController.navigate("detail/$id")
                 },
@@ -400,6 +419,7 @@ private fun AppNavigation() {
         // 设置页（CP5.6.0 / §4 G2 个性化开关 UI 灰置）
         composable("settings") {
             SettingsScreen(
+                feedbackRepository = feedbackRepository,
                 onBack = { navController.popBackStack() },
                 onNavigateToOfflineDownload = { navController.navigate("offline_download") },
                 onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },

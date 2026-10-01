@@ -182,9 +182,30 @@ class PlayerController @Inject constructor(
     private val progressScope = CoroutineScope(Dispatchers.IO + Job())
     private var progressJob: Job? = null
 
+    /**
+     * 本地进度仓库（2026-10-02）。
+     *
+     * 之前进度只写网络，异常 `Log.w` 就丢了；断网期间播的进度一个字节都没留下。
+     * 现在先落 Room（本地），再异步同步服务端 —— 网络失败只是"晚点补传"，
+     * 不是"丢失"。
+     */
+    @Volatile
+    private var progressRepository: com.tingxia.audio.data.repository.ProgressRepository? = null
+
     /** 设置 ProgressApi（由 Hilt 注入，ArticleDetailViewModel 调用）。 */
     fun setProgressApi(api: ProgressApi) {
         progressApi = api
+    }
+
+    /**
+     * 设置本地进度仓库。
+     *
+     * 走 Hilt EntryPoint 取而不是构造注入：PlayerController 是 @Singleton 且
+     * 在 [com.tingxia.audio.audio.AudioPlayerService] 里也会建一份，构造注入
+     * 会形成环。
+     */
+    fun setProgressRepository(repo: com.tingxia.audio.data.repository.ProgressRepository) {
+        progressRepository = repo
     }
 
     /**
@@ -211,17 +232,25 @@ class PlayerController @Inject constructor(
         if (now - lastReportTimeMs < PROGRESS_REPORT_INTERVAL_MS) return
 
         lastReportTimeMs = now
-        Log.i("ProgressApi", "posted position=$positionSec articleId=$articleId")
+        val durationMs = _duration.value
 
-        // Dispatchers.IO 协程执行网络请求（不复用 Thread，每 10s 启动一个轻量协程）
         progressScope.launch {
+            // ① 先落本地：这一步不该依赖网络。地铁里断网时它是唯一的真相来源。
+            progressRepository?.let { repo ->
+                runCatching {
+                    repo.saveLocalProgress(articleId, positionMs, durationMs)
+                }.onFailure { Log.w(TAG, "本地进度落盘失败: ${it.message}") }
+            }
+
+            // ② 再同步服务端：失败不丢数据，留在 Room 里等 ProgressSyncWorker 补传。
             try {
                 api.updateProgress(
                     articleId,
                     ProgressUpdateRequest(position_sec = positionSec, total_sec = null)
                 )
+                progressRepository?.let { runCatching { it.markSyncedLocally(articleId) } }
             } catch (e: Exception) {
-                Log.w("ProgressApi", "failed to report progress: ${e.message}")
+                Log.w("ProgressApi", "服务端上报失败（已存本地，稍后补传）: ${e.message}")
             }
         }
     }
@@ -268,6 +297,74 @@ class PlayerController @Inject constructor(
         resetListenCompletionFlag()
         startPolling()
         startProgressReporting()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 播放队列（2026-10-02 新增）
+    //
+    // 之前 FullScreenPlayerScreen 的「上一首 / 下一首」是
+    // `onSkipPrevious = { /* 占位 */ }` —— 点下去毫无反应。
+    // 根因不是按钮没接线，而是**整条链路没有队列**（本类原先 queue 命中数为 0）：
+    // 播放器只认「当前这一篇」，不知道前后是什么。
+    //
+    // 队列由列表页灌入（把当前可见的 ready 文章按顺序排好），播放器只负责
+    // 维护游标和切换 —— 职责分明，列表刷新不影响正在播的那一篇。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** 队列条目。最小集：能播就行，其余 UI 需要的字段让界面自己带。 */
+    data class QueueItem(
+        val articleId: String,
+        val audioUrl: String,
+        val title: String? = null,
+        val author: String? = null,
+    )
+
+    private val _queue = MutableStateFlow<List<QueueItem>>(emptyList())
+    private val _queueIndex = MutableStateFlow(-1)
+
+    val hasNext: Boolean get() = _queueIndex.value in 0 until _queue.value.size - 1
+    val hasPrevious: Boolean get() = _queueIndex.value > 0
+
+    /**
+     * 灌入队列。列表页在数据加载完时调。
+     *
+     * 已经在播的那一篇会被定位到队列中的对应位置，这样「下一首」才是
+     * 用户视线里那篇，而不是从头开始。
+     */
+    fun setQueue(items: List<QueueItem>) {
+        if (items.isEmpty()) {
+            _queue.value = emptyList()
+            _queueIndex.value = -1
+            return
+        }
+        _queue.value = items
+        val currentId = _currentArticleId.value
+        _queueIndex.value = items.indexOfFirst { it.articleId == currentId }
+            .takeIf { it >= 0 } ?: 0
+    }
+
+    /** 跳到下一首；已在末尾则 no-op 返回 false。 */
+    fun playNext(): Boolean {
+        val items = _queue.value
+        val next = _queueIndex.value + 1
+        if (next !in items.indices) return false
+        _queueIndex.value = next
+        playQueueItem(items[next])
+        return true
+    }
+
+    /** 跳到上一首；已在开头则 no-op 返回 false。 */
+    fun playPrevious(): Boolean {
+        val items = _queue.value
+        val prev = _queueIndex.value - 1
+        if (prev !in items.indices) return false
+        _queueIndex.value = prev
+        playQueueItem(items[prev])
+        return true
+    }
+
+    private fun playQueueItem(item: QueueItem) {
+        play(item.audioUrl, item.title ?: "", articleId = item.articleId, author = item.author)
     }
 
     /**
