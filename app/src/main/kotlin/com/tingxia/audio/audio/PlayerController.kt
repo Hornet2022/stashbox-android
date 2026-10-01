@@ -244,9 +244,17 @@ class PlayerController @Inject constructor(
 
             // ② 再同步服务端：失败不丢数据，留在 Room 里等 ProgressSyncWorker 补传。
             try {
+                // 2026-10-02: 之前一直发 total_sec = null。
+                // 服务端 listening_statuses.total_sec 因此永远是 NULL —— 而
+                // 完听率正是靠 position_sec / total_sec 算的，缺了分母，
+                // 「跳过率 / 完听率 / 平均单次收听时长」这三个画像特征
+                // 就永远算不出来，个性化无从学习。
                 api.updateProgress(
                     articleId,
-                    ProgressUpdateRequest(position_sec = positionSec, total_sec = null)
+                    ProgressUpdateRequest(
+                        position_sec = positionSec,
+                        total_sec = if (durationMs > 0) (durationMs / 1000).toInt() else null,
+                    )
                 )
                 progressRepository?.let { runCatching { it.markSyncedLocally(articleId) } }
             } catch (e: Exception) {

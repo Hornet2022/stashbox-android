@@ -81,6 +81,8 @@ fun ArticleListScreen(
     feedbackRepository: FeedbackRepository? = null,
     // 2026-10-02: 供「上一首/下一首」用。把列表当播放队列灌进去。
     playerController: com.tingxia.audio.audio.PlayerController? = null,
+    // 通勤自动预加载的决策层（2026-10-02）
+    commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher? = null,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsState()
@@ -98,6 +100,12 @@ fun ArticleListScreen(
                 )
             }
         playerController?.setQueue(items)
+
+        // 通勤窗口内自动预加载下一集（闭环 3）。决策逻辑在 CommutePrefetcher，
+        // 这里只负责喂数据 —— 什么时候**不该**下载由它判断。
+        if (commutePrefetcher != null && items.isNotEmpty()) {
+            commutePrefetcher.maybePrefetch(articles, learnedWindows = null)
+        }
     }
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()

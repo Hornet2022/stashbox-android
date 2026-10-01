@@ -10,6 +10,7 @@ import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.ProgressGetResponse
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
+import com.tingxia.audio.data.local.InMemoryPlaybackProgressDao
 import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -60,7 +61,7 @@ class ArticleDetailViewModelTest {
     }
 
     private fun fakeProgressRepo(getResponse: ProgressGetResponse = ProgressGetResponse(article_id = "a", position_sec = null, total_sec = null)): ProgressRepository =
-        ProgressRepository(FakeProgressApi(getResponse, updateOk = true))
+        ProgressRepository(FakeProgressApi(getResponse, updateOk = true), InMemoryPlaybackProgressDao())
 
     private fun fakeVm(
         article: Article,

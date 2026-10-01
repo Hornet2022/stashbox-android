@@ -34,21 +34,21 @@ class LoginScreenTest {
     fun `renders title and login button`() {
         composeTestRule.setContent {
             MaterialTheme {
-                LoginScreen(onMockLogin = { loginClicked = true })
+                LoginScreen(onLogin = { loginClicked = true })
             }
         }
         composeTestRule.onNodeWithText("听匣").assertIsDisplayed()
-        composeTestRule.onNodeWithText("微信登录（mock）").assertIsDisplayed()
+        composeTestRule.onNodeWithText("微信登录").assertIsDisplayed()
     }
 
     @Test
-    fun `clicking button calls onMockLogin`() {
+    fun `clicking button calls onLogin`() {
         composeTestRule.setContent {
             MaterialTheme {
-                LoginScreen(onMockLogin = { loginClicked = true })
+                LoginScreen(onLogin = { loginClicked = true })
             }
         }
-        composeTestRule.onNodeWithText("微信登录（mock）").performClick()
-        assertTrue("onMockLogin 应被调用", loginClicked)
+        composeTestRule.onNodeWithText("微信登录").performClick()
+        assertTrue("onLogin 应被调用", loginClicked)
     }
 }

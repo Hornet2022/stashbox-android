@@ -87,6 +87,10 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var prefetchScheduler: com.tingxia.audio.data.sync.PrefetchScheduler
 
+    /** 通勤自动预加载决策层 */
+    @Inject
+    lateinit var commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -214,6 +218,7 @@ private fun AppNavigation() {
     val feedbackRepository = activity.feedbackRepository
     // 2026-10-02: 播放队列需要它（上一首/下一首）
     val playerController = activity.playerController
+    val commutePrefetcher = activity.commutePrefetcher
 
     // 退出登录必须操作 **AuthRoot 那个** AuthViewModel（Activity 作用域），
     // 这里的 hiltViewModel() 在 NavHost 之外解析，拿到的仍是同一实例。
@@ -268,6 +273,7 @@ private fun AppNavigation() {
         composable("list") {
             ArticleListScreen(
                 playerController = playerController,
+                commutePrefetcher = commutePrefetcher,
                 onNavigateToDetail = { id ->
                     navController.navigate("detail/$id")
                 },

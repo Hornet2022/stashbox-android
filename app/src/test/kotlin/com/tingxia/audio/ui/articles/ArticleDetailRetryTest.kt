@@ -10,6 +10,7 @@ import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
+import com.tingxia.audio.data.local.InMemoryPlaybackProgressDao
 import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -36,6 +37,8 @@ import org.robolectric.annotation.Config
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
+
+
 class ArticleDetailRetryTest {
 
     private val testDispatcher = StandardTestDispatcher()
@@ -90,7 +93,7 @@ class ArticleDetailRetryTest {
         )
         return ArticleDetailViewModel(
             repository = repo,
-            progressRepository = ProgressRepository(FakeProgressApi()),
+            progressRepository = ProgressRepository(FakeProgressApi(), InMemoryPlaybackProgressDao()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
@@ -125,7 +128,7 @@ class ArticleDetailRetryTest {
                         throw RuntimeException("retry endpoint down")
                 }
             ),
-            progressRepository = ProgressRepository(FakeProgressApi()),
+            progressRepository = ProgressRepository(FakeProgressApi(), InMemoryPlaybackProgressDao()),
             progressApi = FakeProgressApi(),
             playerController = fakeController(),
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
