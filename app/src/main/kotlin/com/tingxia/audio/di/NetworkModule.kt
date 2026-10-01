@@ -52,6 +52,9 @@ object NetworkModule {
     @Singleton
     fun provideOkHttpClient(authInterceptor: AuthInterceptor): OkHttpClient =
         OkHttpClient.Builder()
+            // CP-ANDROID-MDNS-FALLBACK：mDNS 解析失败时降级到局域网 IP。
+            // host 仍是 Mac-mini.local，所以明文白名单不用动（见 MdnsFallbackDns）。
+            .dns(MdnsFallbackDns())
             // JWT 鉴权：自动附加 Authorization: Bearer ***
             .addInterceptor(authInterceptor)
             // CP11.0.6 P2.2: 响应时间埋点（放在 auth 后，这样可以拿到最终 URL）

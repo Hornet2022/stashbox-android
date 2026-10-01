@@ -52,6 +52,35 @@ object BaseUrls {
     fun gatewayBaseUrl(): String =
         if (isRunningOnEmulator()) EMULATOR_BASE else "http://$REAL_DEVICE_HOST:$REAL_DEVICE_PORT/"
 
+    /**
+     * CP-ANDROID-MDNS-FALLBACK：mDNS 解析失败时的兜底局域网 IP。
+     *
+     * **为什么需要兜底** —— mDNS 在部分真机上根本不工作。实测华为 JEF-AN20
+     * （Android 12 / EMUI）与 Mac mini 同网段（192.168.3.12 ↔ 192.168.3.100）、
+     * 手机浏览器直接访问 `http://192.168.3.100:8100/healthz` 能拿到
+     * `{"status":"ok"}`，但 `mac-mini.local` 一律 `UnknownHostException`。
+     * 于是 App 能装能启动，登录却直接失败（`POST /api/v1/auth/token` 报
+     * `Unable to resolve host "mac-mini.local"`）—— 编译期和单测都发现不了，
+     * 只有真机能暴露。
+     *
+     * 失败不一定来自设备：路由器不开组播反射 / AP 隔离也会造成同样现象，
+     * 换设备未必能绕开。所以不能只靠「mDNS 一定可用」这个假设。
+     *
+     * **兜底怎么生效** —— 走 [MdnsFallbackDns]（OkHttp 的可插拔 `Dns`），
+     * **不改 URL 里的主机名**。这一点很关键：Android 的明文校验
+     * （`network_security_config.xml`）看的是 URL 的 host，不是解析后的 IP，
+     * 所以 host 仍是 `mac-mini.local` 时，现有白名单就继续生效，
+     * 不必把局域网 IP 也加进白名单、少一处会随 IP 漂移而失效的配置。
+     *
+     * ⚠️ 这个 IP 是**当前 Mac mini 的 DHCP 地址，换网络后要改这里重编译**。
+     * 它只影响「mDNS 恰好不可用」这一个降级路径；mDNS 正常时压根不会用到。
+     * 真要根治，应该上公网域名（见 CP-ANDROID-PUBLIC-DOMAIN）。
+     */
+    const val FALLBACK_LAN_IP = "192.168.3.100"
+
+    /** 需要兜底判断的主机名。别的 host 解析失败要照常抛错，别把真实 DNS 问题一起吞掉。 */
+    const val REAL_DEVICE_HOST_NAME = REAL_DEVICE_HOST
+
     private fun isRunningOnEmulator(): Boolean =
         Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
             Build.FINGERPRINT.contains("sdk_gphone", ignoreCase = true) ||

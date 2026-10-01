@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.Log
 import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.di.BaseUrls
+import com.tingxia.audio.di.MdnsFallbackDns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -37,6 +38,9 @@ object D9Receiver {
 
     private val client by lazy {
         OkHttpClient.Builder()
+            // CP-ANDROID-MDNS-FALLBACK：D9 走裸 OkHttpClient（不过 Retrofit），
+            // 所以这里也要单独注入降级 Dns，否则分享回跳在 mDNS 不可用的真机上必然失败。
+            .dns(MdnsFallbackDns())
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
