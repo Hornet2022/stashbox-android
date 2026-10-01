@@ -23,7 +23,17 @@
           所以这里写 mac-mini.local 即可，请求时用 Mac-mini.local 也能匹配上。
         -->
         <domain includeSubdomains="true">mac-mini.local</domain>
-        <!-- 历史局域网 IP（172.16.5.28 / en8 USB 网卡），保留兼容旧包与直连调试 -->
+        <!--
+          局域网 IP：真机（华为 JEF-AN20）实测解析不了 mac-mini.local，
+          客户端的 OkHttp 有 MdnsFallbackDns 能把 mDNS 兜底到 IP，
+          但**音频走 ExoPlayer 自己的 DefaultHttpDataSource，它不走那个 Dns**，
+          直接拿 audio_url 里的 host 去连 —— 所以 audio_url 用 IP 时，
+          这个 IP 必须在明文白名单里，否则报
+          `IOException: Cleartext HTTP traffic to <ip> not permitted`
+          （症状：详情页渲染正常、一按播放就 ExoPlaybackException: Source error）。
+        -->
+        <domain includeSubdomains="true">192.168.3.100</domain>
+        <!-- 历史局域网 IP（172.16.5.28 / en8 USB 网卡、172.16.1.90），保留兼容旧包与直连调试 -->
         <domain includeSubdomains="true">172.16.5.28</domain>
         <domain includeSubdomains="true">172.16.1.90</domain>
         <domain includeSubdomains="true">localhost</domain>
