@@ -42,15 +42,45 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /** 微信登录（CP4.6 mock：dev-only 端点返回固定 token）。[userId] 可指定联调账号。 */
-    fun mockWechatLogin(userId: String? = null) {
+    /**
+     * 真实登录：走 `wechat-login`（唯一上线路径）。
+     *
+     * [code] 在接真微信 OAuth 前传稳定串即可（服务端按 `wx_<code>` 查/建用户）。
+     */
+    fun login(code: String) {
         viewModelScope.launch {
             _state.value = AuthState.Loading
             try {
-                val resp = authRepository.mockWechatLogin(userId) // mock，CP4.7 接真 OAuth
+                val resp = authRepository.wechatLogin(code)
                 _state.value = AuthState.LoggedIn(resp.userId)
             } catch (e: Exception) {
                 _state.value = AuthState.Error(friendlyError(e, fallback = "登录失败，请稍后再试"))
+            }
+        }
+    }
+
+    /**
+     * 联调登录：以指定 user_id 换取 token（debug 包专用）。
+     *
+     * 依赖 gateway 的 dev-only 端点，服务端默认关闭 → 未开启时返回 403，
+     * 这里把它翻译成一句能照做的提示，而不是甩个 HTTP 错误给用户。
+     */
+    fun devLoginAs(userId: String) {
+        viewModelScope.launch {
+            _state.value = AuthState.Loading
+            try {
+                val resp = authRepository.devImpersonate(userId)
+                _state.value = AuthState.LoggedIn(resp.userId)
+            } catch (e: Exception) {
+                val msg = friendlyError(e, fallback = "联调登录失败")
+                _state.value = AuthState.Error(
+                    if (msg.contains("403") || msg.contains("dev token")) {
+                        "联调登录被服务端拒绝：gateway 未开启 dev token 端点。\n" +
+                            "如需在真机上冒充指定账号，请让服务端设 STASHBOX_ALLOW_DEV_TOKEN=1 后重启。"
+                    } else {
+                        msg
+                    }
+                )
             }
         }
     }

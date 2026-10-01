@@ -1,7 +1,6 @@
 package com.tingxia.audio.auth
 
 import android.util.Base64
-import com.tingxia.audio.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -11,9 +10,16 @@ import javax.inject.Inject
 /**
  * 鉴权数据仓库：包装 [AuthApi] 与 [TokenManager]，向 ViewModel 屏蔽网络 / 存储细节。
  *
- * 2026-09-22: [mockWechatLogin] 改走 gateway `/api/v1/auth/token`（dev-only mock 端点），
- * 因为 user-service `/api/v1/auth/wechat-login` 当前返回 500。客户端从 JWT payload 解析 user_id。
- * 生产应走 wechatLogin + 真实微信 OAuth（待 user-service 修复后切回）。
+ * ## 登录路径（2026-10-02 修正）
+ *
+ * 之前这里只有一条路：走 gateway 的 `/api/v1/auth/token` 签发 mock JWT，注释说
+ * 「user-service 的 wechat-login 当前返回 500」。**那个 500 早已不复存在** —— 实测
+ * `wechat-login` 正常返回，因此本类改回以 [wechatLogin] 为唯一真实登录路径。
+ *
+ * 走 `issueToken` 的那个端点是一个**无鉴权后门**：任何能访问网关的人传任意
+ * user_id 就能拿到该账号的真 token。它已改为默认关闭（需服务端显式设
+ * `STASHBOX_ALLOW_DEV_TOKEN=1`，且 prod 环境即便设了也拒绝），所以这里只把它
+ * 保留成**显式的联调通道**，供需要在真机上冒充指定账号的开发者使用。
  */
 class AuthRepository @Inject constructor(
     private val api: AuthApi,
@@ -28,28 +34,44 @@ class AuthRepository @Inject constructor(
 
     data class LoginResult(
         val accessToken: String,
-        val refreshToken: String,
+        val refreshToken: String?,
         val userId: Long,
     )
 
     /**
-     * 走 gateway `/api/v1/auth/token`（dev-only mock）拿真 JWT。
+     * 真实登录：微信 code 换 token（user-service 实现，按 code 派生稳定 open_id）。
      *
-     * - [userId] 留空时回退到 [BuildConfig.DEBUG_USER_ID]（默认 "6892"），
-     *   允许 LoginScreen 在 debug 包内手动指定任意 user_id 以便联调多账号。
-     * - 响应无 user_id 字段，从 JWT payload 解析（`sub` 字段）
-     * - 优先用服务端下发的 refresh_token，缺失才回落占位符（兼容旧服务端）
-     *
-     * TODO: user-service wechat-login 修复后切回 [AuthApi.wechatLogin]
+     * 这是**上线后的唯一登录路径**。code 在联调期可传任意稳定串
+     * （如 `dev_user_1`），服务端会按 `wx_<code>` 查/建用户。
      */
-    suspend fun mockWechatLogin(userId: String? = null): LoginResult {
-        val uid = userId?.takeIf { it.isNotBlank() } ?: BuildConfig.DEBUG_USER_ID
-        val resp = api.issueToken(TokenIssueRequest(user_id = uid))
-        val userIdParsed = parseUserIdFromJwt(resp.access_token)
-        // CP 修复：gateway 现下发真实 refresh_token，用它做续期；缺失回落占位符
-        val refresh = resp.refresh_token ?: "mock_refresh_${userIdParsed}_cp7_4"
-        tokenManager.saveTokens(resp.access_token, refresh, userIdParsed)
-        return LoginResult(resp.access_token, refresh, userIdParsed)
+    suspend fun wechatLogin(code: String): LoginResult {
+        val resp = api.wechatLogin(WechatLoginRequest(code))
+        val uid = resp.user_id.toLongOrNull()
+            ?: throw IllegalStateException("服务端返回的 user_id 非法: ${resp.user_id}")
+        // wechat-login 实际会下发 refresh_token（早期注释说"不返回"已过时）。
+        // 缺了就直接失败 —— 拿不到 refresh 意味着 access 过期后无法续期，
+        // 静默存个占位符只会让用户几小时后莫名其妙被登出。
+        val refresh = resp.refresh_token
+            ?: throw IllegalStateException("服务端未下发 refresh_token，无法保证会话续期")
+        tokenManager.saveTokens(resp.access_token, refresh, uid)
+        return LoginResult(resp.access_token, refresh, uid)
+    }
+
+    /**
+     * 联调专用：直接以指定 user_id 换取 token。
+     *
+     * ⚠️ 依赖 gateway 的 dev-only 端点，该端点**默认关闭**。服务端没设
+     * `STASHBOX_ALLOW_DEV_TOKEN=1` 时会返回 403 —— 这是预期行为，请让开发者
+     * 显式开启，而不是把这里改回无条件调用。
+     *
+     * 仅在真机联调需要冒充某个已有账号（例如带历史数据的 user 1）时使用。
+     */
+    suspend fun devImpersonate(userId: String): LoginResult {
+        val resp = api.issueToken(TokenIssueRequest(user_id = userId))
+        val parsed = parseUserIdFromJwt(resp.access_token)
+        val refresh = resp.refresh_token ?: "dev_refresh_${parsed}"
+        tokenManager.saveTokens(resp.access_token, refresh, parsed)
+        return LoginResult(resp.access_token, refresh, parsed)
     }
 
     /**

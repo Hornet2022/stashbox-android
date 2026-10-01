@@ -34,6 +34,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
 import androidx.navigation.navArgument
+import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.audio.AudioPlayerService
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.share.D9Receiver
@@ -151,7 +152,8 @@ private fun AuthRoot() {
         is AuthState.Loading,
         is AuthState.Error,
         -> LoginScreen(
-            onMockLogin = { uid -> viewModel.mockWechatLogin(uid) },
+            onLogin = { code -> viewModel.login(code) },
+            onDevLogin = if (BuildConfig.DEBUG) { uid -> viewModel.devLoginAs(uid) } else null,
             errorMessage = (state as? AuthState.Error)?.message,
             isLoading = state is AuthState.Loading,
         )

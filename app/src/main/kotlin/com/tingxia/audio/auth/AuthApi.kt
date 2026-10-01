@@ -8,11 +8,12 @@ import retrofit2.http.POST
 /**
  * 用户鉴权 API（user-service，base url 见 [com.tingxia.audio.di.AppModule]）。
  *
- * CP4.6 仅 mock 微信登录；[wechatLogin] 真实调用留待 CP4.7 接真微信 OAuth。
+ * [wechatLogin] 是**唯一的上线登录路径**（2026-10-02 实测正常；此前注释里的
+ * "返回 500" 早已不成立）。[issueToken] 是 dev-only 的联调后门，默认关闭。
  */
 interface AuthApi {
 
-    /** POST /api/v1/auth/wechat-login → 微信 code 换 token（user-service 实现，当前 500） */
+    /** POST /api/v1/auth/wechat-login → code 换 token（user-service 按 `wx_<code>` 查/建用户） */
     @POST("api/v1/auth/wechat-login")
     suspend fun wechatLogin(@Body req: WechatLoginRequest): AuthResponse
 
@@ -29,10 +30,10 @@ interface AuthApi {
     suspend fun me(): UserInfoResponse
 
     /**
-     * POST /api/v1/auth/token → gateway dev-only mock：直接传 user_id 拿真 JWT。
+     * POST /api/v1/auth/token → gateway **dev-only 后门**：直接传 user_id 拿真 JWT。
      *
-     * 仅供 Android 端本地联调，绕过 user-service wechat-login 500 错误（2026-09-22 发现）。
-     * 生产应走 wechatLogin + 真实微信 OAuth。
+     * ⚠️ 该端点 2026-10-02 起默认关闭（需服务端 `STASHBOX_ALLOW_DEV_TOKEN=1`，
+     * 且 prod 环境即便设了也 403）。只保留给真机联调需要冒充指定账号的场景。
      */
     @POST("api/v1/auth/token")
     suspend fun issueToken(@Body req: TokenIssueRequest): TokenIssueResponse
