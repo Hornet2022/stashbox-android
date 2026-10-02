@@ -404,6 +404,16 @@ private fun AppNavigation() {
                 onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
                 initialTag = tag,
                 feedbackRepository = feedbackRepository,
+                // 2026-10-03：这两条原来没传。
+                // playerController 决定「上一首/下一首」有没有队列可走 ——
+                //   队列就是由这个参数灌进去的。不传的话，从「主题标签」
+                //   点进来这一屏，播放器里这两颗键是灰的。
+                // commutePrefetcher 决定通勤窗口到点时会不会预加载 ——
+                //   不传的话同一条路径上通勤预加载整个不工作。
+                // 也就是说同一个 ArticleListScreen，走「全部」进来能用、
+                // 走「某个标签」进来就哑了，而用户看不出这两个入口的区别。
+                playerController = playerController,
+                commutePrefetcher = commutePrefetcher,
             )
         }
         // 2026-10-03：删掉 fullscreen_player 路由。它和上面的 "player"

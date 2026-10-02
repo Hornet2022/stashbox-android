@@ -32,6 +32,10 @@ import com.tingxia.audio.data.model.Tag
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,13 +85,29 @@ fun TagSubscriptionScreen(
                 }
             }
             else -> {
-                TagList(
-                    tags = uiState.tags,
-                    subscribedIds = uiState.subscribedIds,
-                    onToggle = viewModel::toggleTag,
-                    onTagClick = onTagClick,
+                // 2026-10-03：补下拉刷新。
+                // 通知 / 我的收藏 / 稍后听 / 我的反馈 四个列表都有 PullToRefreshBox，
+                // 只有这一屏没有。可这一屏恰恰是最需要刷新的：订阅状态是
+                // 别的设备 / 后台改的，用户切回来看到的还是旧的开关状态，
+                // 而开关一拨是真实写库的，状态错了会直接误导操作。
+                var isRefreshing by remember { mutableStateOf(false) }
+                PullToRefreshBox(
+                    // loadTags() 内部会把 isLoading 置 true 再落回 false，
+                    // 这里额外等它归零才收指示器，避免刷新动画一闪而过。
+                    isRefreshing = isRefreshing && uiState.isLoading,
+                    onRefresh = {
+                        isRefreshing = true
+                        viewModel.loadTags()
+                    },
                     modifier = Modifier.padding(innerPadding),
-                )
+                ) {
+                    TagList(
+                        tags = uiState.tags,
+                        subscribedIds = uiState.subscribedIds,
+                        onToggle = viewModel::toggleTag,
+                        onTagClick = onTagClick,
+                    )
+                }
             }
         }
     }
