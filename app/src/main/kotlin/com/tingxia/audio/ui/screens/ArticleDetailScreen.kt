@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
@@ -335,9 +336,27 @@ fun ArticleDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(article?.title ?: "详情") },
+                // 原来直接 `Text(article?.title)`，没有 maxLines/overflow。
+                // 文章标题动辄三四十个字（少数派、Solidot 的正文标题），
+                // 撑开之后会直接把左侧「返回」和右侧「收藏/稍后听/评分」挤出
+                // 屏幕 —— 顶栏固定高度，溢出部分没有第二行可去。
+                // 正文主体里本来就有完整标题（大号），顶栏这里只保留一行
+                // 截断的上下文，滚动时还能认出自己在哪一篇。
+                title = {
+                    Text(
+                        text = article?.title ?: "详情",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("返回") }
+                    // 其余 9 个屏（剪藏/设置/蒸馏/离线预加载…）统一用
+                    // AutoMirrored 箭头图标，这里原来是唯一用文字「返回」的。
+                    // 文字按钮宽约 60px，在长标题场景下会把本就紧张的顶栏
+                    // 再切掉三分之一，正好是标题被挤爆的帮凶之一。
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
                 },
                 actions = {
                     if (favoritesRepository != null) {
