@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -72,13 +73,33 @@ object DistillNotifier {
         // 之前写成 id.toString() 会拼出 stashbox://detail/-123456 这种打不开的链接。
         val notifyId = articleId.hashCode()
         ensureChannel(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+
+        // 权限门必须按 **targetSdk** 判断，不能按系统版本（SDK_INT）。
+        //
+        // 真机实测（华为 JEF-AN20 / Android 12 / SDK 31，2026-10-02）：
+        // 本项目 targetSdk=35，而 Android 把「targetSdk≥33 的 app 必须有
+        // POST_NOTIFICATIONS」这条规则**回移到了 Android 12**。原判断写成
+        // `Build.VERSION.SDK_INT >= TIRAMISU`，在 SDK 31 上为 false → 检查被跳过 →
+        // 直接调 notify() → 系统静默丢弃：
+        //   HwNotificationService: isNeedInterceptStart true, interceptionState:BACKGROUND
+        //   NotificationService: blockNotificationByPermission,
+        //       Suppressing notification from package com.tingxia.audio.debug
+        // 现象是「Worker 跑到了、渠道建了、notify() 调了，但通知栏什么都没有」，
+        // 而且不报任何错 —— 只看「有没有调 notify()」会误判成成功。
+        //
+        // 判据是 targetSdk 不是系统版本：门槛由 app 自己决定，与手机是 12 还是 14 无关。
+        if (requiresNotificationPermission(context) &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            // 没权限就静默跳过：通知是锦上添花，不能因此让 Worker 失败
+            Log.w(
+                "DistillNotifier",
+                "POST_NOTIFICATIONS 未授权，通知被系统丢弃（targetSdk=" +
+                    "${context.applicationInfo.targetSdkVersion}, device=${Build.VERSION.SDK_INT}）",
+            )
             return
         }
+
         // 复用详情页已注册的 deep link（MainActivity: route "detail/{id}" +
         // navDeepLink "stashbox://detail/{id}"），不用自己再造一套 Intent extra 跳转。
         val intent = Intent(
@@ -103,6 +124,28 @@ object DistillNotifier {
             .setAutoCancel(true)
             .setContentIntent(pending)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(notifyId, notification) }
+        runCatching {
+            NotificationManagerCompat.from(context).notify(notifyId, notification)
+        }.onFailure {
+            // 之前 runCatching 什么都不做，失败完全不可见 —— 这正是上面那个 bug
+            // 难被发现的原因。至少要留下一行日志。
+            Log.w("DistillNotifier", "notify 失败: ${it.message}", it)
+        }
     }
+
+    /**
+     * 本 app 是否需要 POST_NOTIFICATIONS —— 判据是 **targetSdk ≥ 33**。
+     *
+     * 不能写 `SDK_INT >= TIRAMISU`：targetSdk 35 的 app 跑在 Android 12 上时，
+     * 系统照样强制要求这个权限，而按 SDK_INT 判断会漏掉。
+     */
+    fun requiresNotificationPermission(context: Context): Boolean =
+        context.applicationInfo.targetSdkVersion >= Build.VERSION_CODES.TIRAMISU
+
+    /** 供调用方（Worker / UI）查询当前是否已具备发通知的条件。 */
+    fun canNotify(context: Context): Boolean =
+        !requiresNotificationPermission(context) ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
 }
