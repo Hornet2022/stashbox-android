@@ -39,6 +39,35 @@ android {
         debug {
             applicationIdSuffix = ".debug"
         }
+        /**
+         * minifyDebug：专用于**在真机上验证 R8**（2026-10-03）。
+         *
+         * 为什么需要单独一个变体：直接在 debug 上开 isMinifyEnabled 是**无效的** ——
+         * AGP 会警告 "BuildType 'debug' is both debuggable and has 'isMinifyEnabled'
+         * set to true. All code optimizations and obfuscation are disabled for
+         * debuggable builds."，等于根本没跑 R8，验证了个寂寞。
+         *
+         * 所以这里复制一份 release 的完整配置（混淆 + 裁剪 + 同一套 proguard
+         * 规则），只把签名换成 debug key（能装）、加上 .minifydebug 后缀
+         * （和正式数据、常规 debug 包都隔离）。这才是「release 的混淆效果」的
+         * 真机验证。
+         *
+         * 2026-10-03 已用它完成一次真机验证（华为 JEF-AN20 / Android 12）：
+         * 启动 / Hilt 注入 / Compose 渲染 / 图标资源 / Retrofit 请求 /
+         * kotlinx-serialization 反序列化 / 导航 / media3 实际播放全部通过，
+         * 0 次 FATAL。以后改了 proguard 规则可以再用它复验。
+         */
+        create("minifyDebug") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".minifydebug"
+            // ⚠️ isDebuggable 必须 false：AGP 见到 debuggable + minify 组合会
+            // 直接「All code optimizations and obfuscation are disabled」，
+            // 那样虽然过了构建，但**根本没跑 R8**，验证毫无意义。
+            // 代价是崩溃栈没有行号/原类名，所以用 mapping.txt 还原。
+            isDebuggable = false
+            matchingFallbacks += listOf("release")
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
 
     compileOptions {
