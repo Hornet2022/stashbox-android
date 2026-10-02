@@ -139,23 +139,24 @@ class CaptureViewModel @Inject constructor(
                     capturedArticleId = id.ifEmpty { null },
                     url = "",
                 )
-                // P0-3 兜底：服务端 submit_article 现在会自动派蒸馏；这里保留 trigger_distill
-                // 作为 client-side 兜底（即使服务端 B1 漏修，客户端也能保证 taskId 入库可轮询）。
-                // 端点对已存在 task 的文章是 idempotent 的（不重复扣配额），安全。
-                if (id.isNotEmpty()) {
-                    try {
-                        val triggerResp = repository.distillArticle(id)
-                        android.util.Log.i(
-                            "CaptureViewModel",
-                            "distill trigger ok: taskId=${triggerResp.taskId} status=${triggerResp.status}",
-                        )
-                    } catch (e: Exception) {
-                        android.util.Log.w(
-                            "CaptureViewModel",
-                            "distill trigger failed (服务端可能已自动派): ${e.message}",
-                        )
-                    }
-                }
+                // ⚠️ 这里**不要**再补一次 distillArticle()。服务端 submit_article
+                // 已经自动派发（content-service main.py 里 trigger_distill 紧跟建文章），
+                // 客户端再调一次等于**入队两个独立的 Arq job**。
+                //
+                // 原注释写的「端点对已存在 task 的文章是 idempotent 的（不重复扣配额），安全」
+                // 只对了一半：配额确实有守卫（所以没扣两次钱），但**入队没有**。
+                // 带「已在跑就不再入队」守卫的是另一个端点 `/api/v1/distill/start`，
+                // 而这个客户端调的 `/api/v1/articles/{id}/distill` 无条件 enqueue。
+                //
+                // 实测代价（华为 JEF-AN20，2026-10-02，剪藏一篇 838 字文章）：
+                //   10:53:57 job A 开始 TTS（7 段）
+                //   11:04:58 A 完成 → 11:04:59 arq_distill_completed
+                //   11:04:59 job B 被取走（入队于 10:53:42，排队 delayed=676.97s）
+                //   11:05:13 B 重新 LLM 改写 + 全量 TTS（8 段，文字还不一样）
+                // → 单篇总耗时翻倍（~23 分钟 vs ~12），本机算力和 LLM 费用双倍，
+                //   而第一遍的音频被整个丢弃。
+                //
+                // taskId 轮询也不需要它：createArticle 的响应里已经带 taskId/status。
                 onSuccess(id)
                 loadRecent()
                 refreshQuota()   // 提交成功后 quota-1,刷新 banner

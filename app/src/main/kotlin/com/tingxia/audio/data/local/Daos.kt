@@ -18,6 +18,10 @@ interface DownloadedAudioDao {
     @Query("SELECT * FROM downloaded_audio WHERE article_id = :articleId")
     fun observeByArticle(articleId: String): Flow<DownloadedAudioEntity?>
 
+    /** 按音频 URL 查 —— 缓存对账用（Cache 的键是 URL，台账主键是 articleId）。 */
+    @Query("SELECT * FROM downloaded_audio WHERE audio_url = :audioUrl")
+    suspend fun byAudioUrl(audioUrl: String): DownloadedAudioEntity?
+
     @Query("SELECT * FROM downloaded_audio WHERE pinned = 1")
     suspend fun allPinned(): List<DownloadedAudioEntity>
 

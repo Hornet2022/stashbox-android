@@ -81,16 +81,33 @@ class OfflineDownloadManager @Inject constructor(
     /**
      * 查某个 URL 是否**已完整**缓存在本地。
      *
-     * Media3 的 `Cache.isCached(key, position, length)` 在 1.4.1 里是公开的
-     * （`javap androidx.media3.datasource.cache.Cache` 可验证），之前的
-     * 「没有公开」是误判。`CACHE_LENGTH_UNSET` 让它忽略长度、按已缓存
-     * 范围判断是否覆盖到末尾。
+     * ⚠️ 这里**不能**用 `Cache.isCached(key, position, length)`。它在
+     * `androidx.media3.datasource.cache.Cache` 上是 abstract，由 `SimpleCache` 实现，
+     * 而实现内部是 `Assertions.checkArgument(getCachedContent(key) != null)` 之后
+     * 直接 `getCachedContent(key).getCachedBytesLength(...)` —— 对**不存在的 key 抛
+     * IllegalArgumentException**。也就是说它不是「查一下在不在」，而是「断言它在」。
      *
-     * 还要过一遍 Room 台账 —— LRU 淘汰后 Cache 说不全，表里那行也得同步删掉，
-     * 否则两处状态打架。
+     * 实测后果（华为 JEF-AN20，2026-10-02）：任何没下载过的文章，打开详情页必崩 ——
+     *   java.lang.IllegalArgumentException
+     *     at CachedContent.getCachedBytesLength(CachedContent.java:184)
+     *     at SimpleCache.isCached(SimpleCache.java:461)
+     *     at OfflineDownloadManager.isCached(OfflineDownloadManager.kt:93)
+     *     at ArticleDetailScreen.kt:405
+     * 上一轮只验证了「1.4.1 有没有公开 isCached」—— 方法确实存在（javap 可证），
+     * 但**存在 ≠ 在这条调用路径上安全**，这是两件事。
+     *
+     * 安全查询用 `getCachedSpans`：Media3 保证 key 不存在时返回**空集合**而不是 null。
+     * 再叠一层台账字节数校验，避免 LRU 只留下部分 span 时误报「已下载」。
      */
-    fun isCached(audioUrl: String): Boolean =
-        cache.isCached(cacheKey(audioUrl), 0, CACHE_LENGTH_UNSET)
+    suspend fun isCached(audioUrl: String): Boolean {
+        val spans = cache.getCachedSpans(cacheKey(audioUrl))
+        if (spans.isNullOrEmpty()) return false
+        val expected = dao.byAudioUrl(audioUrl)?.fileSizeBytes
+        if (expected != null && expected > 0L) {
+            return spans.sumOf { it.length } >= expected
+        }
+        return true
+    }
 
     /**
      * 主动下载一集音频到本地缓存。
@@ -191,6 +208,16 @@ class OfflineDownloadManager @Inject constructor(
         }
     }
 
+    /**
+     * 台账里所有「已完整缓存」的音频 URL。
+     *
+     * 供 UI 订阅（StateFlow）而不是让组件同步逐条问 —— 组合期读磁盘是阻塞 IO，
+     * 逐条问还是 N 次磁盘访问。
+     */
+    suspend fun cachedUrls(): Set<String> = withContext(Dispatchers.IO) {
+        dao.all().map { it.audioUrl }.filter { isCached(it) }.toSet()
+    }
+
     suspend fun remove(articleId: String, audioUrl: String) = withContext(Dispatchers.IO) {
         cache.removeResource(cacheKey(audioUrl))
         dao.delete(articleId)
@@ -204,7 +231,9 @@ class OfflineDownloadManager @Inject constructor(
      * 表说有、文件没了，比没有这层更糟。
      */
     suspend fun reconcileWithCache() = withContext(Dispatchers.IO) {
-        val stale = dao.all().filterNot { cache.isCached(cacheKey(it.audioUrl), 0, CACHE_LENGTH_UNSET) }
+        // 走 isCached 而不是直接调 Cache.isCached —— 同样的 IllegalArgumentException
+        // 陷阱，这里是第二个调用点（LRU 对账在 App 启动期跑，等于启动即崩）。
+        val stale = dao.all().filterNot { isCached(it.audioUrl) }
         if (stale.isNotEmpty()) dao.deleteAll(stale.map { it.articleId })
         stale.map { it.articleId }
     }

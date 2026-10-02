@@ -24,6 +24,9 @@ import com.tingxia.audio.audio.DownloadState
 import com.tingxia.audio.audio.OfflineDownloadManager
 import com.tingxia.audio.data.sync.PrefetchScheduler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -47,7 +50,8 @@ fun DownloadButton(
 
     val states by viewModel.states.collectAsState()
     val state = remember(articleId, states) { states[articleId] }
-    val isCached = remember(articleId, audioUrl, states) { viewModel.isCached(audioUrl) }
+    val cachedUrls by viewModel.cachedUrls.collectAsState()
+    val isCached = remember(articleId, audioUrl, cachedUrls) { audioUrl in cachedUrls }
     val scope = rememberCoroutineScope()
 
     IconButton(
@@ -100,12 +104,31 @@ class OfflineCacheViewModel @Inject constructor(
 ) : ViewModel() {
     val states = offlineDownloadManager.states
 
-    fun isCached(audioUrl: String): Boolean = offlineDownloadManager.isCached(audioUrl)
+    /**
+     * 已完整缓存的音频 URL 集合。
+     *
+     * 刻意做成 StateFlow 而不是每次组合期同步问一次：查缓存要读磁盘 + Room，
+     * 放 `remember {}` 里是阻塞 IO；而上一版直接同步调 `Cache.isCached` 更是
+     * 遇到未缓存的文章就抛 IllegalArgumentException，把整个详情页带崩。
+     */
+    private val _cachedUrls = MutableStateFlow<Set<String>>(emptySet())
+    val cachedUrls: StateFlow<Set<String>> = _cachedUrls.asStateFlow()
+
+    init {
+        refreshCachedUrls()
+    }
+
+    private fun refreshCachedUrls() {
+        viewModelScope.launch { _cachedUrls.value = offlineDownloadManager.cachedUrls() }
+    }
+
+    fun isCached(audioUrl: String): Boolean = audioUrl in _cachedUrls.value
 
     /** 立即下载（用户主动点的，要看到反馈，不能丢给 WorkManager 静默跑）。 */
     fun download(articleId: String, audioUrl: String, title: String?, durationSec: Int?) {
         viewModelScope.launch {
             offlineDownloadManager.download(articleId, audioUrl, title, durationSec)
+            refreshCachedUrls()
         }
     }
 
