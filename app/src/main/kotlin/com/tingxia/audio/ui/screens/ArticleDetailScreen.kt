@@ -637,6 +637,7 @@ private fun AddFavoriteBottomSheet(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
     var selectedFolder by remember { mutableStateOf("default") }
     var note by remember { mutableStateOf("") }
@@ -711,8 +712,14 @@ private fun AddFavoriteBottomSheet(
                                 note = note.ifBlank { null },
                             )
                             onDismiss()
-                        } catch (_: Exception) {
-                            // silent fail
+                        } catch (e: Exception) {
+                            // 2026-10-03：原来 `// silent fail`，点「保存」毫无反馈。
+                            // 与稍后听那处同型，一并补上。
+                            Toast.makeText(
+                                context,
+                                friendlyError(e, "收藏失败"),
+                                Toast.LENGTH_LONG,
+                            ).show()
                         } finally {
                             isSubmitting = false
                         }
@@ -741,6 +748,7 @@ private fun AddLaterListenBottomSheet(
     onDismiss: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
     var selectedOption by remember { mutableStateOf("tonight") }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -804,8 +812,16 @@ private fun AddLaterListenBottomSheet(
                                 snoozeUntil = snoozeUntil,
                             )
                             onDismiss()
-                        } catch (_: Exception) {
-                            // silent fail
+                        } catch (e: Exception) {
+                            // 2026-10-03：原来 `catch (_: Exception) { // silent fail }`。
+                            // 用户点「保存」→ 转圈停了、弹窗还开着、界面零变化、无文案
+                            // 无 Toast，连点几次都这样 —— 客观上就是个死按钮。
+                            // 同文件的删除/重试都走 Toast + friendlyError，这里漏了。
+                            Toast.makeText(
+                                context,
+                                friendlyError(e, "保存稍后听失败"),
+                                Toast.LENGTH_LONG,
+                            ).show()
                         } finally {
                             isSubmitting = false
                         }

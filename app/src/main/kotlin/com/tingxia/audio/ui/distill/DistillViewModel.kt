@@ -142,11 +142,17 @@ class DistillViewModel @Inject constructor(
                 isDistilling = false,
             )
             var attempts = 0
+            // 连续网络失败次数（2026-10-03）：单次失败不终止轮询，
+            // 连续 MAX_CONSECUTIVE_POLL_FAILURES 次才放弃并给出可重试提示
+            var consecutiveFailures = 0
             while (attempts < MAX_POLL_ATTEMPTS) {
                 delay(POLL_INTERVAL_MS)
                 attempts++
                 try {
-                    when (val status = repository.getDistillStatus(taskId)) {
+                    val status = repository.getDistillStatus(taskId)
+                    // 查询成功即重置连续失败计数，避免抖动被误判成服务不可达
+                    consecutiveFailures = 0
+                    when (status) {
                         DistillStatus.READY -> {
                             // CP-DISTILL：READY → 从 distilling 桶移除
                             _uiState.value = _uiState.value.copy(
@@ -175,9 +181,27 @@ class DistillViewModel @Inject constructor(
                         else -> { /* distilling / pending：继续轮询 */ }
                     }
                 } catch (e: Exception) {
+                    // ⚠️ 2026-10-03 修两处：
+                    // ① 原来一次异常就 `return@launch` 终止轮询。一次 5xx / 65s 超时
+                    //    就让文章永远显示「处理中」，而背后没有任何任务在跑。
+                    // ② 原来把 inProgress 摘掉了，却**没把文章移出 distillingArticles 桶**
+                    //    （对比下面超时分支有移桶）—— 于是它既不在进行中、也不在失败里。
+                    consecutiveFailures++
+                    if (consecutiveFailures < MAX_CONSECUTIVE_POLL_FAILURES) {
+                        // 还没到阈值：留在 distilling 桶继续下一轮
+                        continue
+                    }
+                    val movedArticle = _uiState.value.distillingArticles
+                        .firstOrNull { it.id == articleId }
+                        ?: Article(id = articleId, url = "", title = "（已删除）")
                     _uiState.value = _uiState.value.copy(
                         inProgress = _uiState.value.inProgress - articleId,
-                        error = friendlyError(e, fallback = "蒸馏状态查询失败"),
+                        distillingArticles = _uiState.value.distillingArticles.filter { it.id != articleId },
+                        failedArticles = (_uiState.value.failedArticles + movedArticle).distinctBy { it.id },
+                        error = friendlyError(
+                            e,
+                            fallback = "连续 $MAX_CONSECUTIVE_POLL_FAILURES 次无法查询蒸馏状态，请稍后重试",
+                        ),
                     )
                     pollJobs.remove(articleId)
                     return@launch
@@ -247,6 +271,9 @@ class DistillViewModel @Inject constructor(
     companion object {
         /** 轮询间隔：3 秒 */
         const val POLL_INTERVAL_MS: Long = 3000L
+
+        /** 连续网络失败多少次才放弃轮询（2026-10-03，约 9 秒） */
+        const val MAX_CONSECUTIVE_POLL_FAILURES: Int = 3
 
         /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
         const val MAX_POLL_ATTEMPTS = 30

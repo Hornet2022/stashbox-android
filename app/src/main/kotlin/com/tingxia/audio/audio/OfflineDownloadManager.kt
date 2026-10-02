@@ -45,7 +45,17 @@ import javax.inject.Singleton
  *   把音频写进 Cache。选它是因为 CacheDataSource 只能被 ExoPlayer 驱动，
  *   无法在后台独立跑；直接写 Cache 需要 CacheSpan 句柄，比自定义目录更
  *   能与播放侧共享缓存。
+ *
+ * ⚠️ 2026-10-03 实测结论（对定义处补标注，**没用**）：
+ * 补 `@OptIn`（kotlin 版、androidx 版、位置参数、具名参数都试过）在本文件
+ * 加上之后 lint error 数**一点没变**。这个类型的 opt-in 标注只有加在
+ * **调用方**才被 lint 认 —— 所以 OfflineDownloadViewModel 那边也加了。
+ * 这里的标注留给 Kotlin 编译器（编译期确实需要），但别指望它能消 lint。
+ *
+ * 连带说明：本类的**既有**调用方 DownloadButton / PlayerModule 同样在报
+ * 同一个错（属那 16 个既有 media3 问题的范围，本次没动）。
  */
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 @UnstableApi
 @Singleton
 class OfflineDownloadManager @Inject constructor(

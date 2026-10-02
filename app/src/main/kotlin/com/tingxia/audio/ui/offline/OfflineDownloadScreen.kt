@@ -183,11 +183,16 @@ fun OfflineDownloadScreen(
             title = { Text("预热完成") },
             text = {
                 Column {
-                    Text("成功：${summary.warmed}")
+                    // 「已下载到本机」才是用户真正关心的数；「已转码」只是服务端有货。
+                    // 原来只报 warmed（转码数）却配「到本机」的文案，等于报了个假成功。
+                    Text("已下载到本机：${summary.downloaded}")
+                    if (summary.transcoded > summary.downloaded) {
+                        Text("已转码待下载：${summary.transcoded - summary.downloaded}")
+                    }
                     Text("失败：${summary.failed}")
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "转码结果在服务端保留，下次播放会自动命中本地缓存。",
+                        "已下载的音频现在断网也能听；只转码未下载的，仍需联网播放一次才会缓存。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

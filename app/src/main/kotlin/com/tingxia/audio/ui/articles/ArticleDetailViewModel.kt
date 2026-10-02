@@ -210,11 +210,22 @@ class ArticleDetailViewModel @Inject constructor(
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             var attempts = 0
+            // ⚠️ 2026-10-03 修：原来连续网络失败直接 `return@launch` 终止整个轮询，
+            // 且没有重试入口。一次地铁/电梯的基站切换、一次 5xx、一次 65s 超时就让
+            // 「剪藏 → 等 12~23 分钟 → 收听」这条主链路永久停在「处理中」——
+            // 服务端其实正常跑完了，但页面没有错误、没有重试、音频栏不出现。
+            //
+            // 改成：单次失败只记一次并继续下一轮；连续失败超过阈值才放弃，
+            // 且放弃时给出可重试的提示（而不是「静默停止」）。
+            var consecutiveFailures = 0
             while (attempts < MAX_POLL_ATTEMPTS) {
                 delay(POLL_INTERVAL_MS)
                 attempts++
                 try {
                     val resp = repository.getArticleStatus(articleId)
+                    // 成功一次就重置连续失败计数 —— 否则「好一次、坏一次」的抖动
+                    // 会在 3 个周期内累计到阈值，把其实连得上的服务误判成不可达
+                    consecutiveFailures = 0
                     when (resp.status) {
                         DistillStatus.READY -> {
                             // §1.3 响应若带 audio_url 直接用；否则回退 §1.4
@@ -252,8 +263,18 @@ class ArticleDetailViewModel @Inject constructor(
                         else -> _uiState.update { it.copy(status = resp.status) }
                     }
                 } catch (e: Exception) {
-                    _uiState.update { it.copy(pollError = e.message ?: "轮询失败") }
-                    return@launch
+                    // 单次网络失败不终止轮询：记一次、继续下一轮
+                    consecutiveFailures++
+                    _uiState.update { it.copy(pollError = e.message ?: "轮询失败，正在重试") }
+                    if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+                        _uiState.update {
+                            it.copy(
+                                pollError = "连续 ${MAX_CONSECUTIVE_POLL_FAILURES} 次无法连接服务" +
+                                    "（${e.message ?: "网络错误"}）。蒸馏可能仍在服务端进行，可下拉重试。",
+                            )
+                        }
+                        return@launch
+                    }
                 }
             }
             // 超过最大尝试次数仍未 ready → 超时
@@ -328,6 +349,14 @@ class ArticleDetailViewModel @Inject constructor(
 
         /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
         const val MAX_POLL_ATTEMPTS: Int = 30
+
+        /**
+         * 连续网络失败多少次才放弃轮询（2026-10-03）。
+         *
+         * 3 次 × 3s 间隔 ≈ 9 秒，足够熬过一次基站切换/瞬时 5xx，又不会让
+         * 真断网的用户白等太久。成功一次就重置（见 startPolling）。
+         */
+        const val MAX_CONSECUTIVE_POLL_FAILURES: Int = 3
 
         /** URL 过期前 60 秒主动刷新 */
         const val URL_REFRESH_LEAD_MS: Long = 60_000L

@@ -138,6 +138,13 @@ class OfflineCacheViewModel @Inject constructor(
     }
 
     fun remove(articleId: String, audioUrl: String) {
-        viewModelScope.launch { offlineDownloadManager.remove(articleId, audioUrl) }
+        viewModelScope.launch {
+            offlineDownloadManager.remove(articleId, audioUrl)
+            // 2026-10-03：原来漏了这一行（download() 有）。OfflineDownloadManager.remove()
+            // 只清自己的 cache/dao/_states，从不通知这个 VM 的 cachedUrls，
+            // 于是文件已经删了、✓「已下载到本地」图标还留着，且在 VM 生命周期内
+            // 永远回不去 —— 用户要么白下一遍，要么信这个 ✓ 然后进地铁发现打不开。
+            refreshCachedUrls()
+        }
     }
 }
