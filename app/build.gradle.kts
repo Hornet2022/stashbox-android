@@ -26,7 +26,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 2026-10-03 开 R8：release 一直没混淆/裁剪，实测 15MB。
+            // 开启后能裁掉未被引用的 Compose / media3 / Guava（media3-session 的
+            // 传递依赖，约 4400 个类引用，release 里实际只用其中很小一部分）。
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,6 +79,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     // CP8.5 — FullScreenPlayer 用到 SkipNext / Forward30 / Bookmark / Tag 等扩展图标
+    //
+    // 2026-10-03 实测：全项目只用 24 个图标，且命名空间全是 Filled/Outlined、
+    // 零个 Icons.Extended，看起来「只用 core 就够」——实测**不行**，删掉这行后
+    // 编译报 12+ 处 Unresolved reference，core 里缺：
+    //   Pause / GraphicEq / CloudDownload / ErrorOutline / Link / …
+    // 所以 extended 是必需的，别再当冗余依赖删。
+    // 真要减包体只能换掉这几个图标（用 Material Symbols 或自绘），不是删依赖。
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
