@@ -41,7 +41,7 @@ import com.tingxia.audio.data.model.QuotaResponse
  * CP11.0.4 P1.2 付费墙:
  * - 用户本月配额用尽时拦截提交 → 跳此页
  * - 显示当前配额 + mock 升级按钮(mock:点"升级"只弹 toast,后端无支付)
- * - P2：离线下载占位说明 — 此版未接通 service download API，仅文案承诺即将开放。
+ * - 离线下载已于 2026-10-02 真做（Room 台账 + 真下载 + 通勤预加载），不再是付费点。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -157,9 +157,12 @@ fun PaywallScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // P2：离线下载占位说明（不阻塞 — 后端暂未提供下载 API，文案承诺即将开放）
+            // 2026-10-02：离线下载已经真做了（Room 台账 + 真下载 + 通勤预加载），
+            // 这里原本写「升级后还将开放：离线下载」已经过期 —— 而且它把一个
+            // 已有的功能说成付费点，会让用户以为不付钱就用不了。
+            // 剩下的真实待办是「主题标签自动蒸馏」。
             Text(
-                text = "升级后还将开放：离线下载 / 主题标签自动蒸馏",
+                text = "升级后还将开放：主题标签自动蒸馏",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
