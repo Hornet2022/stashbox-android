@@ -38,6 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -82,7 +84,6 @@ fun HomeScreen(
     onNavigateToReview: () -> Unit = {},
     onNavigateToArticleList: () -> Unit = {},
     onNavigateToDetail: (String) -> Unit = {},
-    onNavigateToFullscreenPlayer: () -> Unit = {},
     onNavigateToOfflineDownload: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     viewModel: ArticleListViewModel = hiltViewModel(),
@@ -198,7 +199,8 @@ fun HomeScreen(
 
 @Composable
 private fun SkillCard(skill: SkillItem, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.95f else 1f,
         animationSpec = tween(durationMillis = 160),
@@ -208,10 +210,15 @@ private fun SkillCard(skill: SkillItem, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .scale(scale)
-            .clickable {
-                pressed = true
-                onClick()
-            },
+            // 2026-10-03：原来 `clickable { pressed = true; onClick() }` ——
+            // pressed 只被置 true，永远没有复位的那一行。点一次之后，
+            // 卡片会缩到 0.95 并**卡在那个尺寸**，缩到一半的卡片比
+            // 静止时更显得没做完。正确做法是让 interactionSource 驱动
+            // 按下态，抬手/取消/移出时由框架自己复位。
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+            ) { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,

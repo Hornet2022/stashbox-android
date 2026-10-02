@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.QuotaResponse
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 
 /**
  * CP11.0.4 P1.2 付费墙:
@@ -64,6 +66,13 @@ fun PaywallScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                // 2026-10-03：这一屏原来整列不可滚动。内容是
+                // 120dp 星星 + 标题 + 副标题 + 配额行 + 三张特性卡 + 升级按钮，
+                // 竖着叠完约 620dp；加上 TopAppBar 和 40dp 顶部留白，
+                // 6.1 寸以外的机器和任何放大过的系统字号下，底部的
+                // 「升级会员」按钮直接掉出屏幕 —— 这一屏存在的全部意义
+                // 就是那一个按钮，用户却看不到、点不到。
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

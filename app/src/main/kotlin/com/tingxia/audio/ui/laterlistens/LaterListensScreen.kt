@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +44,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.remote.LaterListen
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +73,17 @@ fun LaterListensScreen(
         topBar = {
             TopAppBar(
                 title = { Text("稍后听") },
+                // 2026-10-03：这一屏原来只有标题、没有任何返回入口。
+                // 五个二级屏全都一样：进来的路是「从别处跳过来」，
+                // 退回去的路只剩系统返回手势和底部系统导航的返回键。
+                // 在手势导航机型上，系统返回条和 Home 指示条常常重叠成
+                // 一个拇指热区，单手够不着，用户就走不出去了。
+                // onBack 参数本来就在，只是没接上。
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
             )
         },
     ) { innerPadding ->
@@ -142,6 +156,10 @@ private fun LaterListenItem(
                 Text(
                     text = laterListen.article_title?.takeIf { it.isNotBlank() } ?: laterListen.article_id,
                     style = MaterialTheme.typography.titleSmall,
+                    // 不限行数的话，一篇长标题的稍后听条目会把整张列表
+                    // 撑成参差的一列，扫视节奏全断。限两行 + 省略号。
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = formatSnoozeTime(laterListen.snooze_until),

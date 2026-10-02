@@ -14,6 +14,16 @@ import androidx.compose.ui.unit.sp
  * - 英文：系统默认
  *
  * 如需精确控制字体，需在项目中添加字体文件。
+ *
+ * ── 为什么这里一个 color 都不写（2026-10-03）────────────────────
+ * Typography 是在 composable 之外构造的**单例**，所以里面写死的颜色
+ * 永远是浅色模式的值（Ink #1A1A1A 这种）。这个 App 是有深色模式的，
+ * 主题一换，写死的颜色不会跟着换 —— 那是必然出错的写法。
+ *
+ * Text() 的颜色来自 LocalContentColor（Surface / Card / Scaffold 都会下发），
+ * 不取自 style，所以去掉这些 color 不会改变任何一处现有显示，
+ * 只是把一个「谁一读就踩」的坑填掉。想指定颜色就在调用处显式写
+ * color = MaterialTheme.colorScheme.xxx。
  */
 
 val Typography = Typography(
@@ -24,7 +34,6 @@ val Typography = Typography(
         fontSize = 30.sp,
         lineHeight = 36.sp,
         letterSpacing = 0.sp,
-        color = Ink,
     ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.Serif,
@@ -32,7 +41,6 @@ val Typography = Typography(
         fontSize = 28.sp,
         lineHeight = 34.sp,
         letterSpacing = 0.sp,
-        color = Ink,
     ),
     headlineSmall = TextStyle(
         fontFamily = FontFamily.Serif,
@@ -40,7 +48,6 @@ val Typography = Typography(
         fontSize = 24.sp,
         lineHeight = 30.sp,
         letterSpacing = 0.sp,
-        color = Ink,
     ),
 
     // 标题
@@ -50,7 +57,6 @@ val Typography = Typography(
         fontSize = 20.sp,
         lineHeight = 28.sp,
         letterSpacing = 0.sp,
-        color = Ink,
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -58,7 +64,6 @@ val Typography = Typography(
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.15.sp,
-        color = Ink,
     ),
     titleSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -66,7 +71,6 @@ val Typography = Typography(
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp,
-        color = Ink,
     ),
 
     // 正文
@@ -76,7 +80,6 @@ val Typography = Typography(
         fontSize = 16.sp,
         lineHeight = 24.sp,
         letterSpacing = 0.5.sp,
-        color = Ink,
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -84,7 +87,6 @@ val Typography = Typography(
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.25.sp,
-        color = Ink,
     ),
     bodySmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -92,7 +94,6 @@ val Typography = Typography(
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.4.sp,
-        color = Neutral500,
     ),
 
     // 标签
@@ -102,7 +103,6 @@ val Typography = Typography(
         fontSize = 14.sp,
         lineHeight = 20.sp,
         letterSpacing = 0.1.sp,
-        color = Ink,
     ),
     labelMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -110,7 +110,6 @@ val Typography = Typography(
         fontSize = 12.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp,
-        color = Neutral500,
     ),
     labelSmall = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -118,6 +117,5 @@ val Typography = Typography(
         fontSize = 11.sp,
         lineHeight = 16.sp,
         letterSpacing = 0.5.sp,
-        color = Neutral400,
     ),
 )

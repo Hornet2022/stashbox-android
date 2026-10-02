@@ -37,6 +37,21 @@ val Neutral900 = Color(0xFF1A1614)
 
 val Success = Color(0xFF6B8E7F)
 val Warning = Color(0xFFC4956A)
+
+// ── 警告（配额快用完）容器色对（2026-10-03 新增）────────────────────
+// QuotaBanner 的「配额 ≤10%」分支原来直接写 Color(0xFFFFE0B2) /
+// Color(0xFFE65100)，那是 Material 200 浅橙 / 900 深橙，一对**只适配浅色模式**
+// 的常量。深色模式下：底色是一块亮橙，文字继承 onSurface（近白 #EFE9E1），
+// 对比度约 1.1:1 —— 提示条在深色里等于消失。
+// 语义色要有浅深两套，标量做不到，所以这里给成对定义，由主题挑。
+/** 浅色模式下的警告容器底色：比 200 略深，13sp 正文能压住 */
+val WarningContainerLight = Color(0xFFF5DFC2)
+/** 浅色模式下的警告文字/图标色 */
+val OnWarningContainerLight = Color(0xFF6B4A2A)
+/** 深色模式下的警告容器底色：暖赭压暗，不是纯色提亮 */
+val WarningContainerDark = Color(0xFF3D2F1F)
+/** 深色模式下的警告文字/图标色 */
+val OnWarningContainerDark = Color(0xFFE8CFAE)
 val Error   = Color(0xFFB87070)
 
 // ─────────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ import com.tingxia.audio.data.remote.DeviceInfo
 import com.tingxia.audio.data.remote.FeedbackCategory
 import com.tingxia.audio.data.repository.FeedbackRepository
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.imePadding
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +78,12 @@ fun FeedbackBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // 2026-10-03：补 imePadding —— 全 App 之前一处都没有。
+                // 这个 sheet 里的反馈描述是个多行输入框，键盘弹起来约
+                // 300dp 高的面板，ModalBottomSheet 不会自动躲开：内容
+                // 被顶上去、「提交」按钮被压在键盘下面看不见，
+                // 表现是「点了没反应」。imePadding 会把内容推到键盘上方。
+                .imePadding()
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),

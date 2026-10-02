@@ -30,4 +30,9 @@
     <string name="cd_play">播放</string>
     <string name="cd_pause">暂停</string>
     <string name="cd_audio_player">音频播放器</string>
+    <!-- 配额提示条（QuotaBanner）—— 2026-10-03 从硬编码字面量搬进资源 -->
+    <string name="quota_exhausted_title">本月配额已用完</string>
+    <string name="quota_exhausted_subtitle">升级会员，继续剪藏 · 蒸馏</string>
+    <string name="quota_low_title">本月配额快用完</string>
+    <string name="quota_low_subtitle">剩余 %1$d / %2$d 篇（≤10%%）</string>
 </resources>

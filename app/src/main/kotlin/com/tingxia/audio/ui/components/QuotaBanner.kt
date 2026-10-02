@@ -1,6 +1,7 @@
 package com.tingxia.audio.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,8 +20,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tingxia.audio.R
+import com.tingxia.audio.ui.theme.OnWarningContainerDark
+import com.tingxia.audio.ui.theme.OnWarningContainerLight
+import com.tingxia.audio.ui.theme.WarningContainerDark
+import com.tingxia.audio.ui.theme.WarningContainerLight
 
 /**
  * CP11.0.4 P1.2 + P3.1 配额提示条:
@@ -51,10 +59,10 @@ fun QuotaBanner(
     if (total == 0) {
         BannerBlock(
             color = MaterialTheme.colorScheme.errorContainer,
-            iconTint = MaterialTheme.colorScheme.error,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
             icon = Icons.Filled.Warning,
-            title = "本月配额已用完",
-            subtitle = "升级会员,继续剪藏 · 蒸馏",
+            title = stringResource(R.string.quota_exhausted_title),
+            subtitle = stringResource(R.string.quota_exhausted_subtitle),
             modifier = modifier,
         )
         return
@@ -65,20 +73,24 @@ fun QuotaBanner(
         remaining <= 0 -> {
             BannerBlock(
                 color = MaterialTheme.colorScheme.errorContainer,
-                iconTint = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
                 icon = Icons.Filled.Warning,
-                title = "本月配额已用完",
-                subtitle = "升级会员,继续剪藏 · 蒸馏",
+                title = stringResource(R.string.quota_exhausted_title),
+                subtitle = stringResource(R.string.quota_exhausted_subtitle),
                 modifier = modifier,
             )
         }
         pct <= 0.10f -> {
             BannerBlock(
-                color = Color(0xFFFFE0B2),         // 橙
-                iconTint = Color(0xFFE65100),      // 深橙
+                // 2026-10-03：原来写死 Color(0xFFFFE0B2) / Color(0xFFE65100) ——
+                // Material 200/900，一对只适配浅色的常量。深色模式下底色是一块
+                // 亮橙、文字继承近白的 onSurface，对比度约 1.1:1，提示条等于消失。
+                // 警告是纯语义色，和品牌色系无关，所以走独立的浅深两套常量。
+                color = if (isSystemInDarkTheme()) WarningContainerDark else WarningContainerLight,
+                contentColor = if (isSystemInDarkTheme()) OnWarningContainerDark else OnWarningContainerLight,
                 icon = Icons.Filled.Warning,
-                title = "本月配额快用完",
-                subtitle = "剩余 $remaining / $total 篇(≤10%)",
+                title = stringResource(R.string.quota_low_title),
+                subtitle = stringResource(R.string.quota_low_subtitle, remaining, total),
                 modifier = modifier,
             )
         }
@@ -89,8 +101,8 @@ fun QuotaBanner(
 @Composable
 private fun BannerBlock(
     color: Color,
-    iconTint: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentColor: Color,
+    icon: ImageVector,
     title: String,
     subtitle: String,
     modifier: Modifier,
@@ -107,18 +119,22 @@ private fun BannerBlock(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = iconTint,
+            tint = contentColor,
         )
         Column {
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
+                // 原来没有显式色 → 继承外层 Scaffold 的 onSurface。
+                // 压在 errorContainer / 警告底色上不保证可读。
+                color = contentColor,
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
             )
         }
     }

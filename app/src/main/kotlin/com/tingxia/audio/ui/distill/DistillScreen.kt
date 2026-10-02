@@ -46,6 +46,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.util.formatRelativeTime
 import com.tingxia.audio.ui.components.sourceLabelRes
+import com.tingxia.audio.ui.components.statusLabelRes
 
 /**
  * CP10.4 蒸馏中心:列出所有 PENDING / FAILED 文章,提供「立即蒸馏」按钮手动重派。
@@ -277,7 +278,11 @@ private fun DistillItem(
                     )
                     Spacer(modifier = Modifier.padding(2.dp))
                     Text(
-                        text = "${stringResource(sourceLabelRes(article.source))} · ${article.status.name.lowercase()}",
+                        // 原来是把枚举名小写直接印出来，用户看到的是
+                        // 「公众号 · distilling」—— 一个全中文界面里冒出的
+                        // 英文机器码。strings.xml 里早就有状态映射，
+                        // StatusBadge 也在用，这里绕开了。统一走 statusLabelRes。
+                        text = "${stringResource(sourceLabelRes(article.source))} · ${stringResource(statusLabelRes(article.status))}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

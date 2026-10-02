@@ -579,7 +579,10 @@ fun ArticleDetailScreen(
 
                         if (uiState.status == DistillStatus.DISTILLING) {
                             Text(
-                                text = "蒸馏中…（每 3 秒轮询）",
+                                // 原来写「（每 3 秒轮询）」。实现是 15 秒，而且写死不变；
+            // 用户在详情页盯着这一个字，技术实现变成了产品文案。
+            // 蒸馏单篇约 12 分钟，告诉用户真实时长比告诉他轮询频率有用得多。
+            text = "蒸馏中…约需 12 分钟",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -753,11 +756,15 @@ private fun AddLaterListenBottomSheet(
     var selectedOption by remember { mutableStateOf("tonight") }
     var isSubmitting by remember { mutableStateOf(false) }
 
+    // 2026-10-03：删掉「自定义时间」。选中它之后 snoozeUntil 走 `else -> null`，
+    // 而 null 的语义是「不设定时」—— 用户选了一个看得见的选项，保存后
+    // 文章根本不会出现在稍后听里，全程零提示。一个会静默说谎的选项比没有更糟。
+    // 要加回来的前提是接一个真的时间选择器（DatePickerDialog / TimePicker），
+    // 而不是让 now() 拼一个假时间。
     val options = listOf(
         "tonight" to "今晚睡前",
         "tomorrow" to "明天",
         "weekend" to "本周末",
-        "custom" to "自定义时间",
     )
 
     ModalBottomSheet(

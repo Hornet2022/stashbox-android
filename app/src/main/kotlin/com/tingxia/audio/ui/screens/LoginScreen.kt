@@ -24,6 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.tingxia.audio.BuildConfig
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.imePadding
 
 /**
  * 登录页。
@@ -60,6 +63,15 @@ fun LoginScreen(
             modifier = modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                // 2026-10-03：补 imePadding + verticalScroll
+                // imePadding：这是全 App 第一处有输入框的屏，键盘一弹就把
+                //   密码框和登录按钮顶出屏幕，而整列是 Arrangement.Center
+                //   且不可滚动 —— 用户看得见「登录」但点不到。
+                // verticalScroll：系统字号放大到 1.3x 时，logo + 两行副标题 +
+                //   48dp 间距 + 两个输入框 + 按钮 + 协议行放不下，
+                //   没有滚动条就只能放弃登录。
+                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

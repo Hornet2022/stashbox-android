@@ -265,7 +265,6 @@ private fun AppNavigation() {
                 onNavigateToReview = { navController.navigate("later-listens") },
                 onNavigateToArticleList = { navController.navigate("list") },
                 onNavigateToDetail = { id -> navController.navigate("detail/$id") },
-                onNavigateToFullscreenPlayer = { navController.navigate("fullscreen_player") },
                 onNavigateToOfflineDownload = { navController.navigate("offline_download") },
                 onNavigateToSettings = { navController.navigate("settings") },
             )
@@ -317,6 +316,12 @@ private fun AppNavigation() {
                 title = "",
                 author = null,
                 coverUrl = null,
+                // 2026-10-03：底部 4 个动作键此前全是空实现（isFavorite 恒 false、
+                // 四个回调都是默认的 {}），四个可见控件点了没有任何反应。
+                // 这里把两个仓库传下去，屏内自己接线：收藏走乐观更新，
+                // 反馈走 FeedbackBottomSheet。
+                favoritesRepository = favoritesRepository,
+                feedbackRepository = feedbackRepository,
                 onDismiss = { navController.popBackStack() },
             )
         }
@@ -401,15 +406,11 @@ private fun AppNavigation() {
                 feedbackRepository = feedbackRepository,
             )
         }
-        composable("fullscreen_player") {
-            FullScreenPlayerScreen(
-                // P1-2：title/author 留空占位 — 屏内 collect PlayerController 状态决定显示
-                title = "",
-                author = null,
-                coverUrl = null,
-                onDismiss = { navController.popBackStack() },
-            )
-        }
+        // 2026-10-03：删掉 fullscreen_player 路由。它和上面的 "player"
+        // 指向同一个 FullScreenPlayerScreen、参数逐字相同，是同一条路注册了两次；
+        // 而唯一能进播放器的入口是详情页的 onOpenFullScreenPlayer → "player"。
+        // HomeScreen 上的 onNavigateToFullscreenPlayer 参数从来没有被调用过，
+        // 整条路是死的。
         // CP11.0.4 P1.2: 付费墙
         composable("paywall") {
             PaywallScreen(

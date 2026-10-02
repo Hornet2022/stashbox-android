@@ -15,29 +15,32 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Feedback
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
@@ -68,7 +71,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +84,9 @@ import androidx.compose.ui.unit.sp
 import com.tingxia.audio.audio.PlaybackState
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
+import com.tingxia.audio.data.repository.FavoritesRepository
+import com.tingxia.audio.data.repository.FeedbackRepository
+import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.ui.theme.WarmOchre
 import androidx.hilt.navigation.compose.hiltViewModel
 import android.widget.Toast
@@ -103,6 +111,19 @@ import kotlinx.coroutines.launch
  * 视觉系统：
  * - 大封面渐变背景 = 品牌暖棕（WarmOchre 暗化）
  * - 进度条颜色 = Cream on dark
+ *
+ * 2026-10-03 自检修复（都是实测确认的缺陷，不是审美偏好）：
+ * - 底部 4 个动作键此前全是空实现（MainActivity 一个回调都没传），收藏 /
+ *   标签订阅 / 反馈 / 分享 四个可见控件点了没有任何反应。现在自己接线。
+ * - 封面首字取的是入参 title，而 MainActivity 两处都传 title = ""，
+ *   于是每一篇的封面都印同一个「听」。改为取真实标题。
+ * - 内联语速 chip 写死 0.75~2.0 五档，和服务端下发的 availableSpeeds 各说各话
+ *   （下面的 sheet 用的才是服务端档位）。改为同一份来源。
+ * - 「蒸馏质量 · 优」是写死的假数据，真实 qualityScore 在 ArticleDetailScreen
+ *   有展示、播放器里没有。编造的数字比不显示更糟，改为播放器真正掌握的码率。
+ * - 整列不可滚动 + 封面 aspectRatio(1f)：横屏时封面吃满高度，进度条和控制
+ *   键被顶出屏幕且无法滚动到。这是音频 App 最要命的断法。
+ * - 背景渐变 endY 写死 2000f（像素），高分屏上底部一大段是死板的纯色。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -117,6 +138,8 @@ fun FullScreenPlayerScreen(
     onFeedback: () -> Unit = {},
     onShare: () -> Unit = {},
     shareUrl: String? = null,
+    favoritesRepository: FavoritesRepository? = null,
+    feedbackRepository: FeedbackRepository? = null,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -137,20 +160,31 @@ fun FullScreenPlayerScreen(
     // CP-TTS-VOICE: 语速的真实来源。档位由服务端下发，不再在 UI 里硬编码五档。
     val speed by controller.speed.collectAsState()
     val availableSpeeds by controller.availableSpeeds.collectAsState()
+    // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
+    val currentBitrate by controller.currentBitrate.collectAsState()
     val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
     // 三段兜底：当前曲目 → 调用方传入 → 友好占位文案
     val displayTitle = currentTitle.ifBlank { title.ifBlank { "未在播放" } }
     val displayAuthor = currentAuthor.ifBlank { author }
 
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
     var isDragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     var showSpeedSheet by remember { mutableStateOf(false) }
+    var showFeedbackSheet by remember { mutableStateOf(false) }
+    // 收藏是乐观更新：先翻图标，失败再翻回来并提示。播放器的收藏不该
+    // 阻塞在一次网络往返上。
+    var favoriteOverride by remember { mutableStateOf<Boolean?>(null) }
+    val shownFavorite = favoriteOverride ?: isFavorite
     val speedSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
     )
-    val scope = rememberCoroutineScope()
 
-    // 全屏背景渐变 — 上深下浅的暖棕
+    // 全屏背景渐变 — 上深下浅的暖棕。
+    // 不给 startY/endY：Brush 默认按绘制区域的实际尺寸铺满，之前写死
+    // endY = 2000f（像素）在 2K 屏上底部会留一大段死掉的纯色。
     val backgroundBrush = remember {
         Brush.verticalGradient(
             colors = listOf(
@@ -158,8 +192,6 @@ fun FullScreenPlayerScreen(
                 Color(0xFF5C4A3A),  // 中：主品牌色
                 Color(0xFF7A6650),  // 下：略亮
             ),
-            startY = 0f,
-            endY = 2000f,
         )
     }
 
@@ -168,10 +200,18 @@ fun FullScreenPlayerScreen(
             .fillMaxSize()
             .background(backgroundBrush),
     ) {
+        // 封面尺寸同时看宽度和高度。之前只有 fillMaxWidth().aspectRatio(1f)，
+        // 横屏时封面高度等于宽度、等于吃满整个视口高度，把进度条和控制键
+        // 顶到屏幕外。取「宽 - 内边距」和「高的 40%」里小的那个。
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.40f)
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.systemBars)
+                // 不可滚动 = 字体放大到 1.3x、或横屏、或小屏时控制键够不着。
+                // 这是音频 App 最要命的断法：暂停不了、拖不动进度。
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp),
         ) {
             // 顶部：下拉关闭 + 标题栏
@@ -182,22 +222,22 @@ fun FullScreenPlayerScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // 大封面 — 无封面时用渐变 + 大首字
+            // 大封面 — 无封面图时用标题首字 + 渐变
+            // 传 displayTitle 而不是入参 title：MainActivity 两处都传 title = ""，
+            // 传参的话每一篇的封面都印同一个「听」。
             LargeCover(
-                title = title,
+                title = displayTitle,
                 coverUrl = coverUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .padding(horizontal = 32.dp),
+                modifier = Modifier.size(coverSize),
             )
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // 标题 + 作者 + 质量分
+            // 标题 + 作者 + 当前码率
             Metadata(
                 title = displayTitle,
                 author = displayAuthor,
+                bitrate = currentBitrate,
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -227,6 +267,9 @@ fun FullScreenPlayerScreen(
             ControlButtons(
                 isPlaying = playbackState == PlaybackState.PLAYING,
                 onPlayPause = {
+                    // 触感：播放/暂停是「耳朵和手同时确认」的动作，没有触感时
+                    // 用户会怀疑自己没点到（图标只有 180ms 淡入淡出）。
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     when (playbackState) {
                         PlaybackState.PLAYING -> controller.pause()
                         // P1-2：暂停态 → resume（沿用已加载的 MediaItem，不从头播放）
@@ -251,7 +294,12 @@ fun FullScreenPlayerScreen(
                     }
                 },
                 onSkipBackward = {
-                    val target = (position - 15_000L).coerceAtLeast(0L)
+                    // 2026-10-03：图标是 Icons.Default.Replay10、contentDescription
+                    // 写的是「后退 15 秒」，而这里真的退 15 秒 —— 三者里两个对不上，
+                    // 而图标和文案恰恰是用户唯一能看到的两样。统一成 10 秒：
+                    // Material 图标集里有 Replay5/10/30，没有 15，用现成图标
+                    // 比让用户盯着一个说谎的数字好。10 秒在长音频里也够回听一句。
+                    val target = (position - 10_000L).coerceAtLeast(0L)
                     controller.seekTo(target)
                 },
                 onSkipForward = {
@@ -266,43 +314,80 @@ fun FullScreenPlayerScreen(
                 onSkipNext = { controller.playNext() },
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // 速度切换行
+            // 语速：单一 chip 展示当前档位，点开 sheet 选。
+            // 原来这里排了 5 个 chip + 一个「更多」键，但算一下宽度：
+            // 5 × (12+12 padding + 约 30dp 文字) ≈ 270dp，加 4 个 8dp 间距、
+            // 再加「更多」键，合计约 346dp；而 360dp 机型上这行只有
+            // 360 - 24×2 = 312dp。「更多」键被挤出屏幕。
+            // 而且 sheet 里列的就是同一批档位，两处状态是重复的。
+            // 单 chip 是 Spotify / Apple Podcasts / 小宇宙的通行做法，
+            // 任何字号和屏宽下都不会溢出。
             SpeedRow(
                 currentSpeed = speed,
-                onSpeedSelected = { value ->
-                    // 与 sheet 走同一套逻辑：先改播放器(立即生效)再同步云端
-                    controller.setSpeed(value)
-                    scope.launch {
-                        runCatching { ttsViewModel.persistSpeed(value) }
-                            .onFailure {
-                                // 注意：以前这里写成 .onFailure { friendlyError(...) }，
-                                // 文案算出来就被丢掉 = 静默吞掉失败。必须真的提示。
-                                Toast.makeText(
-                                    context,
-                                    friendlyError(it, "语速已生效，但同步到云端失败"),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                    }
+                onShowSpeedSheet = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    showSpeedSheet = true
                 },
-                onShowSpeedSheet = { showSpeedSheet = true },
             )
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            // 底部 4 IconButton — 收藏 / 标签 / 反馈 / 分享
+            // 底部 4 个动作 — 收藏 / 标签 / 反馈 / 分享
+            // 2026-10-03：这四个键此前全是空实现，MainActivity 一个回调都没传，
+            // 四个可见控件点了没有任何反应。现在全部接线。
             BottomActions(
-                isFavorite = isFavorite,
-                onToggleFavorite = onToggleFavorite,
-                onNavigateToTags = onNavigateToTags,
-                onFeedback = onFeedback,
+                isFavorite = shownFavorite,
+                onToggleFavorite = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val repo = favoritesRepository
+                    val id = currentArticleId
+                    if (repo == null || id.isNullOrBlank()) {
+                        // 没有仓库（或没在播放）时不要假装成功：点收藏要有反应，
+                        // 但反应必须是诚实的。
+                        Toast.makeText(context, "先播放一篇文章再收藏", Toast.LENGTH_SHORT).show()
+                        return@BottomActions
+                    }
+                    val target = !shownFavorite
+                    favoriteOverride = target          // 乐观更新
+                    scope.launch {
+                        runCatching {
+                            if (shownFavorite) {
+                                val hit = repo.listFavorites()
+                                    .firstOrNull { it.article_id == id }
+                                if (hit != null) repo.deleteFavorite(hit.id) else repo.addFavorite(id)
+                            } else {
+                                repo.addFavorite(id)
+                            }
+                        }.onFailure {
+                            favoriteOverride = !target    // 失败翻回去
+                            Toast.makeText(
+                                context,
+                                friendlyError(it, "收藏没存上"),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                },
+                onNavigateToTags = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onNavigateToTags()
+                },
+                onFeedback = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    if (feedbackRepository != null) showFeedbackSheet = true else onFeedback()
+                },
                 onShare = {
-                    if (shareUrl != null) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    // 分享链接用已注册的深链 stashbox://detail/{id}，和通知
+                    // 点进来用的是同一条路，不另造一套。
+                    val link = shareUrl
+                        ?: currentArticleId?.takeIf { it.isNotBlank() }?.let { "stashbox://detail/$it" }
+                    if (link != null) {
                         val intent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "听听这个: $title $shareUrl")
+                            putExtra(Intent.EXTRA_TEXT, "${displayTitle}\n$link")
                         }
                         context.startActivity(Intent.createChooser(intent, "分享到"))
                     } else {
@@ -312,6 +397,7 @@ fun FullScreenPlayerScreen(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+        }
         }
     }
 
@@ -352,6 +438,23 @@ fun FullScreenPlayerScreen(
                 },
             )
         }
+    }
+
+    // 反馈 —— 接线前这个键是空的
+    if (showFeedbackSheet && feedbackRepository != null) {
+        val appVersion = remember {
+            try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (_: Exception) {
+                "unknown"
+            }
+        }
+        FeedbackBottomSheet(
+            articleId = currentArticleId,
+            feedbackRepository = feedbackRepository,
+            appVersion = appVersion,
+            onDismiss = { showFeedbackSheet = false },
+        )
     }
 }
 
@@ -418,7 +521,7 @@ private fun LargeCover(
         )
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .clip(RoundedCornerShape(24.dp))
             .background(coverBrush)
@@ -429,10 +532,13 @@ private fun LargeCover(
             ),
         contentAlignment = Alignment.Center,
     ) {
+        // 首字字号从容器宽度算，不写死 140.sp。
+        // 容器是 dp，字号是 sp —— 系统字号放大到 1.5x 时 140sp 会涨到 210sp，
+        // 直接把封面这个视觉中心撑爆。写死数字在这里一定是错的。
         Text(
             text = initials,
             color = Color.White.copy(alpha = 0.85f),
-            fontSize = 140.sp,
+            fontSize = (maxWidth.value * 0.40f).sp,
             fontWeight = FontWeight.Light,
             fontFamily = FontFamily.Serif,
         )
@@ -462,6 +568,7 @@ private fun LargeCover(
 private fun Metadata(
     title: String,
     author: String?,
+    bitrate: Int,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -471,7 +578,7 @@ private fun Metadata(
             color = Color(0xFFF5F2EB),
             fontSize = 22.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis,
             lineHeight = 28.sp,
             fontFamily = FontFamily.Serif,
@@ -498,7 +605,12 @@ private fun Metadata(
                         ),
                 )
                 Text(
-                    text = "蒸馏质量 · 优",
+                    // 原来这里写死「蒸馏质量 · 优」。那是编的：真实 qualityScore
+                    // 在 ArticleDetailScreen 有展示，播放器根本没这个状态，
+                    // 无论哪一篇都印「优」——用户会当成质量信号来决策。
+                    // 改报播放器确实掌握、也确实会变的量：当前码率。
+                    // 多码率本来就是本 App 的招牌能力，把它露出来更有意义。
+                    text = "$bitrate kbps",
                     color = Color(0xFFD4CFC6),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -610,7 +722,7 @@ private fun ControlButtons(
         ) {
             Icon(
                 imageVector = Icons.Default.Replay10,
-                contentDescription = "后退 15 秒",
+                contentDescription = "后退 10 秒",
                 tint = Color(0xFFE8E4DD),
                 iconSizeDp = 40,
             )
@@ -698,89 +810,67 @@ private fun PlayPauseButton(
 @Composable
 private fun SpeedRow(
     currentSpeed: Float,
-    onSpeedSelected: (Float) -> Unit,
     onShowSpeedSheet: () -> Unit,
 ) {
     // CP-TTS-VOICE: 原来是 `var currentSpeed by remember { mutableStateOf("1.0x") }`
     // —— 纯粹本地 state,点哪个 chip 都只改这个变量,播放器速度纹丝不动,
     // 切屏/重启即丢。这条链路从 UI 到 ExoPlayer 根本没接上。
-    // 现在 currentSpeed 由 PlayerController 的 StateFlow 驱动,点击直接落到播放器。
+    // 现在 currentSpeed 由 PlayerController 的 StateFlow 驱动。
+    //
+    // 2026-10-03: 5 个内联 chip + 「更多」键换成单 chip。
+    // 算宽度：chip = 24 padding + 约 30dp 文字 ≈ 54dp，5 个 = 270dp，
+    // 加 4 个 8dp 间隔和「更多」键约 346dp；而 360dp 机型这行只有
+    // 360 − 48 = 312dp —— 「更多」键被挤出屏幕，且 sheet 里列的还是同一批档位。
+    // 单 chip 既不溢出又把当前档位一眼可见，展开后的 sheet 给的是完整列表。
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-        speeds.forEachIndexed { index, value ->
-            if (index > 0) Spacer(modifier = Modifier.width(8.dp))
-            SpeedChip(
-                label = formatSpeedLabel(value),
-                selected = kotlin.math.abs(value - currentSpeed) < 0.01f,
-                onClick = { onSpeedSelected(value) },
-            )
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        PressableIconButton(
-            onClick = onShowSpeedSheet,
-            sizeDp = 36,
-        ) {
-            Icon(
-                imageVector = Icons.Default.MoreHoriz,
-                contentDescription = "更多速度",
-                tint = Color(0xFFD4CFC6),
-                iconSizeDp = 20,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SpeedChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
-        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
-        label = "chipScale",
-    )
-    val bgColor by animateColorAsState(
-        targetValue = if (selected) Color(0xFFF5F2EB) else Color.Transparent,
-        animationSpec = tween(durationMillis = 160),
-        label = "chipBg",
-    )
-    val textColor = if (selected) Color(0xFF3A2F26) else Color(0xFFD4CFC6)
-
-    Box(
-        modifier = Modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(16.dp))
-            .background(bgColor)
-            .border(
-                width = 1.dp,
-                color = if (selected) Color.Transparent else Color.White.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(16.dp),
-            )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            color = textColor,
-            fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        val interactionSource = remember { MutableInteractionSource() }
+        val isPressed by interactionSource.collectIsPressedAsState()
+        val scale by animateFloatAsState(
+            targetValue = if (isPressed) 0.95f else 1f,
+            animationSpec = tween(durationMillis = 120, easing = LinearEasing),
+            label = "speedRowScale",
         )
+        val bgColor by animateColorAsState(
+            targetValue = Color(0xFFFFFFFF).copy(alpha = 0.12f),
+            animationSpec = tween(durationMillis = 160),
+            label = "speedRowBg",
+        )
+        Row(
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .clip(RoundedCornerShape(20.dp))
+                .background(bgColor)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onShowSpeedSheet,
+                )
+                // 48dp 触控下限：原来「更多」键只有 36dp，手指很难点准。
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = formatSpeedLabel(currentSpeed),
+                color = Color(0xFFF5F2EB),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Icon(
+                imageVector = Icons.Default.ExpandMore,
+                contentDescription = "选择播放速度",
+                tint = Color(0xFFD4CFC6),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
 }
 
