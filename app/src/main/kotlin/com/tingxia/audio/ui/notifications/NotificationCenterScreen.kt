@@ -310,21 +310,45 @@ private fun NotificationItem(
     }
 }
 
+/**
+ * 标签 chip。
+ *
+ * 文字色和底色分工：**色相只给底色 tint，文字用主题的中性文字色**。
+ * 原来文字直接用 `color`（标签色本身）压在 `color.copy(alpha=0.15)` 上，
+ * 于是要「柔和」就得压暗颜色，压暗了 12px 文字就读不清 —— 两个要求
+ * 直接冲突。把文字换成 onSurface 级的对比度后，色板可以一直保持低饱和，
+ * 而可读性不再依赖具体色值。
+ *
+ * slug 原来原样显示 `tech` / `science`，这里是中文用户界面 —— 映射成
+ * 中文，未知 slug 退回原值（宁可显示 `douyin` 也不要空白，运营至少能
+ * 拿这个词去问人）。
+ */
 @Composable
 private fun TagChip(tagSlug: String) {
     val color = tagSlugToColor(tagSlug)
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(color.copy(alpha = 0.15f))
+            .background(color.copy(alpha = 0.18f))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
         Text(
-            text = tagSlug,
+            text = tagSlugLabel(tagSlug),
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
+}
+
+/** slug → 中文标签名。 */
+private fun tagSlugLabel(tagSlug: String): String = when (tagSlug.lowercase()) {
+    "tech" -> "科技"
+    "science" -> "科学"
+    "history" -> "历史"
+    "finance" -> "财经"
+    "sports" -> "体育"
+    "entertainment" -> "娱乐"
+    else -> tagSlug
 }
 
 private fun tagSlugToColor(tagSlug: String): Color = when (tagSlug.lowercase()) {
