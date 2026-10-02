@@ -64,6 +64,13 @@ fun EvaluationDialog(
     val uiState by viewModel.uiState.collectAsState()
     val submitState by viewModel.submitState.collectAsState()
     val myRating by viewModel.myRating.collectAsState()
+    // 从 collect 出来的 uiState 推导 —— 这才是 Compose 认的依赖。
+    val canSubmit = uiState.overallScore in 1..5 &&
+        (uiState.hookScore == null || uiState.hookScore in 1..5) &&
+        (uiState.sectionScore == null || uiState.sectionScore in 1..5) &&
+        (uiState.outroScore == null || uiState.outroScore in 1..5) &&
+        (uiState.rhythmScore == null || uiState.rhythmScore in 1..5) &&
+        uiState.skipReason.let { it == null || it.length <= EvaluationViewModel.MAX_SKIP_REASON_LEN }
 
     LaunchedEffect(taskId) {
         viewModel.initWithTask(taskId)
@@ -239,7 +246,21 @@ fun EvaluationDialog(
         confirmButton = {
             Button(
                 onClick = viewModel::submit,
-                enabled = submitState !is EvaluationViewModel.SubmitState.Loading && viewModel.isValid(),
+                // enabled 必须从**已 collect 的 uiState** 推导，不能调 viewModel.isValid()。
+                //
+                // isValid() 读的是 _uiState.value —— 那是 StateFlow 的普通字段读，
+                // **不是 Compose 快照读**，Compose 无从知道这个 Button 依赖它。
+                // 星级 ScoreRow 因为读了 collectAsState 的 uiState 会重绘（星是亮的），
+                // 但 confirmButton 这个 lambda 在 Material3 AlertDialog 的
+                // confirmButton 槽位里不一定跟着重跑 → enabled 永远停在进弹窗时的
+                // false。实测（华为 JEF-AN20，2026-10-02）：四维和总评都点满星、
+                // 状态确认已写入（★★★★☆），提交按钮仍是 enabled=false，
+                // 网关只收到 10 次 GET、0 次 POST，distillation_evaluations 至今 0 行。
+                //
+                // 也就是说：**这个评分弹窗从来没有、也不可能被用户提交成功**。
+                // 闭环 1「听感质量」收不到数据的真正原因在这里 ——
+                // 不是「没有入口」，是「有入口但点不动」。
+                enabled = submitState !is EvaluationViewModel.SubmitState.Loading && canSubmit,
             ) {
                 if (submitState is EvaluationViewModel.SubmitState.Loading) {
                     CircularProgressIndicator(

@@ -7,6 +7,7 @@ import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.QuotaStatus
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.QuotaRepository
+import com.tingxia.audio.data.sync.PrefetchScheduler
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -29,6 +30,7 @@ import javax.inject.Inject
 class CaptureViewModel @Inject constructor(
     private val repository: ArticleRepository,
     private val quotaRepository: QuotaRepository,
+    private val prefetchScheduler: PrefetchScheduler,
 ) : ViewModel() {
 
     data class UiState(
@@ -160,9 +162,12 @@ class CaptureViewModel @Inject constructor(
                 onSuccess(id)
                 loadRecent()
                 refreshQuota()   // 提交成功后 quota-1,刷新 banner
-                // P0-4：启动实时轮询，把这条新文章从 pending/distilling 自动更新到 ready
                 if (id.isNotEmpty()) {
+                    // 前台：刷新列表上的状态徽标
                     startStatusPolling(id)
+                    // 后台：跨进程盯到就绪并发通知 —— 用户切走 app 也能收到「可以听了」。
+                    // 这是「文章好了」唯一的触达通路：没有推送通道，push_notifications 表 0 行。
+                    prefetchScheduler.watchDistill(id)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("CaptureViewModel", "capture failed: ${e.message}")
@@ -184,18 +189,30 @@ class CaptureViewModel @Inject constructor(
     }
 
     /**
-     * P0-4：实时轮询刚剪藏的文章状态。
-     * - 每 3s 拉一次 getArticle(id)，更新 recentArticles 里对应条目（用户可见 statusBadge）
-     * - status=ready 或 30 次超时（90s）停止
+     * 实时轮询刚剪藏的文章状态（前台，让列表的 statusBadge 跟着变）。
+     *
+     * - 前 2 分钟 3 秒一次，之后 10 秒一次
+     * - status=ready / failed 即停
      * - 同一 articleId 多次启动会自动取消旧的（防泄漏）
+     *
+     * ⚠️ 上限从 30 次（90 秒）放宽到 45 分钟。原来的 90 秒不是「异常兜底」，
+     * 是**每一次剪藏都会走到的正常路径** —— 实测单篇真实耗时 11 分 40 秒
+     *（LLM 改写 14s + TTS 分 7 段合成 11 分钟，2026-10-02 实机），
+     * 用户 100% 会看到「蒸馏超时（>90s）」，而内容其实还在正常生成。
+     *
+     * 这里只负责**界面上的状态刷新**；「文章好了」的通知由
+     * [com.tingxia.audio.data.sync.DistillReadyWorker] 负责（跨进程存活，
+     * 用户切走 app 也能收到）。两者分工：前台看得见变化，后台收得到提醒。
      */
     private fun startStatusPolling(articleId: String) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
-            var attempts = 0
-            while (attempts < MAX_POLL_ATTEMPTS) {
-                delay(POLL_INTERVAL_MS)
-                attempts++
+            val startedAt = System.currentTimeMillis()
+            var waited = 0L
+            while (System.currentTimeMillis() - startedAt < MAX_POLL_MS) {
+                val interval = if (waited < POLL_FAST_PHASE_MS) POLL_FAST_MS else POLL_SLOW_MS
+                delay(interval)
+                waited += interval
                 try {
                     val updated = repository.getArticle(articleId)
                     updateRecentArticle(updated)
@@ -204,7 +221,7 @@ class CaptureViewModel @Inject constructor(
                     ) {
                         android.util.Log.i(
                             "CaptureViewModel",
-                            "poll: article=$articleId reached ${updated.status} after $attempts attempts",
+                            "poll: article=$articleId reached ${updated.status} after $waited ms",
                         )
                         return@launch
                     }
@@ -218,13 +235,13 @@ class CaptureViewModel @Inject constructor(
                 } catch (e: Exception) {
                     android.util.Log.w(
                         "CaptureViewModel",
-                        "poll: article=$articleId attempt=$attempts failed: ${e.message}",
+                        "poll: article=$articleId after $waited ms failed: ${e.message}",
                     )
                 }
             }
             android.util.Log.w(
                 "CaptureViewModel",
-                "poll: article=$articleId timed out after $attempts attempts",
+                "poll: article=$articleId gave up after ${System.currentTimeMillis() - startedAt} ms",
             )
         }
     }
@@ -280,7 +297,12 @@ class CaptureViewModel @Inject constructor(
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 3000L
-        private const val MAX_POLL_ATTEMPTS = 30  // 3s × 30 = 90s 后超时
+        /** 前 2 分钟 3 秒一次：这段时间用户盯着屏幕，状态刷新要跟手。 */
+        private const val POLL_FAST_MS = 3_000L
+        private const val POLL_FAST_PHASE_MS = 2 * 60 * 1000L
+        /** 之后 10 秒一次：12 分钟总共约 76 次请求，不是 240 次。 */
+        private const val POLL_SLOW_MS = 10_000L
+        /** 45 分钟。实测 12 分钟，这是 3.75 倍余量。 */
+        private const val MAX_POLL_MS = 45 * 60 * 1000L
     }
 }

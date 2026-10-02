@@ -14,9 +14,9 @@ import com.tingxia.audio.data.model.RatingResponse
 import com.tingxia.audio.data.model.RetryResponse
 import com.tingxia.audio.data.model.SkipRequest
 import com.tingxia.audio.data.model.SkipResponse
-import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query

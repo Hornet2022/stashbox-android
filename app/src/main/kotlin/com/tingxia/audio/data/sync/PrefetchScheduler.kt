@@ -99,6 +99,36 @@ class PrefetchScheduler @Inject constructor(
      *
      * 周期性排一份（每小时）作兜底，App 启动时再排一次即时的。
      */
+    /**
+     * 盯一篇刚剪藏的文章，蒸馏完发本地通知。
+     *
+     * 这是「文章好了」能到达用户的**唯一**通路：没有推送通道，`push_notifications`
+     * 表 0 行，纯靠 ViewModel 轮询的话用户切走 app 就收不到了。
+     *
+     * 唯一名带 articleId + KEEP：同一篇重复剪藏不会排多份。
+     */
+    fun watchDistill(articleId: String) {
+        val req = OneTimeWorkRequestBuilder<DistillReadyWorker>()
+            .setInputData(
+                androidx.work.Data.Builder()
+                    .putString(DistillReadyWorker.KEY_ARTICLE_ID, articleId)
+                    .build()
+            )
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .addTag(DistillReadyWorker.NAME)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            "distill-ready-$articleId",
+            ExistingWorkPolicy.KEEP,
+            req,
+        )
+    }
+
     fun scheduleProgressSync() {
         val req = PeriodicWorkRequestBuilder<ProgressSyncWorker>(1, TimeUnit.HOURS)
             .setConstraints(
