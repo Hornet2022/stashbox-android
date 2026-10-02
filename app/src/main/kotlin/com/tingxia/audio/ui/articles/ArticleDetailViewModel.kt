@@ -344,11 +344,26 @@ class ArticleDetailViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "ArticleDetailViewModel"
-        /** 轮询间隔：3 秒 */
-        const val POLL_INTERVAL_MS: Long = 3000L
+        /**
+         * 轮询间隔：15 秒（2026-10-03 从 3s 拉长）。
+         *
+         * 原来 3s × 30 次 = **90 秒窗口**，但实测单篇蒸馏要 12 分钟
+         * （本机 TTS 约 745s/篇，生产最长音频 598s）—— 也就是说轮询**必然在
+         * 蒸馏完成之前就放弃**，用户看到「蒸馏超时」，而服务端还在跑。
+         * 这比「网络抖动导致提前放弃」更根本。
+         *
+         * 15s 对分钟级的操作完全够用：等待窗口本来就是分钟级，3s 的刷新密度
+         * 对用户毫无感知价值，却把请求量放大了 5 倍（多篇并发时是 N 倍）。
+         */
+        const val POLL_INTERVAL_MS: Long = 15_000L
 
-        /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
-        const val MAX_POLL_ATTEMPTS: Int = 30
+        /**
+         * 最大轮询次数：60 次 × 15s ≈ 15 分钟。
+         *
+         * 覆盖 12 分钟的实测耗时并留出余量；到点仍未 ready 判为超时，
+         * 提示用户稍后回来查看（蒸馏任务在服务端是独立跑的，不会被掐断）。
+         */
+        const val MAX_POLL_ATTEMPTS: Int = 60
 
         /**
          * 连续网络失败多少次才放弃轮询（2026-10-03）。

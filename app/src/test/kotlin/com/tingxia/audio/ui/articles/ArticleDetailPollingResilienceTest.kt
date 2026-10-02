@@ -43,6 +43,10 @@ import org.robolectric.annotation.Config
  * 错误、没有重试、音频栏不出现。
  *
  * 修之后：单次失败只记一次并继续下一轮；连续失败超阈值才放弃，且给出可重试提示。
+ *
+ * 另有一处更根本的（2026-10-03 同批修）：轮询窗口原本是 3s × 30 次 = 90 秒，
+ * 而实测单篇蒸馏要 12 分钟 —— 轮询**必然在完成前放弃**。现在 15s × 60 次 ≈
+ * 15 分钟。下面 `轮询窗口必须覆盖实测蒸馏耗时` 这条就是它的看门狗。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -216,4 +220,27 @@ class ArticleDetailPollingResilienceTest {
             id = id, title = "t", status = DistillStatus.DISTILLING, audioUrl = null, taskId = "dst_$id",
         )
     }
+
+    @Test
+    fun 轮询窗口必须覆盖实测蒸馏耗时() {
+        // 实测：本机 TTS 约 745s/篇，生产最长音频 598s。
+        // 窗口太短 = 轮询必然提前放弃，用户看到「超时」而服务端还在跑。
+        val windowSec = ArticleDetailViewModel.POLL_INTERVAL_MS / 1000 * ArticleDetailViewModel.MAX_POLL_ATTEMPTS
+        assertTrue(
+            "轮询窗口 ${windowSec}s 覆盖不了 12 分钟的蒸馏耗时（745s），" +
+                "用户会看到假超时",
+            windowSec >= 12 * 60,
+        )
+    }
+
+    @Test
+    fun 轮询间隔不应过密() {
+        // 等待窗口本来就是分钟级，3s 的刷新密度对用户毫无感知价值，
+        // 却把请求量放大 5 倍（多篇并发时是 N 倍）。
+        assertTrue(
+            "轮询间隔 ${ArticleDetailViewModel.POLL_INTERVAL_MS}ms 过密，" +
+                "分钟级操作用不着秒级刷新",
+            ArticleDetailViewModel.POLL_INTERVAL_MS >= 10_000L,
+        )
+}
 }

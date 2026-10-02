@@ -56,6 +56,18 @@ class DistillViewModel @Inject constructor(
     // 防止多个 distill job 撞同一文章
     private val pollJobs: MutableMap<String, Job> = mutableMapOf()
 
+    /**
+     * 全局并发轮询上限（2026-10-03）。
+     *
+     * `pollJobs` 只按 articleId 去重，**没有全局上限** —— 点 N 篇就是 N 个
+     * 独立轮询器同时跑，15s 一次，App 切后台（`viewModelScope` 不随息屏取消）
+     * 还在继续烧。
+     *
+     * 上限 3 是权衡：超过这个数的任务不启动轮询，UI 仍标记为「处理中」，
+     * 由服务端独立跑完，用户下次进页面直接看到结果（列表页不依赖轮询器）。
+     */
+    private val maxConcurrentPolls = 3
+
     fun load() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -136,6 +148,17 @@ class DistillViewModel @Inject constructor(
      */
     private fun startPolling(articleId: String, taskId: String) {
         pollJobs[articleId]?.cancel()
+
+        // 超过并发上限就不起轮询器（见 distill() 里的说明）：服务端独立跑完，
+        // 列表页下次刷新直接能看到结果。
+        if (pollJobs.count { it.value.isActive } >= maxConcurrentPolls) {
+            android.util.Log.i(
+                "DistillViewModel",
+                "跳过轮询 article=$articleId（已达并发上限 $maxConcurrentPolls）",
+            )
+            return
+        }
+
         pollJobs[articleId] = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 inProgress = _uiState.value.inProgress + (articleId to DistillInProgress(articleId)),
@@ -269,13 +292,28 @@ class DistillViewModel @Inject constructor(
     }
 
     companion object {
-        /** 轮询间隔：3 秒 */
-        const val POLL_INTERVAL_MS: Long = 3000L
+        /**
+         * 轮询间隔：15 秒（2026-10-03 从 3s 拉长）。
+         *
+         * 原来 3s × 30 次 = **90 秒窗口**，但实测单篇蒸馏要 12 分钟
+         * （本机 TTS 约 745s/篇，生产最长音频 598s）—— 也就是说轮询**必然在
+         * 蒸馏完成之前就放弃**，用户看到「蒸馏超时」，而服务端还在跑。
+         * 这比「网络抖动导致提前放弃」更根本。
+         *
+         * 15s 对分钟级的操作完全够用：等待窗口本来就是分钟级，3s 的刷新密度
+         * 对用户毫无感知价值，却把请求量放大了 5 倍（多篇并发时是 N 倍）。
+         */
+        const val POLL_INTERVAL_MS: Long = 15_000L
 
         /** 连续网络失败多少次才放弃轮询（2026-10-03，约 9 秒） */
         const val MAX_CONSECUTIVE_POLL_FAILURES: Int = 3
 
-        /** 最大轮询次数：30 次 ≈ 90 秒后超时 */
-        const val MAX_POLL_ATTEMPTS = 30
+        /**
+         * 最大轮询次数：60 次 × 15s ≈ 15 分钟。
+         *
+         * 原来 30 次 × 3s = 90 秒，远短于实测的 12 分钟蒸馏耗时，轮询必然提前
+         * 放弃，用户看到「超时」而服务端还在跑。15 分钟覆盖实测耗时并留余量。
+         */
+        const val MAX_POLL_ATTEMPTS = 60
     }
 }
