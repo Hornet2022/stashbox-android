@@ -1,6 +1,7 @@
 package com.tingxia.audio.di
 
 import android.os.Build
+import com.tingxia.audio.BuildConfig
 
 /**
  * 客户端 → 后端基础 URL 统一出口（P1-3）。
@@ -49,8 +50,28 @@ object BaseUrls {
 
     private const val EMULATOR_BASE = "http://10.0.2.2:8100/"
 
+    /**
+     * 构建期覆盖（`-PapiBaseUrl=...`），空串表示没传。
+     *
+     * 存在的理由：有些状态只在真机上验得了，但造它们要写库 —— 配额耗尽
+     * （付费墙 / QuotaBanner）、蒸馏中（状态徽章文案）。没有这个开关时
+     * 想换后端只能改上面两个常量重编译，而那些常量是**线上配置**。
+     *
+     * 指向 e2e 后端（admin-web 的 `e2e-backend.sh`，独立 stashbox_e2e 库）
+     * 时测试数据落在隔离库，生产库零写入。默认空 = 行为完全不变。
+     *
+     * ⚠️ 目标 host 必须在 `network_security_config.xml` 的明文白名单里，
+     * 否则 App 能装能启动但一个请求都发不出去（编译期和单测都发现不了）。
+     */
+    private val buildTimeOverride: String = BuildConfig.API_BASE_URL
+
+    /** true 表示这次构建显式指定了后端，日志里要标出来，别让人以为在连生产。 */
+    val isOverridden: Boolean get() = buildTimeOverride.isNotBlank()
+
     fun gatewayBaseUrl(): String =
-        if (isRunningOnEmulator()) EMULATOR_BASE else "http://$REAL_DEVICE_HOST:$REAL_DEVICE_PORT/"
+        buildTimeOverride.ifBlank {
+            if (isRunningOnEmulator()) EMULATOR_BASE else "http://$REAL_DEVICE_HOST:$REAL_DEVICE_PORT/"
+        }
 
     /**
      * CP-ANDROID-MDNS-FALLBACK：mDNS 解析失败时的兜底局域网 IP。

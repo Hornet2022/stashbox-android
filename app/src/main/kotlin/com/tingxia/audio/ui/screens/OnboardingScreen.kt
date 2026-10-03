@@ -4,9 +4,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
@@ -73,14 +77,28 @@ fun OnboardingScreen(
 
     Scaffold(
         topBar = {
+            // 2026-10-03 真机发现：进度条压在状态栏上（时间/电量那一带），
+            // 「下一步」整块画进系统导航栏区域。
+            //
+            // 原因是 **Scaffold 只把 inset 喂给内容区，不会替 topBar/bottomBar 加**。
+            // Material3 的 `TopAppBar` / `BottomAppBar` 自带 `windowInsets` 参数，
+            // 所以别的屏都没事；这里 topBar 是裸的 `LinearProgressIndicator`、
+            // bottomBar 是裸的 `Row`，没人替它们 inset，于是两头都画到了系统栏底下。
+            // 设备一换导航栏样式（实体/不透明）这个按钮就直接点不到了。
             LinearProgressIndicator(
                 progress = { currentStep / 3f },
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(16.dp),
             )
         },
         bottomBar = {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 if (currentStep > 1) {
@@ -109,6 +127,11 @@ fun OnboardingScreen(
         ) {
             val step = steps[currentStep - 1]
             Column(
+                // 2026-10-03 真机发现：正文原来**顶到屏幕左右边缘**（x=0 / x=屏宽），
+                // 一行字压着屏幕边断行，中文长句读起来像被裁掉了一截 ——
+                // 移动端正文贴边是最基础的排版错误。
+                // 24dp 和付费墙那一屏一致。
+                modifier = Modifier.padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {

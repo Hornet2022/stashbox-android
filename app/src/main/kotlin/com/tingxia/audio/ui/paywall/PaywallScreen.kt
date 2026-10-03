@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -59,6 +61,19 @@ fun PaywallScreen(
         topBar = {
             TopAppBar(
                 title = { Text("升级会员") },
+                // 2026-10-03 真机发现：这一屏顶栏只有标题、没有返回入口，
+                // 是全 App 唯一漏掉的一个（其余 14 屏都接了 ArrowBack）。
+                // 付费墙是**被动**被推上来的 —— 用户在剪藏页点「立即剪藏」，
+                // 配额耗尽才落到这里，他并没有主动选择来看价格。
+                // 结果是：没注意到底部「稍后再说」的人，界面里没有任何
+                // 回去的路，只剩系统返回键/手势 —— 在手势导航机型上那个热区
+                // 常常和 Home 指示条重叠，单手够不着。
+                // onBack 参数本来就在（被「稍后再说」用着），这里补的是图标。
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
             )
         },
     ) { padding ->

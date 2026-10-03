@@ -7,6 +7,23 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// 构建期后端开关：`-PapiBaseUrl=http://192.168.3.100:18100/`
+//
+// 2026-10-03 加这个的原因：有些状态**只在真机上验得了，但造它们要写库**
+// —— 配额耗尽（付费墙 / QuotaBanner）、蒸馏中（状态徽章文案）。
+// 而 base URL 原本是 [BaseUrls] 里的硬编码常量，App 连哪套后端在编译期就
+// 钉死了，想换只能改源码重编译。
+//
+// 有了这个开关就能让 App 指向 admin-web 那套 e2e 后端（:18100，独立的
+// stashbox_e2e 库 + redis db 14），测试数据全落在隔离库里，生产库零写入。
+//
+// 默认空 = 走 [BaseUrls] 原逻辑，不传这个参数时行为完全不变。
+val apiBaseUrlOverride: String = (project.findProperty("apiBaseUrl") as String?)
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?.let { if (it.endsWith("/")) it else "$it/" }
+    ?: ""
+
 android {
     namespace = "com.tingxia.audio"
     compileSdk = 35
@@ -22,6 +39,9 @@ android {
 
         // 调试用默认联调账号（P0-3：避免写死 6892，允许 LoginScreen 在 debug 包覆盖）
         buildConfigField("String", "DEBUG_USER_ID", "\"6892\"")
+
+        // 见文件头 apiBaseUrlOverride 的说明。空串 = 走 BaseUrls 原逻辑。
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrlOverride\"")
     }
 
     buildTypes {
