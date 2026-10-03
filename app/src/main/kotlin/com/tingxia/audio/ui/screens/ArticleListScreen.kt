@@ -16,10 +16,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
@@ -187,6 +186,19 @@ fun ArticleListScreen(
             TopAppBar(
                 title = { Text("听匣") },
                 actions = {
+                    // 2026-10-03 真机发现：这里原来挂了 6 个动作 —— 4 个
+                    // IconButton（标签订阅/通知中心/我的收藏/设置）+ 2 个
+                    // TextButton（「稍后听」「添加」）。360dp 屏上 actions 实测
+                    // 占掉 320dp，给标题只剩 32dp，于是「听匣」被挤成
+                    // 「听」「匣」两行竖排，还压到第一个图标身上。
+                    // 和 99e57af 详情页那处是同一类问题：栏里只放得下
+                    // 高频动作，低频的收进溢出菜单。
+                    // 留下的 3 个是这一页真正的高频入口；「稍后听」和「添加」
+                    // 移进溢出菜单（不删功能，只是降低权重）。
+                    //
+                    // 图标同时从 ⚙ 改成 ⋮：菜单里装的是反馈/稍后听/添加，
+                    // 没有一项是「设置」，齿轮是误导。⋮ 也和详情页一致。
+                    //
                     // CP5.3-C: 标签订阅入口
                     IconButton(
                         onClick = onNavigateToTags,
@@ -220,28 +232,29 @@ fun ArticleListScreen(
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    // CP5.5-B1: 稍后听入口
-                    TextButton(
-                        onClick = onNavigateToLaterListens,
-                        modifier = Modifier.semantics { contentDescription = "稍后听" },
-                    ) {
-                        Text("稍后听", style = MaterialTheme.typography.labelMedium)
-                    }
-                    // CP5.5-A3: 反馈入口
                     IconButton(
                         onClick = { showSettingsMenu = true },
-                        modifier = Modifier.semantics { contentDescription = "设置与反馈" },
+                        modifier = Modifier.semantics { contentDescription = "更多" },
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "设置与反馈",
-                            tint = MaterialTheme.colorScheme.primary,
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "更多",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     DropdownMenu(
                         expanded = showSettingsMenu,
                         onDismissRequest = { showSettingsMenu = false },
                     ) {
+                        // CP5.5-B1: 稍后听入口
+                        DropdownMenuItem(
+                            text = { Text("稍后听") },
+                            onClick = {
+                                showSettingsMenu = false
+                                onNavigateToLaterListens()
+                            },
+                        )
+                        // CP5.5-A3: 反馈入口
                         DropdownMenuItem(
                             text = { Text("反馈与建议") },
                             onClick = {
@@ -256,10 +269,11 @@ fun ArticleListScreen(
                                 onNavigateToFeedbackHistory()
                             },
                         )
-                    }
-                    // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
-                    TextButton(onClick = { /* 占位，CP4.6 才接 */ }) {
-                        Text("添加")
+                        // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
+                        DropdownMenuItem(
+                            text = { Text("添加（开发中）") },
+                            onClick = { showSettingsMenu = false },
+                        )
                     }
                 },
             )
