@@ -113,7 +113,9 @@ fun ArticleListScreen(
     val context = LocalContext.current
 
     var showFeedbackSheet by remember { mutableStateOf(false) }
-    var showSettingsMenu by remember { mutableStateOf(false) }
+    // 原名 showSettingsMenu：菜单里没有一项是「设置」，55a07c0 把它改成 ⋮ 之后
+    // 这个名字就在骗人了。跟图标一起改掉。
+    var showMoreMenu by remember { mutableStateOf(false) }
     // CP-DELETE: 长按卡片 → 删除确认
     var deleteTarget by remember { mutableStateOf<Article?>(null) }
 
@@ -233,7 +235,7 @@ fun ArticleListScreen(
                         )
                     }
                     IconButton(
-                        onClick = { showSettingsMenu = true },
+                        onClick = { showMoreMenu = true },
                         modifier = Modifier.semantics { contentDescription = "更多" },
                     ) {
                         Icon(
@@ -243,14 +245,14 @@ fun ArticleListScreen(
                         )
                     }
                     DropdownMenu(
-                        expanded = showSettingsMenu,
-                        onDismissRequest = { showSettingsMenu = false },
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false },
                     ) {
                         // CP5.5-B1: 稍后听入口
                         DropdownMenuItem(
                             text = { Text("稍后听") },
                             onClick = {
-                                showSettingsMenu = false
+                                showMoreMenu = false
                                 onNavigateToLaterListens()
                             },
                         )
@@ -258,21 +260,21 @@ fun ArticleListScreen(
                         DropdownMenuItem(
                             text = { Text("反馈与建议") },
                             onClick = {
-                                showSettingsMenu = false
+                                showMoreMenu = false
                                 showFeedbackSheet = true
                             },
                         )
                         DropdownMenuItem(
                             text = { Text("反馈历史") },
                             onClick = {
-                                showSettingsMenu = false
+                                showMoreMenu = false
                                 onNavigateToFeedbackHistory()
                             },
                         )
                         // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
                         DropdownMenuItem(
                             text = { Text("添加（开发中）") },
-                            onClick = { showSettingsMenu = false },
+                            onClick = { showMoreMenu = false },
                         )
                     }
                 },
