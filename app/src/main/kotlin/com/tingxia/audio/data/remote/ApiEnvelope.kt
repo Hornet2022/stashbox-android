@@ -64,6 +64,21 @@ val ApiException.isQuotaExceeded: Boolean
 val ApiException.isAuthExpired: Boolean
     get() = httpCode == 401 && bizCode == 40100
 
+/**
+ * 剪藏抓取失败（后端 `map_fetcher_error`）
+ *
+ * 2001 = URL 不支持（HTTP 400），2002 = 抓取失败（HTTP 502/500）。
+ *
+ * 为什么单独判：这两条的 message 是后端**特意写成给用户看的中文**，
+ * 写清了是谁的错、能不能重试、该做什么（网络不通 / 微信要���微信里打开 /
+ * 文章已删除 / 对方限流…）。而 `friendlyError` 的 `httpCode in 500..599`
+ * 分支会把 502 压成一句"服务暂不可用，请稍后再试" —— 那是在说**我们的服务**
+ * 挂了，但实际情况是**对方网站**连不上，用户看完既不知道发生了什么，
+ * 也不知道该不该重试。剪藏是听匣的第一个动作，这一句文案直接决定成败。
+ */
+val ApiException.isCaptureFetchFailed: Boolean
+    get() = bizCode == 2001 || bizCode == 2002
+
 /** 通用解析：从 HttpException 提取 ApiException */
 private val ENVELOPE_JSON = Json { ignoreUnknownKeys = true }
 

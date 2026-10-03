@@ -3,6 +3,7 @@ package com.tingxia.audio.ui
 import com.tingxia.audio.data.remote.ApiException
 import com.tingxia.audio.data.remote.isAudioNotReady
 import com.tingxia.audio.data.remote.isAuthExpired
+import com.tingxia.audio.data.remote.isCaptureFetchFailed
 import com.tingxia.audio.data.remote.isQuotaExceeded
 import com.tingxia.audio.data.remote.parseEnvelope
 import retrofit2.HttpException
@@ -18,6 +19,7 @@ import java.net.UnknownHostException
  *   - 音频未 ready（404 + 40400）→ "音频还在蒸馏中，请稍候"
  *   - 配额用尽（429 + 3001）→ "今日配额已用完，开通会员继续收听"
  *   - JWT 过期（401 + 40100）→ "登录已失效，请重新登录"
+ *   - 剪藏抓取失败（2001/2002）→ **原样用后端文案**（网络不通/微信风控/已删除/限流）
  *   - 其他 → 用 ApiException.message（后端文案更具体）
  * - 5xx → "服务暂不可用，请稍后再试"
  * - 401/403/407 → "登录已失效，请重新登录"
@@ -46,6 +48,10 @@ fun friendlyError(e: Throwable, fallback: String = "操作失败，请稍后再�
             apiEx.isAudioNotReady -> "音频还在蒸馏中，请稍候"
             apiEx.isQuotaExceeded -> "今日配额已用完，开通会员继续收听"
             apiEx.isAuthExpired -> "登录已失效，请重新登录"
+            // 剪藏抓取失败：**用后端给的中文原文**，别压成"服务暂不可用"。
+            // 后端知道到底是网络不通 / 微信风控 / 文章已删 / 对方限流，
+            // 每种给的下一步都不一样，客户端没资格替它概括成一句废话。
+            apiEx.isCaptureFetchFailed -> apiEx.message.ifBlank { "抓取失败，请稍后重试" }
             apiEx.httpCode in 500..599 -> "服务暂不可用，请稍后再试"
             apiEx.httpCode == 404 -> "内容不存在或已删除"
             apiEx.httpCode == 429 -> "请求过于频繁，请稍后再试"
