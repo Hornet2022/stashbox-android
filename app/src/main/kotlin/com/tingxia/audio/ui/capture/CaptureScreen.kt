@@ -51,6 +51,8 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.components.QuotaBanner
 import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.util.formatRelativeTime
+import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.ui.components.statusLabelRes
 
 /**
  * CP11.0.2 剪藏页:粘贴 URL → 后端自动创建文章 + 派蒸馏任务。
@@ -289,8 +291,15 @@ private fun RecentArticleItem(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
+                    // 2026-10-03 真机发现：这里直接插值 article.status，插的是
+                    // 枚举的 toString()，也就是机器码 —— 用户在「最近剪藏」里
+                    // 看到的是「通用 · READY」。同款问题在 DistillScreen 修过一次
+                    // （那里是 .name.lowercase()，显示 "distilling"），这一处漏了。
+                    // ?: 那个 "pending" 更是连兜底都是没翻译的英文。
+                    // 一律走 statusLabelRes —— 全 App 唯一的状态到中文的映射。
                     text = if (isDeleting) "删除中…" else
-                        "${stringResource(sourceLabelRes(article.source))} · ${article.status ?: "pending"}",
+                        "${stringResource(sourceLabelRes(article.source))} · " +
+                            stringResource(statusLabelRes(article.status ?: DistillStatus.PENDING)),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isDeleting) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant,

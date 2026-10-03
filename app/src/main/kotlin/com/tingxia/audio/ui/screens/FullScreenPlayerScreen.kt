@@ -517,8 +517,15 @@ private fun LargeCover(
     modifier: Modifier = Modifier,
 ) {
     // 无封面图 → 用标题首字 + 渐变
+    //
+    // 2026-10-03 真机发现：原来直接取 trim 后的第一个字符。
+    // 中文标题极常以标点开头 —— 少数派那篇是「「让我告诉你，我所了解小米10PRO
+    // 的一切」…」，于是整张封面印了一个孤零零的「，在 296dp 的一方块上像
+    // 一个渲染坏了的括号，而不是封面。
+    // 改成取**第一个字母/数字**：标点、空格、以及开引号括号一律跳过。
+    // 标题全是非字符合计（纯 emoji / 符号）时才回落到「听」。
     val initials = remember(title) {
-        title.trim().firstOrNull()?.toString() ?: "听"
+        title.trim().firstOrNull { it.isLetterOrDigit() }?.toString() ?: "听"
     }
     val coverBrush = remember {
         Brush.linearGradient(

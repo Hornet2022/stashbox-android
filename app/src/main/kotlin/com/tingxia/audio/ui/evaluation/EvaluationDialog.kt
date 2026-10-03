@@ -188,8 +188,14 @@ fun EvaluationDialog(
                 }
 
                 // 跳过原因
+                //
+                // 2026-10-03 真机发现：原来写「≤32 字符，可选」。
+                // 但这一栏下面是 SKIP_REASONS 的 FilterChip 选择器，**根本没有输入框** ——
+                // 「≤32 字符」是后端 skipReason 字段的校验上限（见 Evaluation.kt /
+                // DistillationApi 的注释），属于接口契约细节，不是用户需要知道的东西。
+                // 摆在这里的效果是让人以为能打字，点了没反应还要以为是自己理解错了。
                 Text(
-                    "跳过这篇的（≤32 字符，可选）",
+                    "跳过这篇的（可选）",
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
