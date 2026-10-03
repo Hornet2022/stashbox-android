@@ -93,6 +93,9 @@ import kotlinx.coroutines.launch
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.MoreVert
 
 /**
  * 文章详情页。
@@ -127,6 +130,8 @@ fun ArticleDetailScreen(
     var showLaterListenSheet by remember { mutableStateOf(false) }
     var showFeedbackSheet by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // 2026-10-03：顶栏溢出菜单的展开状态（见 actions 里那排图标的取舍说明）
+    var showOverflow by remember { mutableStateOf(false) }
     var showManualRatingDialog by remember { mutableStateOf(false) }
     var showBitrateSheet by remember { mutableStateOf(false) }
     // CP-TTS-VOICE：换音色 / 重新生成
@@ -359,6 +364,18 @@ fun ArticleDetailScreen(
                     }
                 },
                 actions = {
+                    // ── 2026-10-03 真机发现：顶栏图标互相压住，标题被吃光 ──
+                    // 文章就绪时这一排最多 8 项（收藏/稍后听/评分/音质/反馈/
+                    // 换音色/下载/删除），每个 IconButton 48dp —— 360dp 宽的机器上
+                    // 光按钮就 384dp。而 TopAppBar 的 actions 是一个普通 Row，
+                    // 既不换行也不滚动，于是从右往左把标题和「返回」一起推出屏幕。
+                    // 实测截图：收藏图标压在返回箭头上，最右一个被切掉一半。
+                    //
+                    // 关键判断：顶栏那行标题和正文里 36sp 的衬线大标题是**重复**的。
+                    // 与其把 8 个动作全留在栏里，不如承认标题已经出现过：
+                    // 栏里只留最高频的三件，低频的收进溢出菜单（一次点击仍直达）。
+                    // 删除**不收进菜单** —— 破坏性动作藏菜单是公认的误触反模式，
+                    // 它留在栏里、保持红色、且本来就有二次确认兜底。
                     if (favoritesRepository != null) {
                         IconButton(onClick = { showFavoriteSheet = true }) {
                             Icon(
@@ -367,56 +384,63 @@ fun ArticleDetailScreen(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
-                        TextButton(onClick = { showLaterListenSheet = true }) {
-                            Text("稍后听")
-                        }
                     }
-                    // CP3.7.0: 评分入口（音频就绪后可见）
-                    if (uiState.status == DistillStatus.READY && uiState.audioUrl != null && taskId != null) {
-                        IconButton(onClick = { showManualRatingDialog = true }) {
+                    // 溢出菜单：稍后听 / 评分 / 音质 / 反馈 / 换音色
+                    // 条目的可见条件与原先留在栏里时逐条一致 —— 评分要音频就绪且有
+                    // taskId，音质要 ready 且有 taskId，换音色要 ready，反馈要仓库在。
+                    // 收进菜单不改变任何一条的可达性，只是多一次点击。
+                    Box {
+                        IconButton(onClick = { showOverflow = true }) {
                             Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = if (myRating?.isRated == true) "修改评分" else "评分",
-                                tint = if (myRating?.isRated == true) {
-                                    MaterialTheme.colorScheme.tertiary
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                            )
-                        }
-                    }
-                    // §3.1 码率切换入口
-                    if (uiState.status == DistillStatus.READY && taskId != null) {
-                        IconButton(onClick = { showBitrateSheet = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.Speed,
-                                contentDescription = "音质",
+                                imageVector = Icons.Filled.MoreVert,
+                                contentDescription = "更多操作",
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                         }
-                    }
-                    if (feedbackRepository != null) {
-                        IconButton(onClick = { showFeedbackSheet = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.Edit,
-                                contentDescription = "反馈",
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                    // CP-TTS-VOICE：换音色 + 用新音色重新生成这一篇。
-                    //
-                    // 放在详情页而不是设置页，因为只有这里有**文章上下文** ——
-                    // 「重新生成」重跑的是这一篇，设置页给不出 article_id。
-                    // 自测时发现这个入口原先只在设置页可达（且参数没传），
-                    // 导致整条回溯重跑链路在 App 里是死的。
-                    if (uiState.status == DistillStatus.READY) {
-                        IconButton(onClick = { showVoiceSheet = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.RecordVoiceOver,
-                                contentDescription = "换音色",
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
+                        DropdownMenu(
+                            expanded = showOverflow,
+                            onDismissRequest = { showOverflow = false },
+                        ) {
+                            if (favoritesRepository != null) {
+                                DropdownMenuItem(
+                                    text = { Text("稍后听") },
+                                    onClick = { showOverflow = false; showLaterListenSheet = true },
+                                )
+                            }
+                            if (uiState.status == DistillStatus.READY && uiState.audioUrl != null && taskId != null) {
+                                DropdownMenuItem(
+                                    text = { Text(if (myRating?.isRated == true) "修改评分" else "评分") },
+                                    leadingIcon = { Icon(Icons.Filled.Star, contentDescription = null) },
+                                    onClick = { showOverflow = false; showManualRatingDialog = true },
+                                )
+                            }
+                            if (uiState.status == DistillStatus.READY && taskId != null) {
+                                DropdownMenuItem(
+                                    text = { Text("音质") },
+                                    leadingIcon = { Icon(Icons.Filled.Speed, contentDescription = null) },
+                                    onClick = { showOverflow = false; showBitrateSheet = true },
+                                )
+                            }
+                            if (feedbackRepository != null) {
+                                DropdownMenuItem(
+                                    text = { Text("反馈") },
+                                    leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                    onClick = { showOverflow = false; showFeedbackSheet = true },
+                                )
+                            }
+                            // CP-TTS-VOICE：换音色 + 用新音色重新生成这一篇。
+                            //
+                            // 放在详情页而不是设置页，因为只有这里有**文章上下文** ——
+                            // 「重新生成」重跑的是这一篇，设置页给不出 article_id。
+                            // 自测时发现这个入口原先只在设置页可达（且参数没传），
+                            // 导致整条回溯重跑链路在 App 里是死的。
+                            if (uiState.status == DistillStatus.READY) {
+                                DropdownMenuItem(
+                                    text = { Text("换音色并重新生成") },
+                                    leadingIcon = { Icon(Icons.Filled.RecordVoiceOver, contentDescription = null) },
+                                    onClick = { showOverflow = false; showVoiceSheet = true },
+                                )
+                            }
                         }
                     }
                     // 离线下载：点一下真下载，已下载时点一下删除（2026-10-02 从装饰品改成可用）

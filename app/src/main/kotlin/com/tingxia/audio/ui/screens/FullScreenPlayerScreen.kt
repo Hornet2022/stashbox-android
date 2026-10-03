@@ -203,12 +203,20 @@ fun FullScreenPlayerScreen(
         // 封面尺寸同时看宽度和高度。之前只有 fillMaxWidth().aspectRatio(1f)，
         // 横屏时封面高度等于宽度、等于吃满整个视口高度，把进度条和控制键
         // 顶到屏幕外。取「宽 - 内边距」和「高的 40%」里小的那个。
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // 2026-10-03 真机发现：windowInsetsPadding 原来挂在**可滚动 Column 内部**，
+        // 于是上下 inset 变成了「滚动内容的一部分」—— 滚到顶时那段 padding 在
+        // 屏幕之外，播放/暂停按钮就压到了导航栏上被切掉一截。
+        // inset 必须加在滚动视口的**外面**：视口本身就不含系统栏，
+        // 任何滚动位置都不可能有内容跑到导航栏底下。
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars),
+        ) {
         val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.40f)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
                 // 不可滚动 = 字体放大到 1.3x、或横屏、或小屏时控制键够不着。
                 // 这是音频 App 最要命的断法：暂停不了、拖不动进度。
                 .verticalScroll(rememberScrollState())

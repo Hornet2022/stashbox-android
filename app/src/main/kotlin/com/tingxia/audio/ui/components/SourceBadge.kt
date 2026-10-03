@@ -61,10 +61,21 @@ fun SourceBadge(source: String, modifier: Modifier = Modifier) {
             .background(color.copy(alpha = 0.12f))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
+        // 2026-10-03 真机（深色模式）发现：这里把状态色直接当文字色，
+        // 和 StatusBadge 修复前是同一个模式 —— 11sp 的小字压在 12% 的同色 tint 上。
+        //
+        // 泛化档更糟：它用的是 colorScheme.outline，而 outline 是**描边角色**，
+        // 在深色下是 #8E877E 左右，配 12% tint 底之后实测几乎读不出来。
+        // 描边色本来就不该拿来当文字色。
+        //
+        // 改法与 StatusBadge 一致、也与 Color.kt 里对 tag chips 已经写下并
+        // 实测过的结论一致：**色相只管底色，文字取中性色**。微信绿 / 抖音红
+        // 作为平台识别色仍然完整保留在底色 tint 上，不会因为换了文字色而丢掉
+        // 这条身份信息。
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

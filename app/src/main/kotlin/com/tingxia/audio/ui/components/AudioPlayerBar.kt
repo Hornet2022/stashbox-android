@@ -51,6 +51,7 @@ import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.audio.PlaybackState
 import dagger.hilt.android.EntryPointAccessors
+import androidx.compose.foundation.layout.navigationBarsPadding
 
 /**
  * 底部播放器栏（CP4.4 接 ExoPlayer 真实状态；CP8.5 加 onClick 跳全屏；
@@ -131,6 +132,13 @@ fun AudioPlayerBar(
                     )
                 )
                 .padding(horizontal = 16.dp)
+                // 2026-10-03 真机发现：这一条被系统导航栏压住。
+                // 原来只有一个固定的 bottom = 12.dp，于是整条播放条画在
+                // 屏幕最底部，而三键导航的返回/主页/多任务正好落在那一块 ——
+                // 实测截图里标题和暂停键被系统键叠住，两个都点不准。
+                // navigationBarsPadding 让内容抬到导航栏之上；在手势导航机型上
+                // 这个 inset 约为 0，所以不会凭空多出一块空白。
+                .navigationBarsPadding()
                 .padding(top = 8.dp, bottom = 12.dp),
         ) {
             // 顶部细进度条（整栏可点 → 全屏）
