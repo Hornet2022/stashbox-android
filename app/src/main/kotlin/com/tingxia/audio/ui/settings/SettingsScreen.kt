@@ -22,21 +22,17 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -76,11 +72,14 @@ import javax.inject.Inject
 /**
  * 设置页（CP5.6.0 / 接口文档 §4 G2）。
  *
- * - **个性化听感开关**：接口文档 §4 v1.2 标注 G2 仍开放（用户侧读写未上线）。
- *   UI 先按"灰置不可点"+ 锁图标 + 提示文案预留，待 G2 端点上线即可对接
- *   `GET/PUT /api/v1/user/consent`（拟定路径）。
  * - **数据/隐私**：注销删数 / 历史反馈 / 调试入口（debug 构建可见）
+ * - **朗读**：音色 + 播放速度（CP-TTS-VOICE）
  * - **预加载/缓存**：跳到 OfflineDownloadScreen
+ *
+ * 2026-10-06：§4 的「个性化听感开关」已整体移除（UI + UiState 字段）。
+ * 原来它是一个 `enabled = false` 的 Switch + 锁图标 + 「即将开放」弹窗，
+ * 而后端 G2 端点是否就绪始终没有确认 —— 出货界面里留一个点不动的开关，
+ * 只会让用户以为 App 坏了。要重做请从 `GET/PUT /api/v1/user/consent` 端点开始。
  *
  * 不在主仓：注销功能（等 G2 上线）；推送设置（接口文档未定义）。
  */
@@ -98,7 +97,6 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    var showPersonalizationInfo by remember { mutableStateOf(false) }
     // CP-TTS-VOICE: 音色 + 语速
     var showVoicePicker by remember { mutableStateOf(false) }
     // 2026-10-02: 「意见反馈」不再是死按钮，直接复用已存在的通用反馈 sheet
@@ -216,38 +214,6 @@ fun SettingsScreen(
                 )
             }
 
-            // ── 个性化（§4 G2 灰置） ──
-            SettingsSection("听感体验") {
-                SettingsRow(
-                    icon = Icons.Filled.Science,
-                    title = "个性化听感改写",
-                    subtitle = if (uiState.personalizationEnabled) {
-                        "已开启 — 蒸馏时会按你的口味调整"
-                    } else {
-                        "未开启 — 蒸馏使用通用改写"
-                    },
-                    trailing = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Switch(
-                                checked = uiState.personalizationEnabled,
-                                onCheckedChange = { _ ->
-                                    showPersonalizationInfo = true
-                                },
-                                enabled = false,  // G2 未上线 — 灰置
-                            )
-                        }
-                    },
-                    onClick = { showPersonalizationInfo = true },
-                )
-            }
-
             // ── 缓存 ──
             SettingsSection("缓存与离线") {
                 SettingsRow(
@@ -327,50 +293,6 @@ fun SettingsScreen(
             },
         )
     }
-
-    if (showPersonalizationInfo) {
-        AlertDialog(
-            onDismissRequest = { showPersonalizationInfo = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Lock,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("个性化听感 — 即将开放")
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        "后端已经支持个性化改写（A/B 分桶已落库，4 维评分驱动画像更新），" +
-                            "但客户端读写开关还在路上。",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "**当前你可以做的事**：\n" +
-                            "• 在评分页打 4 维分（hook / section / outro / rhythm）\n" +
-                            "• 高分会自动入个性化改写池\n" +
-                            "• 5 篇以上评分后下次蒸馏会按你的口味调",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "完整开关 + GDPR 注销确认 = G2 端点上线后对接。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showPersonalizationInfo = false }) { Text("知道了") }
-            },
-        )
-    }
 }
 
 /** 播放速度的副标题文案（抽出来是为了和 BUG#9 的降级分支对称）。 */
@@ -413,12 +335,14 @@ private fun SettingsRow(
      * 完全无法区分 —— 后端挂了用户却看不出来。用 error 色区分。
      */
     subtitleIsError: Boolean = false,
-    trailing: @Composable (() -> Unit)? = null,
     /**
      * null = 纯信息行，**不渲染可点击态**（2026-10-02）。
      *
      * 之前这里是必填，于是「没有对应页面」的行只能塞 `{}` 或注释掉的 TODO，
      * 两者都表现为「点下去毫无反应」的死按钮。信息就该是信息。
+     *
+     * 2026-10-06：原来的 `trailing` 插槽（行尾挂 Switch）随个性化开关一起删除 ——
+     * 那一处是它唯一的调用方。行尾真要放控件时，按当时的需要再加回来。
      */
     onClick: (() -> Unit)? = null,
 ) {
@@ -453,9 +377,6 @@ private fun SettingsRow(
                 )
             }
         }
-        if (trailing != null) {
-            trailing()
-        }
     }
 }
 
@@ -484,9 +405,9 @@ class SettingsViewModel @Inject constructor(
         val versionCode: Int = BuildConfig.VERSION_CODE,
         val commitHash: String = "ae6c594",
         val isDebug: Boolean = BuildConfig.DEBUG,
-        // §4 个性化开关:G2 未上线,恒 false;UI 灰置。
-        // 等 GET/PUT /api/v1/user/consent 上线后:
-        //   init { viewModelScope.launch { _uiState.update { it.copy(personalizationEnabled = repository.getConsent().personalize) } } }
-        val personalizationEnabled: Boolean = false,
+        // 2026-10-06：原 `personalizationEnabled`（§4 个性化开关）已连同设置页里那个
+        // 永远灰置的 Switch 一起删除 —— 后端 G2 端点是否就绪一直没人确认，
+        // 留一个点不动的开关 + 「即将开放」弹窗，等于在出货界面里挂一个假入口。
+        // 真要重做这个功能时，从 GET/PUT /api/v1/user/consent 端点开始补。
     )
 }
