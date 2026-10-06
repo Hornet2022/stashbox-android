@@ -41,7 +41,9 @@ enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
  * - 暴露 [StateFlow] 给 Compose UI：[state] 播放状态、[position] / [duration] 进度，
  *   [currentTitle] / [currentAuthor] / [currentAudioUrl] 当前曲目元数据（供全屏/迷你条展示）。
  * - 命令：[play] / [pause] / [stop] / [seekTo] / [resume]，转发给内部 [ExoPlayer]。
- * - 每 500ms 轮询一次 [ExoPlayer.getCurrentPosition] 更新 [position] / [duration]。
+ * - 每 500ms 轮询一次 [ExoPlayer.getCurrentPosition] 更新 [position] / [duration]；
+ *   **仅当有 UI 在观察时**才是 500ms，没人看且还在播时退回 10s 慢跳（喂满听
+ *   判定与断点续听），没人看又没在播时完全停表 —— 详见 [positionHandler] 上的说明。
  *
  * UI（[com.tingxia.audio.ui.components.AudioPlayerBar]）通过 [PlayerControllerEntryPoint]
  * 在 Compose 内取到本单例并 collect 其 StateFlow。
@@ -137,7 +139,49 @@ class PlayerController @Inject constructor(
         setSpeed(preferred)
     }
 
+    /**
+     * 位置轮询泵。这条 Handler 有**两个消费者**，不是只有 UI：
+     *
+     * 1. UI —— Compose 侧 [position] / [duration] 进度条（全屏播放器 + 迷你条）。
+     *    它要 500ms 的细粒度才不跳手，但它**只在有人看的时候**才有意义。
+     * 2. 非 UI —— [reportProgressIfNeeded]（断点续听，每 10s 一次）与
+     *    [checkListenCompletion]（完听判定 / 评分卡）。它们读的是**同一个**
+     *    [_position] / [_duration] 缓存，不碰 Handler。
+     *
+     * 此前只有第 1 类需求，却无条件每 500ms 唤醒一次主线程：
+     * [PlayerController] 是 @Singleton，生命周期跟进程走，用户把 App 切到后台
+     * 后它照跑不误 —— 8 小时 = 57,600 次主线程唤醒，全部花在没人看的屏幕上。
+     *
+     * 所以这里改成**按需定频**（见 [nextPositionPollDelayMs]）而不是无条件轮询。
+     *
+     * 注意这里**不能**简单地在"没人观察"时把泵整个停掉：
+     * [reportProgressIfNeeded] 是从 `progressJob`（Dispatchers.IO）里读
+     * [_position] 的缓存值，ExoPlayer 又必须在主线程访问、不能跨线程现读。
+     * 一旦彻底停泵，后台播放时上报的 position 会**冻在上一次的数**上，
+     * 而断点续听不报错 —— 表现为"地铁里听完回来，进度条又跳回去了"，
+     * 属于本项目最吃过亏的静默失真。所以保留一个与上报同频的慢跳（10s），
+     * 10s 内消费的数据最多陈旧一跳，与原来上报时刻的精度等价。
+     */
     private val positionHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * 泵是否开着。
+     *
+     * 不用 `Handler.hasCallbacks` 判断 —— 那是 API 29+，本项目 minSdk 26。
+     * 主线程读写（Compose 与 [play]/[pause] 都在主线程），加 @Volatile 只是
+     * 防止将来有人从别的线程调进来时读到半新半旧的值。
+     */
+    @Volatile
+    private var positionPumpRunning = false
+
+    /**
+     * 正在观察位置的 UI 数量（[startPositionUpdates] / [stopPositionUpdates] 配对）。
+     *
+     * 全屏播放器和迷你条**同时**可见时会各占一个，所以是计数不是布尔 ——
+     * 用布尔会在"关掉其中一个"时把另一个的更新也一起停掉。
+     */
+    private var positionObserverCount = 0
+
     private val positionRunnable = object : Runnable {
         override fun run() {
             player.let { p ->
@@ -147,8 +191,54 @@ class PlayerController @Inject constructor(
             // CP3.7.0: 完听判定 —— ExoPlayer STATE_ENDED（已到末尾）
             // 或进度 ≥ 90% 视为完听（手动拖到末尾也算）
             checkListenCompletion()
-            positionHandler.postDelayed(this, POLL_INTERVAL_MS)
+            scheduleNextPositionTick()
         }
+    }
+
+    /**
+     * 下一跳的间隔；`null` = **彻底不排**（连慢跳都不排）。
+     *
+     * 分档依据是"这一跳有没有存在的理由"，而不是有没有在播放：
+     * - 有 UI 在观察 → [POLL_INTERVAL_MS]，进度条要跟手。
+     * - 没人看但还在播 → [BACKGROUND_POLL_INTERVAL_MS]，够喂满听判定和
+     *   断点续听（两者的时间粒度都是 10s，见 [PROGRESS_REPORT_INTERVAL_MS]）。
+     * - 没人看且没在播 → null。位置根本不会变，此时任何频率都是纯浪费 ——
+     *   此前 [pause] 不动轮询，暂停后放着 App 也能跑到天亮。
+     */
+    private fun nextPositionPollDelayMs(): Long? = when {
+        positionObserverCount > 0 -> POLL_INTERVAL_MS
+        _state.value == PlaybackState.PLAYING -> BACKGROUND_POLL_INTERVAL_MS
+        else -> null
+    }
+
+    /** 取消当前待执行的一跳并按 [nextPositionPollDelayMs] 重排；泵没开则什么都不做。 */
+    private fun scheduleNextPositionTick() {
+        positionHandler.removeCallbacks(positionRunnable)
+        if (!positionPumpRunning) return
+        nextPositionPollDelayMs()?.let { positionHandler.postDelayed(positionRunnable, it) }
+    }
+
+    /**
+     * 注册一个"我要看进度条"的观察者（由 UI 经生命周期感知调用）。
+     *
+     * 注册后立刻重排：从后台慢跳切回 500ms 不用先等完当前那一跳，
+     * 否则用户点开全屏播放器会有最长 [BACKGROUND_POLL_INTERVAL_MS] 的进度条卡住。
+     */
+    fun startPositionUpdates() {
+        positionObserverCount++
+        if (positionObserverCount > 0) scheduleNextPositionTick()
+    }
+
+    /**
+     * 注销观察者。最后一个注销时退回慢跳 —— 声音继续放，
+     * 只是不再有人需要 500ms 的刷新率了。
+     *
+     * 计数已为 0 时调用是 no-op：这样 UI 侧 `onDispose` 可以无条件配对调用，
+     * 不必先判断"当初到底有没有 start 过"。
+     */
+    fun stopPositionUpdates() {
+        if (positionObserverCount > 0) positionObserverCount--
+        if (positionObserverCount == 0) scheduleNextPositionTick()
     }
 
     /**
@@ -416,6 +506,10 @@ class PlayerController @Inject constructor(
     fun pause() {
         _state.value = PlaybackState.PAUSED
         player.pause()
+        // 暂停后 position 不再变化，此刻没有任何一方的需求要 10s 粒度的数据，
+        // 于是把慢跳也撤掉。UI 仍在观察时 scheduleNextPositionTick 会保留 500ms，
+        // 让用户拖完进度条还能看到位置。
+        scheduleNextPositionTick()
     }
 
     fun stop() {
@@ -446,11 +540,12 @@ class PlayerController @Inject constructor(
     }
 
     private fun startPolling() {
-        positionHandler.removeCallbacks(positionRunnable)
-        positionHandler.postDelayed(positionRunnable, POLL_INTERVAL_MS)
+        positionPumpRunning = true
+        scheduleNextPositionTick()
     }
 
     private fun stopPolling() {
+        positionPumpRunning = false
         positionHandler.removeCallbacks(positionRunnable)
     }
 
@@ -473,6 +568,14 @@ class PlayerController @Inject constructor(
     companion object {
         private const val TAG = "PlayerController"
         private const val POLL_INTERVAL_MS = 500L
+
+        /**
+         * 后台慢跳间隔 —— **不是**拍脑袋的数，取的是
+         * [PROGRESS_REPORT_INTERVAL_MS]：断点续听每 10s 读一次缓存的 position，
+         * 所以 10s 采一次刚好让消费方拿到最新一拍。再密只是白唤醒主线程，
+         * 再疏则上报值可能落后一到两跳。
+         */
+        private const val BACKGROUND_POLL_INTERVAL_MS = 10_000L
         private const val PROGRESS_REPORT_INTERVAL_MS = 10_000L
 
         /** 完听判定：进度 ≥ 90% 视为完听 */

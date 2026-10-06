@@ -37,7 +37,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.tingxia.audio.data.model.DistillStatus
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +57,7 @@ import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.util.formatRelativeTime
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * 文章列表页。
@@ -92,7 +92,7 @@ fun ArticleListScreen(
     commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher? = null,
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
-    val articles by viewModel.articles.collectAsState()
+    val articles by viewModel.articles.collectAsStateWithLifecycle()
 
     // 把「已就绪且有音频」的文章排成播放队列（2026-10-02）。
     // 播放器的上一首/下一首靠它工作 —— 之前播放器里根本没有队列概念。
@@ -114,10 +114,10 @@ fun ArticleListScreen(
             commutePrefetcher.maybePrefetch(articles, learnedWindows = null)
         }
     }
-    val isLoading by viewModel.isLoading.collectAsState()
-    val error by viewModel.error.collectAsState()
-    val activeTag by viewModel.activeTag.collectAsState()
-    val deletingId by viewModel.deletingId.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val activeTag by viewModel.activeTag.collectAsStateWithLifecycle()
+    val deletingId by viewModel.deletingId.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var showFeedbackSheet by remember { mutableStateOf(false) }

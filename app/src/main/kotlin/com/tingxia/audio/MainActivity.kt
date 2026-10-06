@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -159,7 +160,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AuthRoot() {
     val viewModel: AuthViewModel = hiltViewModel()
-    val state by viewModel.state.collectAsState()
+    // collectAsStateWithLifecycle：AuthRoot 在后台时不必继续收 auth 状态
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE) }
     val hasOnboarded = remember { mutableStateOf(prefs.getBoolean("has_onboarded", false)) }

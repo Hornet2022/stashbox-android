@@ -19,7 +19,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +36,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * 离线下载按钮（2026-10-02 从装饰品改成真能用）。
@@ -56,9 +56,9 @@ fun DownloadButton(
 ) {
     if (audioUrl.isNullOrBlank()) return
 
-    val states by viewModel.states.collectAsState()
+    val states by viewModel.states.collectAsStateWithLifecycle()
     val state = remember(articleId, states) { states[articleId] }
-    val cachedUrls by viewModel.cachedUrls.collectAsState()
+    val cachedUrls by viewModel.cachedUrls.collectAsStateWithLifecycle()
     val isCached = remember(articleId, audioUrl, cachedUrls) { audioUrl in cachedUrls }
     val scope = rememberCoroutineScope()
 

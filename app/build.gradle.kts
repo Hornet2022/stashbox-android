@@ -350,6 +350,9 @@ dependencies {
     // Lifecycle / Activity / Navigation
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // collectAsStateWithLifecycle 全项目 20+ 处直接用，此前只靠 viewmodel-compose
+    // 的传递依赖解析到；显式声明，见 libs.versions.toml 里的说明
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
 

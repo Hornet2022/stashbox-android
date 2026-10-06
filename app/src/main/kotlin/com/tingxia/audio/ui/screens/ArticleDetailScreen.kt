@@ -51,7 +51,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +95,7 @@ import javax.inject.Inject
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * 文章详情页。
@@ -115,12 +115,12 @@ fun ArticleDetailScreen(
     feedbackRepository: FeedbackRepository? = null,
     viewModel: ArticleDetailViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val retryState by viewModel.retryState.collectAsState()
-    val deleteState by viewModel.deleteState.collectAsState()
-    val shouldShowEvaluation by viewModel.shouldShowEvaluationDialog.collectAsState()
-    val myRating by viewModel.myRating.collectAsState()
-    val taskId by viewModel.taskId.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val retryState by viewModel.retryState.collectAsStateWithLifecycle()
+    val deleteState by viewModel.deleteState.collectAsStateWithLifecycle()
+    val shouldShowEvaluation by viewModel.shouldShowEvaluationDialog.collectAsStateWithLifecycle()
+    val myRating by viewModel.myRating.collectAsStateWithLifecycle()
+    val taskId by viewModel.taskId.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val article = uiState.article

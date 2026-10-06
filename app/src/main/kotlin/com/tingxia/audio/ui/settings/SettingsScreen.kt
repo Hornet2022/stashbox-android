@@ -35,7 +35,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,7 +94,7 @@ fun SettingsScreen(
     feedbackRepository: com.tingxia.audio.data.repository.FeedbackRepository? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // CP-TTS-VOICE: 音色 + 语速
     var showVoicePicker by remember { mutableStateOf(false) }

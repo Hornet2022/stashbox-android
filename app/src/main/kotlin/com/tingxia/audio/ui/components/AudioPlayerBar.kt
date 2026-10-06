@@ -30,12 +30,12 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,9 +85,13 @@ fun AudioPlayerBar(
             .playerController()
     }
 
-    val playbackState by controller.state.collectAsState()
-    val position by controller.position.collectAsState()
-    val duration by controller.duration.collectAsState()
+    val playbackState by controller.state.collectAsStateWithLifecycle()
+    val position by controller.position.collectAsStateWithLifecycle()
+    val duration by controller.duration.collectAsStateWithLifecycle()
+
+    // 这个栏有活的进度条，必须在可见期间拿到 500ms 刷新率；
+    // 不可见（滚走 / App 退后台）时把轮询降频，声音照放不误。
+    ObservePlayerPositionUpdates(controller)
 
     val isPlaying = playbackState == PlaybackState.PLAYING
     val isBuffering = playbackState == PlaybackState.IDLE && audioUrl != null && position == 0L

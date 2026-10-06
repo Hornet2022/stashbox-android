@@ -42,7 +42,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +57,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.articles.ArticleListViewModel
 import com.tingxia.audio.ui.components.sourceLabelRes
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 data class SkillItem(
     val title: String,
@@ -88,8 +88,8 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit = {},
     viewModel: ArticleListViewModel = hiltViewModel(),
 ) {
-    val articles by viewModel.articles.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
+    val articles by viewModel.articles.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.loadArticles()

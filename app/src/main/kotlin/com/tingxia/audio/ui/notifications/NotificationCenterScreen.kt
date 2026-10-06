@@ -47,7 +47,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +75,7 @@ import com.tingxia.audio.ui.theme.TagSports
 import com.tingxia.audio.ui.theme.TagTech
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +84,7 @@ fun NotificationCenterScreen(
     onNavigateToArticle: (String) -> Unit,
     viewModel: NotificationCenterViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }

@@ -31,7 +31,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +46,7 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.util.formatRelativeTime
 import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.ui.components.statusLabelRes
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * CP10.4 蒸馏中心:列出所有 PENDING / FAILED 文章,提供「立即蒸馏」按钮手动重派。
@@ -64,8 +64,8 @@ fun DistillScreen(
     onDistilled: () -> Unit = {},
     viewModel: DistillViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val deletingId by viewModel.deletingId.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val deletingId by viewModel.deletingId.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // CP-DELETE：删除确认（pending/failed 文章可删）
     var deleteTarget by remember { mutableStateOf<Article?>(null) }

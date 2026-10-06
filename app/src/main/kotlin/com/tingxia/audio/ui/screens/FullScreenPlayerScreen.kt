@@ -58,7 +58,6 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -81,12 +80,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tingxia.audio.audio.PlaybackState
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
+import com.tingxia.audio.ui.components.ObservePlayerPositionUpdates
 import com.tingxia.audio.ui.theme.WarmOchre
 import androidx.hilt.navigation.compose.hiltViewModel
 import android.widget.Toast
@@ -149,19 +150,23 @@ fun FullScreenPlayerScreen(
             .playerController()
     }
 
-    val playbackState by controller.state.collectAsState()
-    val position by controller.position.collectAsState()
-    val duration by controller.duration.collectAsState()
+    // 本页有一条活的进度条 + 大量进度相关状态：可见时把轮询提到 500ms，
+    // 退到后台时降频。声音 / MediaSession / 锁屏控制不经过这条路。
+    ObservePlayerPositionUpdates(controller)
+
+    val playbackState by controller.state.collectAsStateWithLifecycle()
+    val position by controller.position.collectAsStateWithLifecycle()
+    val duration by controller.duration.collectAsStateWithLifecycle()
     // P1-2：真实曲目元数据来自 PlayerController（而非调用方写死的占位标题）
-    val currentTitle by controller.currentTitle.collectAsState()
-    val currentAuthor by controller.currentAuthor.collectAsState()
-    val currentAudioUrl by controller.currentAudioUrl.collectAsState()
-    val currentArticleId by controller.currentArticleId.collectAsState()
+    val currentTitle by controller.currentTitle.collectAsStateWithLifecycle()
+    val currentAuthor by controller.currentAuthor.collectAsStateWithLifecycle()
+    val currentAudioUrl by controller.currentAudioUrl.collectAsStateWithLifecycle()
+    val currentArticleId by controller.currentArticleId.collectAsStateWithLifecycle()
     // CP-TTS-VOICE: 语速的真实来源。档位由服务端下发，不再在 UI 里硬编码五档。
-    val speed by controller.speed.collectAsState()
-    val availableSpeeds by controller.availableSpeeds.collectAsState()
+    val speed by controller.speed.collectAsStateWithLifecycle()
+    val availableSpeeds by controller.availableSpeeds.collectAsStateWithLifecycle()
     // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
-    val currentBitrate by controller.currentBitrate.collectAsState()
+    val currentBitrate by controller.currentBitrate.collectAsStateWithLifecycle()
     val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
     // 三段兜底：当前曲目 → 调用方传入 → 友好占位文案
     val displayTitle = currentTitle.ifBlank { title.ifBlank { "未在播放" } }

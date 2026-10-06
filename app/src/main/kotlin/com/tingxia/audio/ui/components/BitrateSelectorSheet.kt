@@ -18,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.audio.BitrateSelectorViewModel
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.VariantSelectionUseCase
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * §3.1 码率选择弹窗（CP7.4.0 客户端半边）。
@@ -45,7 +45,7 @@ fun BitrateSelectorSheet(
     playerController: PlayerController,
     viewModel: BitrateSelectorViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(taskId) {
         viewModel.load(taskId)

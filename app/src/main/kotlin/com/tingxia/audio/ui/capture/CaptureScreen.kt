@@ -34,7 +34,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +52,7 @@ import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.util.formatRelativeTime
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.ui.components.statusLabelRes
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * CP11.0.2 剪藏页:粘贴 URL → 后端自动创建文章 + 派蒸馏任务。
@@ -71,8 +71,8 @@ fun CaptureScreen(
     onNavigateToDetail: (String) -> Unit = {},
     viewModel: CaptureViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val deletingId by viewModel.deletingId.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val deletingId by viewModel.deletingId.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var inputValue by remember { mutableStateOf(TextFieldValue(uiState.url)) }
     // CP-DELETE：最近剪藏删除确认（与列表页/详情页同一交互语义）

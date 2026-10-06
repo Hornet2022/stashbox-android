@@ -25,7 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.EvaluationResponse
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
  * §2.6 4 维听感评分弹窗（CP3.7.0 评分 UI）。
@@ -61,9 +61,9 @@ fun EvaluationDialog(
     onSubmitted: (EvaluationResponse) -> Unit = {},
     viewModel: EvaluationViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val submitState by viewModel.submitState.collectAsState()
-    val myRating by viewModel.myRating.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val submitState by viewModel.submitState.collectAsStateWithLifecycle()
+    val myRating by viewModel.myRating.collectAsStateWithLifecycle()
     // 从 collect 出来的 uiState 推导 —— 这才是 Compose 认的依赖。
     val canSubmit = uiState.overallScore in 1..5 &&
         (uiState.hookScore == null || uiState.hookScore in 1..5) &&
