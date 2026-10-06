@@ -18,11 +18,80 @@ plugins {
 // stashbox_e2e 库 + redis db 14），测试数据全落在隔离库里，生产库零写入。
 //
 // 默认空 = 走 [BaseUrls] 原逻辑，不传这个参数时行为完全不变。
-val apiBaseUrlOverride: String = (project.findProperty("apiBaseUrl") as String?)
-    ?.trim()
+//
+// 2026-10-06 追加一条硬约束：**release 变体必须显式给值**（见文件末尾的守卫）。
+// 原因：release 里 `di/BaseUrls.kt` 的局域网兜底（Mac-mini.local:8100 /
+// 192.168.3.100）已全部禁用 —— 那两个值只在作者自己家的局域网里可达，
+// 留着就等于发一个「装得上、但任何外部用户的第一个请求必失败」的包。
+// 不给值直接构建失败，比发出去再召回强。
+// debug / minifyDebug 不受此限制：emulator 走 10.0.2.2、真机走 Mac-mini.local，
+// 那本来就是开发用的便利。
+//
+// 环境变量 `TINGXIA_API_BASE_URL` 是 `-PapiBaseUrl` 的等价写法，给 CI 用
+// （CI 的 secret 不适合拼成命令行参数）。
+val apiBaseUrlOverride: String = (
+    (project.findProperty("apiBaseUrl") as String?)?.trim()
+        ?: System.getenv("TINGXIA_API_BASE_URL")?.trim()
+    )
     ?.takeIf { it.isNotEmpty() }
     ?.let { if (it.endsWith("/")) it else "$it/" }
     ?: ""
+
+// ─────────────────────────────────────────────────────────────────────────────
+// release 签名：不生成密钥、不把密钥写进仓库，从 Gradle property / 环境变量读
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 2026-10-06 修 BUG#1：release 变体原本**没有 signingConfig**，
+// `assembleRelease` 打出来的是未签名 APK —— 装不上任何真机、进不了任何商店，
+// 是个废产物。而 CI（`.github/workflows/ci.yml`）只跑 lint / test / assembleDebug，
+// 从不构建 release，所以这个洞一直没暴露。
+//
+// 为什么不退化成「用 debug key 签 release」：
+// debug key 签出来的包一旦装到用户手机上，之后换正式 key 就**装不上去覆盖**
+// （Android 要求签名一致），只能卸载重装 → 本地库、登录态、下载进度全丢。
+// 那种事故比「发不了版」严重得多，而且不可挽回。所以这里选：缺配置就构建失败。
+//
+// 需要下面 4 项（Gradle property 优先，其次同名环境变量）：
+//
+//     store 文件路径    -PreleaseStoreFile      或 TINGXIA_RELEASE_STORE_FILE
+//     store 密码        -PreleaseStorePassword  或 TINGXIA_RELEASE_STORE_PASSWORD
+//     key 别名          -PreleaseKeyAlias       或 TINGXIA_RELEASE_KEY_ALIAS
+//     key 密码          -PreleaseKeyPassword    或 TINGXIA_RELEASE_KEY_PASSWORD
+//     密钥库类型(可选)  -PreleaseKeyStoreType   或 TINGXIA_RELEASE_KEY_STORE_TYPE
+//
+// store 文件支持绝对路径，或相对 **app/ 模块目录** 的相对路径。
+// 密钥与密码只放本机 `~/.gradle/gradle.properties` 或 CI secret；
+// **不要**写进仓库里的 gradle.properties —— 那个文件是要提交上去的。
+//
+// debug / minifyDebug 完全不需要这些：debug 走默认 debug key，
+// minifyDebug 在下面显式指定 debug key（见 buildTypes 里的注释）。
+
+/** (说明, Gradle property 名, 环境变量名)。 */
+val releaseSigningSpecs = listOf(
+    Triple("store 文件路径（keystore）", "releaseStoreFile", "TINGXIA_RELEASE_STORE_FILE"),
+    Triple("store 密码", "releaseStorePassword", "TINGXIA_RELEASE_STORE_PASSWORD"),
+    Triple("key 别名", "releaseKeyAlias", "TINGXIA_RELEASE_KEY_ALIAS"),
+    Triple("key 密码", "releaseKeyPassword", "TINGXIA_RELEASE_KEY_PASSWORD"),
+)
+
+/** Gradle property 优先，其次同名环境变量；都没有 = 空串（视为缺失）。 */
+fun signingInput(propertyName: String, envName: String): String =
+    ((project.findProperty(propertyName) as String?)?.trim()
+        ?: System.getenv(envName)?.trim()).orEmpty()
+
+/** 缺失的签名项（空列表 = 齐全）。debug / minifyDebug 不看这个值。 */
+val missingReleaseSigning = releaseSigningSpecs.filter { (_, propertyName, envName) ->
+    signingInput(propertyName, envName).isEmpty()
+}
+
+val releaseStoreFilePath = signingInput("releaseStoreFile", "TINGXIA_RELEASE_STORE_FILE")
+val releaseStorePassword = signingInput("releaseStorePassword", "TINGXIA_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = signingInput("releaseKeyAlias", "TINGXIA_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = signingInput("releaseKeyPassword", "TINGXIA_RELEASE_KEY_PASSWORD")
+val releaseKeyStoreType = signingInput("releaseKeyStoreType", "TINGXIA_RELEASE_KEY_STORE_TYPE")
+
+/** release 构建没有显式后端地址 —— 局域网兜底在 release 里已禁用。 */
+val missingApiBaseUrlForRelease = apiBaseUrlOverride.isEmpty()
 
 android {
     namespace = "com.tingxia.audio"
@@ -44,6 +113,25 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrlOverride\"")
     }
 
+    signingConfigs {
+        // 只在 4 项齐全时才创建。缺项时**不创建** —— 这样下面 release 变体里的
+        // `signingConfigs.getByName("release")` 也不会抛异常；否则「只想构建
+        // debug」的人会被签名配置拦住（配置期对所有变体求值，与本次构建哪个
+        // 变体无关）。缺项这件事由文件末尾的守卫报错，且早于任何任务执行。
+        if (missingReleaseSigning.isEmpty()) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                // 不给就沿用 JDK 默认类型（JDK 9+ 默认 pkcs12），别硬写成 JKS。
+                if (releaseKeyStoreType.isNotEmpty()) {
+                    storeType = releaseKeyStoreType
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
             // 2026-10-03 开 R8：release 一直没混淆/裁剪，实测 15MB。
@@ -55,6 +143,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // BUG#1（2026-10-06）：这里原来**一个签名配置都没有**，
+            // assembleRelease 产出的是未签名 APK，而 CI 只跑 assembleDebug，
+            // 于是没人会发现。现在签名来自文件头的 releaseSigningSpecs 那 4 项。
+            //
+            // ⚠️ 必须条件挂载：缺项时保持 null，交给文件末尾的守卫报错。
+            // 在这里无条件 getByName("release") 会抛 IllegalArgumentException，
+            // 那会把「只构建 debug」也一起拦下。
+            if (missingReleaseSigning.isEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -111,6 +209,117 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// release 前提守卫（2026-10-06，BUG#1 未签名 + BUG#2 局域网地址）
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 两项前提都只在**构建 release 产物**时要求，debug / minifyDebug 一行配置都不用加：
+//
+//   1. release 签名 4 项齐全（否则产出未签名 APK —— 装不上、进不了商店）
+//   2. 显式后端地址（否则 release 只能去连作者家局域网里那一台机器）
+//
+// 为什么不把检查写成「无条件在配置期抛」：Kotlin DSL 的配置期对**所有**变体求值，
+// 无条件抛就等于 debug 也构建不了。判据必须是「这次请求的任务里有没有 release 产物」。
+//
+// 为什么不靠 AGP 自己报错：AGP 对「release 没签名配置」是完全接受的（默认行为就是
+// 不签名），不配 `signingConfig` 时它一声不响地产出未签名 APK —— 这正是 BUG#1
+// 能在仓库里活这么久的原因。
+
+/**
+ * 任务名是不是「会产出或消费可安装、可分发产物」的 release 任务。
+ *
+ * 覆盖 AGP 8.x 实际生成的：`assembleRelease` / `assemble<Flavor>Release` /
+ * `bundleRelease` / `packageRelease` / `installRelease` / `signReleaseBundle` /
+ * `validateSigningRelease`。
+ *
+ * 判定必须**两头都卡**（前缀 + 以 Release 结尾），不能只看前缀：
+ * `bundleReleaseClassesToRuntimeJar` / `bundleReleaseClassesToCompileJar` 是
+ * Kotlin 给 compile classpath 用的 classes jar，名字也以 bundle 开头，
+ * 而 `./gradlew :app:test` 会把所有变体（含 release）的单测都拉进来 ——
+ * 只看前缀的话，CI 的 test job 会被这个守卫直接拦挂。
+ *
+ * 同理刻意**不**拦 `compileReleaseKotlin` / `lintRelease` / `testReleaseUnitTest` /
+ * `packageReleaseSources`：那几个不碰签名也不打包产物，拦下来只会逼着人在
+ * 只想编译或跑测试时也去配密钥。
+ */
+fun targetsReleaseArtifact(taskName: String): Boolean {
+    val t = taskName.substringAfterLast(':')
+    return when {
+        // assemble / bundle / install / package：AGP 的产物任务一律以变体名结尾
+        t.startsWith("assemble") || t.startsWith("bundle") ||
+            t.startsWith("install") || t.startsWith("package") -> t.endsWith("Release")
+        t.startsWith("sign") -> t.contains("Release")        // signReleaseBundle
+        t.startsWith("validateSigning") -> t.contains("Release")
+        else -> false
+    }
+}
+
+/**
+ * 守卫的报错文案。逐条列出**缺了什么**、**用哪个 property / 环境变量补** ——
+ * 只写「请配置签名」等于让操作者自己猜，猜错了还会回来问第二遍。
+ */
+fun releasePrerequisiteError(triggeredBy: List<String>): String = buildString {
+    appendLine()
+    appendLine("✗ release 构建前提不满足，已中止（触发任务：${triggeredBy.joinToString()}）")
+    appendLine()
+    appendLine("拦在这里的原因：缺了下面任何一项，打出来的包都是「看起来正常、实际发不出去」——")
+    appendLine("  • 没有签名的 APK：装不上任何设备，任何商店都不收，等于废产物；")
+    appendLine("  • 没有后端地址的 APK：release 里局域网兜底（Mac-mini.local:8100 / 192.168.3.100）")
+    appendLine("    已禁用，不显式给地址就只能连一台「只有作者家里通」的机器：装得上、登不进、")
+    appendLine("    第一个请求就失败 —— 而这种问题只有真机 + 外网才能暴露。")
+    appendLine("  与其发出去再召回，不如现在就失败。")
+    if (missingReleaseSigning.isNotEmpty()) {
+        appendLine()
+        appendLine("① 缺少 release 签名配置（Gradle property 优先，其次同名环境变量）：")
+        missingReleaseSigning.forEach { (label, propertyName, envName) ->
+            appendLine("     ✗ $label  →  -P$propertyName  或  $envName")
+        }
+        appendLine("   完整说明见 app/build.gradle.kts 顶部「release 签名」注释。")
+    }
+    if (missingApiBaseUrlForRelease) {
+        appendLine()
+        appendLine("② 缺少后端地址（release 必须显式指定）：")
+        appendLine("     ✗ 后端 base URL  →  -PapiBaseUrl=https://<你的后端>/  或  TINGXIA_API_BASE_URL=https://<你的后端>/")
+        appendLine("   debug / minifyDebug 不受此限制：emulator → 10.0.2.2:8100，真机 → Mac-mini.local:8100。")
+    }
+    appendLine()
+    appendLine("示例（值请自行替换；密码只放本机 ~/.gradle/gradle.properties 或 CI secret，")
+    appendLine("不要写进仓库里那个要提交的 gradle.properties）：")
+    appendLine("  ./gradlew :app:assembleRelease \\")
+    appendLine("      -PapiBaseUrl=https://example.internal/ \\")
+    appendLine("      -PreleaseStoreFile=/abs/path/tingxia.jks \\")
+    appendLine("      -PreleaseStorePassword=… -PreleaseKeyAlias=… -PreleaseKeyPassword=…")
+    appendLine()
+}
+
+// 前提齐全就什么都别做 —— release 守卫只负责「缺东西时报错」，
+// 不负责在配置合法时反过来拦人（否则 -P 参数给对了却照样失败，比不设守卫还糟）。
+if (missingReleaseSigning.isNotEmpty() || missingApiBaseUrlForRelease) {
+
+    // 拦截点 1：命令行直接点名了 release 产物任务。这是最常见的入口，也是报错最直接的时机；
+    // `assembleRelease --dry-run` 也会命中（不需要真去构建就能验证守卫）。
+    val releaseTasksNamedOnCli = gradle.startParameter.taskNames.filter(::targetsReleaseArtifact)
+    if (releaseTasksNamedOnCli.isNotEmpty()) {
+        throw GradleException(releasePrerequisiteError(releaseTasksNamedOnCli))
+    }
+
+    // 拦截点 2：任务图就绪后再查一次，覆盖 `./gradlew build` / `:app:build` 这类
+    // 「名字里没有 Release、但图里含 assembleRelease」的入口 —— 否则从那里照样能
+    // 打出一个未签名的 release APK，也就是 BUG#1 原来的样子。
+    //
+    // 注：本工程未开启 configuration cache（gradle.properties 里没有
+    // org.gradle.configuration-cache），taskGraph 在配置期可用。将来若开启配置缓存，
+    // 拦截点 2 需要改成 AGP variant API 的回调（拦截点 1 不受影响，仍然有效）。
+    // 用 listener 写而不是 `taskGraph.whenReady`：Kotlin DSL 里 whenReady 只有 Groovy 的
+    // Closure 重载能被解析，Action 重载在脚本编译期过不了类型推断。
+    gradle.taskGraph.addTaskExecutionGraphListener(TaskExecutionGraphListener { graph ->
+        val hit = graph.allTasks.map { it.name }.filter(::targetsReleaseArtifact)
+        if (hit.isNotEmpty()) {
+            throw GradleException(releasePrerequisiteError(hit.distinct()))
+        }
+    })
 }
 
 // Room 的 schema 导出：迁移时要用（没有它 Room 只能靠 recreate 丢数据）

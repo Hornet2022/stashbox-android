@@ -12,6 +12,8 @@ import com.tingxia.audio.BuildConfig
  * - 真机：`http://Mac-mini.local:8100/`
  * - emulator：`http://10.0.2.2:8100/`
  *
+ * ⚠️ 这两条**只对 debug / minifyDebug 成立**；release 的规则见下节（BUG#2）。
+ *
  * 判定规则：emulator Build.FINGERPRINT 通常含 `generic` / `sdk_gphone`，Build.PRODUCT 含 `sdk`。
  *
  * ## 为什么用 mDNS 主机名而不是 IP（CP-ANDROID-MDNS）
@@ -21,15 +23,22 @@ import com.tingxia.audio.BuildConfig
  *
  * `Mac-mini.local` 走 mDNS 解析，**不随 DHCP 变化**，同一局域网内都能用。
  *
- * ## 将来切公网域名（CP-ANDROID-PUBLIC-DOMAIN）
+ * ## release 不许用局域网地址（2026-10-06，BUG#2）
  *
- * 本地开发完成后会部署到公网并绑域名。到时**只改下面两个常量**即可，
- * 不用再全工程搜 IP：
+ * 下面这套 `Mac-mini.local` / `192.168.3.100` 兜底**只在 debug / minifyDebug 里成立**。
+ * 它俩都在 `network_security_config.xml` 的明文白名单里，而这份白名单会跟着
+ * release 包一起出厂 —— 也就是说 release APK 在任何一台**不在作者家局域网**的设备上，
+ * 只能连那台机器，第一个请求必然失败（`UnknownHostException` / 明文被拦）。
+ * 这种包能装、能启动、登录才炸，正是最坏的一类出货缺陷。
  *
- *     [REAL_DEVICE_HOST]  → api.你的域名.com
- *     [REAL_DEVICE_PORT]  → 若走标准 443 改成空串
+ * 所以 release 的取值规则改成：**只认构建期显式给的地址，没给就在构建期直接失败**
+ * （守卫见 `app/build.gradle.kts` 的「release 前提守卫」，通过
+ * `-PapiBaseUrl` / `TINGXIA_API_BASE_URL` 传入）。这里再加一道运行期兜底：
+ * 万一有人绕过守卫拼出一个 release 产物，也在**第一次用时立刻崩**，
+ * 而不是静默去连一台只有作者家里能连的机器。
  *
- * 同时要改的两处配套（否则上公网后必然出问题）：
+ * 公网域名定下来后，release 只需构建时带上它，不需要改这里的任何常量。
+ * 仍要一并处理的两处配套（否则上公网后必然出问题）：
  *   1. `res/xml/network_security_config.xml` —— 把该域名加进明文白名单，
  *      或彻底改 https 后从白名单移除；
  *   2. 服务端 `OSS_PUBLIC_BASE_URL` —— 音频 URL 由服务端
@@ -40,6 +49,16 @@ import com.tingxia.audio.BuildConfig
  */
 object BaseUrls {
     /**
+     * 当前是不是 release 产物。
+     *
+     * 用 `BuildConfig.BUILD_TYPE` 判，而不是 `BuildConfig.DEBUG`：后者对
+     * `minifyDebug` 是 false，而那个变体恰恰是**真机验证 R8** 用的
+     * （2026-10-03，见 app/build.gradle.kts 里的注释），必须继续允许连局域网。
+     */
+    private val isReleaseBuild: Boolean =
+        BuildConfig.BUILD_TYPE.equals("release", ignoreCase = true)
+
+    /**
      * 真机用的服务端主机。mDNS 名，不随 DHCP 变化。
      * 上公网后改成域名（保留 scheme 与端口约定；若走 https/443 则端口段置空）。
      */
@@ -49,6 +68,12 @@ object BaseUrls {
     private const val REAL_DEVICE_PORT = "8100"
 
     private const val EMULATOR_BASE = "http://10.0.2.2:8100/"
+
+    /**
+     * 开发用兜底局域网 IP（Mac mini 的当前 DHCP 地址）。
+     * release 不暴露它 —— 出口是 [FALLBACK_LAN_IP]（release 下为空串）。
+     */
+    private const val DEV_FALLBACK_LAN_IP = "192.168.3.100"
 
     /**
      * 构建期覆盖（`-PapiBaseUrl=...`），空串表示没传。
@@ -68,10 +93,23 @@ object BaseUrls {
     /** true 表示这次构建显式指定了后端，日志里要标出来，别让人以为在连生产。 */
     val isOverridden: Boolean get() = buildTimeOverride.isNotBlank()
 
-    fun gatewayBaseUrl(): String =
-        buildTimeOverride.ifBlank {
-            if (isRunningOnEmulator()) EMULATOR_BASE else "http://$REAL_DEVICE_HOST:$REAL_DEVICE_PORT/"
+    /**
+     * App 实际连的后端。
+     *
+     * debug / minifyDebug：显式覆盖优先，否则 emulator → 10.0.2.2、真机 → Mac-mini.local。
+     * release：**只认显式覆盖**。没给就抛，而不是回落到局域网地址 ——
+     * 见类注释「release 不许用局域网地址」（BUG#2）。正常流程下 release 根本到不了
+     * 这一行（构建期守卫先失败），这里只是防止有人绕过守卫产出「能装、连不上」的包。
+     */
+    fun gatewayBaseUrl(): String {
+        if (buildTimeOverride.isNotBlank()) return buildTimeOverride
+        check(!isReleaseBuild) {
+            "release 构建没有配置后端地址（-PapiBaseUrl / TINGXIA_API_BASE_URL）。" +
+                "release 已禁用局域网兜底（$REAL_DEVICE_HOST:$REAL_DEVICE_PORT / ${lanFallbackIpOrDev()}），" +
+                "回落到它会让装出去的包在作者家之外一个请求都发不出去。请带 -PapiBaseUrl=... 重新构建。"
         }
+        return if (isRunningOnEmulator()) EMULATOR_BASE else "http://$REAL_DEVICE_HOST:$REAL_DEVICE_PORT/"
+    }
 
     /**
      * CP-ANDROID-MDNS-FALLBACK：mDNS 解析失败时的兜底局域网 IP。
@@ -95,12 +133,25 @@ object BaseUrls {
      *
      * ⚠️ 这个 IP 是**当前 Mac mini 的 DHCP 地址，换网络后要改这里重编译**。
      * 它只影响「mDNS 恰好不可用」这一个降级路径；mDNS 正常时压根不会用到。
-     * 真要根治，应该上公网域名（见 CP-ANDROID-PUBLIC-DOMAIN）。
+     * 真要根治，应该上公网域名（见类注释「release 不许用局域网地址」）。
+     *
+     * **release 里它是空串**（2026-10-06，BUG#2）：连同 [REAL_DEVICE_HOST_NAME] 一起
+     * 置空，兜底路径在 release 里就**根本匹配不到任何 host** ——
+     * 免得哪天有人绕过构建期守卫，这个写死的 DHCP 地址仍然能被一个 release 包用上。
+     * [MdnsFallbackDns] 的比对是 `hostname == REAL_DEVICE_HOST_NAME`，空串匹配不到
+     * 任何真实主机，于是它不会走到 `InetAddress.getByName("")` 那条路。
      */
-    const val FALLBACK_LAN_IP = "192.168.3.100"
+    val FALLBACK_LAN_IP: String = if (isReleaseBuild) "" else DEV_FALLBACK_LAN_IP
 
-    /** 需要兜底判断的主机名。别的 host 解析失败要照常抛错，别把真实 DNS 问题一起吞掉。 */
-    const val REAL_DEVICE_HOST_NAME = REAL_DEVICE_HOST
+    /**
+     * 需要兜底判断的主机名。别的 host 解析失败要照常抛错，别把真实 DNS 问题一起吞掉。
+     * release 里为空串（原因同 [FALLBACK_LAN_IP]）。
+     */
+    val REAL_DEVICE_HOST_NAME: String = if (isReleaseBuild) "" else REAL_DEVICE_HOST
+
+    /** 只用于报错文案：把 release 下被禁用的局域网地址原样告诉操作者。 */
+    private fun lanFallbackIpOrDev(): String =
+        if (isReleaseBuild) "已禁用" else DEV_FALLBACK_LAN_IP
 
     private fun isRunningOnEmulator(): Boolean =
         Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
