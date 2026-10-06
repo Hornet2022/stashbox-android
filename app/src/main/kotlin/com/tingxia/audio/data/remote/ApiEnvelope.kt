@@ -60,9 +60,42 @@ val ApiException.isAudioNotReady: Boolean
 val ApiException.isQuotaExceeded: Boolean
     get() = bizCode == 3001
 
-/** JWT 过期：refresh-token 失败后重登录 */
+/**
+ * 会话失效（JWT 缺失 / 过期）：需要重新登录。
+ *
+ * 以 **HTTP 状态码**为判据，业务码只作为**加强信号**，不是必要条件。
+ *
+ * ## 为什么不能再要求业务码同时是 40100
+ *
+ * 业务码来自响应体，而响应体经常拿不到：[parseEnvelope] 在 body 缺失或不是标准
+ * 信封时给的是 `bizCode = 0`（网关 / 反代直接吐的裸 401 更是连信封都没有）。
+ * 原来写成 `httpCode == 401 && bizCode == 40100`，于是对最常见的
+ * 「401 + 没有业务码」恒为 false —— 一次真实的掉登录会一路掉到
+ * `httpCode in 400..499` 分支，显示成「请求失败（401）」：一句废话，
+ * 不会提示用户重新登录。而 `friendlyError` 里那条真正写着 401/403/407 →
+ * 「登录已失效」的分支位于裸 [retrofit2.HttpException] 兜底里，只要
+ * parseEnvelope 成功构造出 ApiException（几乎总是如此）就永远到不了。
+ *
+ * ## 业务码怎么当加强信号用
+ *
+ * 后端 `common/exceptions.py::_STATUS_CODE_MAP` 把所有裸 HTTP 401 统一映射成
+ * `code=40100`，所以 401 + 40100 是「后端明确说的过期」；`bizCode == 0` 表示
+ * 信封没拿到，按 401 处理。而 401 配上一个**别的**业务码，说明这一次 401 是针对
+ * 某个具体请求的（不是整个会话没了），此时不该在客户端推断成全局登出。
+ *
+ * ## 403 为什么不在这���
+ *
+ * 这个后端大量用 403 表达**跟登录无关**的拒绝：`Forbidden`（40300）用于归属校验
+ * （"not the owner of this article"）、管理员 tier 校验；配额用尽是 403 + code 3001
+ * （见 [isQuotaExceeded]）；dev token 端点关闭也是 403。把它们说成「登录已失效」
+ * 会把用户往错误的路上引（尤其配额：重登多少次都不会让配额回来）。
+ * 407（proxy auth required）在本后端完全没用到。
+ */
 val ApiException.isAuthExpired: Boolean
-    get() = httpCode == 401 && bizCode == 40100
+    get() = httpCode == 401 && (bizCode == 0 || bizCode == BIZ_CODE_AUTH_EXPIRED)
+
+/** 后端对「未认证 / token 过期」的业务码：HTTP 401 → code 40100（common/exceptions.py）。 */
+private const val BIZ_CODE_AUTH_EXPIRED = 40100
 
 /**
  * 剪藏抓取失败（后端 `map_fetcher_error`）

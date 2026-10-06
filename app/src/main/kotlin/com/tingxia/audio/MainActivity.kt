@@ -166,6 +166,20 @@ private fun AuthRoot() {
 
     LaunchedEffect(Unit) { viewModel.checkLogin() }
 
+    // 会话在后台过期时，必须有人把 AuthRoot 拉回登录页。
+    //
+    // 原来只有上面那一次 checkLogin（LaunchedEffect(Unit)，冷启动跑一次就再也不跑），
+    // 所以 AuthState 在整个进程生命周期里只被算过这一次：access token 过期后，
+    // AuthInterceptor 清掉 token 但 AuthState 仍是 LoggedIn —— 用户停在文章列表上
+    // 看起来还登着，每个请求都 401，而且**再也回不到登录页**，不杀进程就恢复不了。
+    //
+    // 现在 AuthInterceptor 在 refresh 确定失败时发 SessionExpirySignal，这里收到就把
+    // 状态翻回未登录，上面的 when 自动重渲染 LoginScreen（无需导航：登录页不是
+    // NavHost 的 destination）。
+    LaunchedEffect(Unit) {
+        viewModel.sessionExpired.collect { viewModel.onSessionExpired() }
+    }
+
     when (state) {
         is AuthState.Checking -> SplashScreen()
         is AuthState.NotLoggedIn,
