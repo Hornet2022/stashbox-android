@@ -296,6 +296,9 @@ private fun AppNavigation() {
                 onNavigateToNotifications = {
                     navController.navigate("notifications")
                 },
+                // 「剪藏」菜单项原来只关菜单，是个死的 affordance（CP4.6 的 TODO）。
+                // 剪藏屏本来就已经在导航图里，缺的只是这一根接线。
+                onNavigateToCapture = { navController.navigate("capture") },
                 onNavigateToFavorites = {
                     navController.navigate("favorites")
                 },
@@ -413,6 +416,7 @@ private fun AppNavigation() {
                 onNavigateToDetail = { id -> navController.navigate("detail/$id") },
                 onNavigateToTags = { navController.navigate("tags") },
                 onNavigateToNotifications = { navController.navigate("notifications") },
+                onNavigateToCapture = { navController.navigate("capture") },
                 onNavigateToFavorites = { navController.navigate("favorites") },
                 onNavigateToLaterListens = { navController.navigate("later-listens") },
                 onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },

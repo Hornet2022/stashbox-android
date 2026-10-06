@@ -62,7 +62,8 @@ import com.tingxia.audio.util.formatRelativeTime
 /**
  * 文章列表页。
  *
- * - 顶部 TopAppBar：标题「听匣」+ 添加按钮（占位，CP4.6 才接 D9 收集页）
+ * - 顶部 TopAppBar：标题「听匣」+ 标签订阅 / 通知 / 收藏 + ⋮ 溢出菜单
+ *   （菜单内含「稍后听」「反馈与建议」「反馈历史」「剪藏」，见 onNavigateToCapture）
  * - 主体 LazyColumn：文章卡片列表（标题 + 来源 + 状态）
  * - 点击卡片 → [onNavigateToDetail]
  */
@@ -75,6 +76,13 @@ fun ArticleListScreen(
     onNavigateToFavorites: () -> Unit,
     onNavigateToLaterListens: () -> Unit,
     onNavigateToFeedbackHistory: () -> Unit,
+    // BUG#6：溢出菜单里的「剪藏」入口 → CaptureScreen（HomeScreen 的「剪藏」卡片
+    // 和顶部 `+` 按钮走的是同一个 destination）。
+    //
+    // 默认值是空的：**必须**由 MainActivity 显式传入，否则点它仍然什么都不发生
+    // （那正是这个 bug 的原状）。之所以不给它 required，是不想在接线之前就把
+    // 整个 App 的编译弄挂 —— 接线只要两行，见菜单项处的注释。
+    onNavigateToCapture: () -> Unit = {},
     // CP-TAG-FILTER：可由 TagSubscriptionScreen 跳过来携带 tag=slug
     initialTag: String? = null,
     feedbackRepository: FeedbackRepository? = null,
@@ -271,10 +279,26 @@ fun ArticleListScreen(
                                 onNavigateToFeedbackHistory()
                             },
                         )
-                        // TODO(CP4.6): 添加按钮 → 跳转 D9 URL Scheme 收集页
+                        // BUG#6（2026-10-06）：原来这里是
+                        // `text = "添加（开发中）"` + `onClick = { showMoreMenu = false }`
+                        // —— 点它**只关菜单**，什么都不会发生。而剪藏能力早就实现了
+                        // （CaptureScreen + D9 分享导入），用户点的是这个 App 的主入口之一，
+                        // 却拿到一个自称「开发中」的假入口。
+                        //
+                        // 现在跳到与 HomeScreen「剪藏」卡片、`+` 按钮**同一条**剪藏路径，
+                        // 文案也统一成「剪藏」（CaptureScreen 的标题）。
+                        //
+                        // ⚠️ 接线的最后一环在 MainActivity：App 的 NavHost 在那里，
+                        // 屏内拿不到 NavController（compose 的 NavHost 不像 NavHostFragment
+                        // 那样往 View 上打 nav_controller_view_tag，所以本屏不能自己
+                        // findNavController()）。两处 ArticleListScreen(...) 调用各加一行：
+                        //     onNavigateToCapture = { navController.navigate("capture") }
                         DropdownMenuItem(
-                            text = { Text("添加（开发中）") },
-                            onClick = { showMoreMenu = false },
+                            text = { Text("剪藏") },
+                            onClick = {
+                                showMoreMenu = false
+                                onNavigateToCapture()
+                            },
                         )
                     }
                 },
