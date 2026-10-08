@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,6 +105,19 @@ fun AudioPlayerBar(
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+
+    // 安全网：`seeking` 只在 onValueChangeFinished 里复位，而那个回调**不保证**
+    // 一定来 —— 手势被系统打断（父容器拦截、返回手势、多指操作、系统对话框）
+    // 时它可能根本不触发。一旦漏掉，`seeking` 就永久停在 true，
+    // `shownFraction` 会一直读本地 `seekingFraction` 而不是播放位置：
+    // 进度条**冻在你松手那一刻的值**，直到下次碰它才跳一下。
+    //
+    // 这里不依赖任何回调的到达，只看"手指还在不在控件上"：
+    // isPressed 变 false 就是手势一定结束了（无论正常松手还是被打断）。
+    // 正常路径下两者一致，重复复位是幂等的。
+    LaunchedEffect(isPressed) {
+        if (!isPressed) seeking = false
+    }
     val barScale by animateFloatAsState(
         targetValue = if (isPressed) 0.985f else 1f,
         animationSpec = tween(durationMillis = 160),
