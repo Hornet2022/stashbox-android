@@ -2,7 +2,19 @@ package com.tingxia.audio.ui.components
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.platform.LocalLifecycleOwner
+// ⚠️ 必须是 androidx.lifecycle.compose 这一支，不能用 androidx.compose.ui.platform
+// 里那个已被废弃的同名 LocalLifecycleOwner（本项目 Compose BOM 2024.10.01 +
+// lifecycle 2.8.7，正处在这个迁移窗口里）。
+//
+// 废弃版是**另一个** CompositionLocal：取不到真实 ViewTreeLifecycleOwner 时它
+// 落到一个兜底 owner，其 lifecycle 只补发 ON_CREATE。于是下面 onStart 注册的
+// 分支永远进不去 —— `positionObserverCount` 恒为 0，
+// `nextPositionPollDelayMs()` 只能落到 BACKGROUND_POLL_INTERVAL_MS(10s)。
+//
+// 症状极有欺骗性：**声音照放、时长照算，只是进度条匀速地每 10 秒跳一下**，
+// 而播放器内部一切正常（完听判定、断点续听读的都是同一份缓存，不受影响）。
+// 看起来像"产品把刷新率调慢了"，真实原因是观察者压根没注册。
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.tingxia.audio.audio.PlayerController
