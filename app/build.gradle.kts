@@ -101,7 +101,7 @@ android {
         applicationId = "com.tingxia.audio"
         minSdk = 26
         targetSdk = 35
-        // 2026-10-21：从 1/0.1.0 升到 2/0.2.0。
+        // 2026-10-21：从 2/0.2.0 升到 3/0.3.0。
         //
         // 升 versionCode 是**硬要求**：Android 只允许 versionCode 更大的包
         // 覆盖安装。停在 1 的话，内测用户每发一版都要手动卸载重装
@@ -109,8 +109,10 @@ android {
         //
         // ⚠️ 换签名密钥同样会强制重装（Android 要求签名一致）。
         // 所以密钥**只生成一次**，之后一直用同一个 keystore。
-        versionCode = 2
-        versionName = "0.2.0"
+        //
+        // 0.3.0：蒸馏中显示当前阶段（正在合成语音…）+ 修正「约需 12 分钟」的过时文案
+        versionCode = 3
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
