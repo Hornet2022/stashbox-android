@@ -172,4 +172,38 @@ class PrefetchScheduler @Inject constructor(
             req,
         )
     }
+
+    /**
+     * 登出时清掉属于**上一个用户**的后台任务（2026-10-21）。
+     *
+     * 三类都要清，少一类就漏一份上一个用户的数据：
+     * - `audio-prefetch`：预下载 worker 会把上一个用户的文章音频**重新灌进缓存**
+     *   —— 缓存刚被清空，它又下回来，等于登出白清；
+     * - `progress-sync`：把断网期间攒下的进度补传给服务端；
+     * - `distill-ready`：盯的是上一个用户剪藏的文章，ready 了还会给他发本地通知。
+     *
+     * 按 tag 取消是够的：三类 worker 排任务时都打了自己的 tag，
+     * 唯一名（`prefetch-$articleId` / `distill-ready-$articleId`）也带同一个 tag。
+     *
+     * 已在跑的任务也会被取消（WorkManager 会取消 worker 的协程，
+     * 正在发的那次请求随之作废），这正是我们要的：不让旧 token 的请求飞出去。
+     */
+    fun cancelUserScopedWork() {
+        // WorkManager 没初始化时（比如单测环境）不该让登出失败
+        runCatching {
+            val wm = workManager
+            USER_SCOPED_TAGS.forEach { tag ->
+                runCatching { wm.cancelAllWorkByTag(tag) }
+            }
+        }
+    }
+
+    companion object {
+        /** 属于单个用户的后台任务：登出时全部取消。 */
+        private val USER_SCOPED_TAGS = listOf(
+            AudioPrefetchWorker.NAME,
+            ProgressSyncWorker.NAME,
+            DistillReadyWorker.NAME,
+        )
+    }
 }
