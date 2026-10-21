@@ -33,6 +33,9 @@ data class DistillStatusResponse(
     /** `article_id` 仅新路径 §1.3 返回；旧 `GET /distill/{task_id}` 无此字段。 */
     @SerialName("article_id") val articleId: String? = null,
     val status: DistillStatus,
+    // 蒸馏当前阶段（fetch/rewrite/tts/concat），仅 distilling 时非空。
+    // 轮询时拿到它就能显示「正在合成语音…」，而不是笼统的「蒸馏中」。
+    @SerialName("stage") val stage: String? = null,
     @SerialName("task_id") val taskId: String? = null,
     @SerialName("task_status") val taskStatus: String? = null,
     val error: String? = null,

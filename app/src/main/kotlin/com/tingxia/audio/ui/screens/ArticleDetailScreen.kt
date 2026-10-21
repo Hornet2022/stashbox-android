@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +85,7 @@ import com.tingxia.audio.ui.components.BitrateSelectorSheet
 import com.tingxia.audio.ui.components.DownloadButton
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
+import com.tingxia.audio.ui.components.stageLabelRes
 import com.tingxia.audio.ui.evaluation.EvaluationDialog
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.util.formatRelativeTime
@@ -603,10 +605,16 @@ fun ArticleDetailScreen(
 
                         if (uiState.status == DistillStatus.DISTILLING) {
                             Text(
-                                // 原来写「（每 3 秒轮询）」。实现是 15 秒，而且写死不变；
-            // 用户在详情页盯着这一个字，技术实现变成了产品文案。
-            // 蒸馏单篇约 12 分钟，告诉用户真实时长比告诉他轮询频率有用得多。
-            text = "蒸馏中…约需 12 分钟",
+                                // 原来写死「蒸馏中…约需 12 分钟」。两个问题：
+                                //  ① **12 分钟是过时的** —— 实测单篇剪藏到就绪约 2 分钟
+                                //     （LLM 改写 ~11s + TTS 合成 ~75s + 落库），写 12 分钟
+                                //     会让用户以为卡死了；
+                                //  ② 只说「蒸馏中」没有信息量 —— 用户不知道系统干到哪一步。
+                                //
+                                // 现在用服务端上报的阶段（agent 的 current_step）：
+                                // 「正在合成语音…（这一步最久，通常 1~3 分钟）」。
+                                // 没有阶段信息（刚开始、或服务端还没上报）时给通用文案。
+                                text = stringResource(stageLabelRes(uiState.stage)),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )

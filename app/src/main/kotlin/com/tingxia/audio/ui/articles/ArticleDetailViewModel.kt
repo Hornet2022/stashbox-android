@@ -260,7 +260,11 @@ class ArticleDetailViewModel @Inject constructor(
                             _uiState.update { it.copy(status = DistillStatus.FAILED, pollError = "蒸馏失败") }
                             return@launch
                         }
-                        else -> _uiState.update { it.copy(status = resp.status) }
+                        else -> _uiState.update {
+                            // 蒸馏中：带上阶段（fetch/rewrite/tts/concat），
+                            // UI 才能显示「正在合成语音…」而不是笼统的「蒸馏中」。
+                            it.copy(status = resp.status, stage = resp.stage)
+                        }
                     }
                 } catch (e: Exception) {
                     // 单次网络失败不终止轮询：记一次、继续下一轮
@@ -445,6 +449,9 @@ data class ArticleUiState(
     val tags: List<String> = emptyList(),
     val qualityScore: Double? = null,
     val audioDurationSec: Int? = null,
+    // 蒸馏当前阶段（fetch/rewrite/tts/concat）—— 蒸馏中时用来显示
+    // 「正在合成语音…」。值来自服务端 agent 的 current_step。
+    val stage: String? = null,
 ) {
     /** 兼容性 getter：UiState 不存 article.tags（避免字段重复）；UI 可直接读这里 */
     val tagsIfReady: List<String> get() = tags

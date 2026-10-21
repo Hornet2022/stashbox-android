@@ -35,6 +35,21 @@ fun statusLabelRes(status: DistillStatus): Int = when (status) {
 }
 
 /**
+ * 蒸馏阶段 → 文案资源。阶段值来自服务端 agent 的 `current_step`
+ * （fetch / rewrite / tts / concat），不另造一套枚举。
+ *
+ * 未知值（含 null）一律回落到通用文案 —— 服务端加新阶段时，
+ * 旧版 App 不该显示空白。
+ */
+fun stageLabelRes(stage: String?): Int = when (stage) {
+    "fetch" -> R.string.stage_fetch
+    "rewrite" -> R.string.stage_rewrite
+    "tts" -> R.string.stage_tts
+    "concat" -> R.string.stage_concat
+    else -> R.string.stage_unknown
+}
+
+/**
  * 蒸馏状态徽章：pending / distilling / ready / failed / listened。
  *
  * 2026-10-03：文字色从「状态色本身」改成 onSurface。

@@ -11,6 +11,13 @@
     <string name="status_failed">失败</string>
     <string name="status_listened">已听</string>
 
+    <!-- 蒸馏阶段文案（服务端 agent 的 current_step：fetch/rewrite/tts/concat） -->
+    <string name="stage_fetch">正在抓取正文…</string>
+    <string name="stage_rewrite">正在改写成播客稿…</string>
+    <string name="stage_tts">正在合成语音…（这一步最久，通常 1~3 分钟）</string>
+    <string name="stage_concat">正在合并音频…</string>
+    <string name="stage_unknown">蒸馏中…通常 2~4 分钟</string>
+
     <!-- Source badge labels -->
     <string name="source_wechat">公众号</string>
     <string name="source_wechat_mp">公众号文章</string>

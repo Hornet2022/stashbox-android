@@ -45,4 +45,12 @@ data class Article(
     // 以及用全局 TTS 配置合成的（来源不可溯源，服务端刻意不塞假音色）。
     // **只有详情页会带这个字段**，列表接口恒为 null（见 backend 的 schema 注释）。
     @SerialName("tts_voice") val ttsVoice: TtsVoiceBrief? = null,
+    // 蒸馏当前阶段（fetch/rewrite/tts/concat），仅 distilling 时非空。
+    //
+    // 为什么要它：蒸馏是异步长任务，**TTS 合成占时延大头**（上游 RTF≈0.3，
+    // 1000 字稿要合成 4 分钟音频）。只显示「蒸馏中」时用户无从判断是在
+    // 正常干活还是卡死 —— 这个字段让 UI 能显示「正在合成语音…」。
+    //
+    // 阶段值直接取自服务端的 agent current_step，不另造一套枚举。
+    @SerialName("stage") val stage: String? = null,
 )
