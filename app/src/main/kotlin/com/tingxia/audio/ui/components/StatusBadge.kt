@@ -46,6 +46,9 @@ fun stageLabelRes(stage: String?): Int = when (stage) {
     "rewrite" -> R.string.stage_rewrite
     "tts" -> R.string.stage_tts
     "concat" -> R.string.stage_concat
+    // 任务级重试（Arq 重新执行整个蒸馏）—— 不是 agent 图里的节点，
+    // 但客户端要能区分「在干活」和「刚才失败了一次、正在重来」。
+    "retry" -> R.string.stage_retry
     else -> R.string.stage_unknown
 }
 
