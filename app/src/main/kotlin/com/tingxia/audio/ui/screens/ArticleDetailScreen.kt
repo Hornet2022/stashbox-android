@@ -603,17 +603,22 @@ fun ArticleDetailScreen(
                         // CP-DISTILL-TEXT：LLM 听感改写稿（整理后的正文）
                         DistilledScriptCard(scriptText = safeArticle.scriptText)
 
-                        if (uiState.status == DistillStatus.DISTILLING) {
+                        if (uiState.status == DistillStatus.DISTILLING ||
+                            uiState.status == DistillStatus.PENDING
+                        ) {
                             Text(
                                 // 原来写死「蒸馏中…约需 12 分钟」。两个问题：
                                 //  ① **12 分钟是过时的** —— 实测单篇剪藏到就绪约 2 分钟
-                                //     （LLM 改写 ~11s + TTS 合成 ~75s + 落库），写 12 分钟
+                                //     （LLM 改写 ~11s + TTS 合成 ~50s + 落库），写 12 分钟
                                 //     会让用户以为卡死了；
                                 //  ② 只说「蒸馏中」没有信息量 —— 用户不知道系统干到哪一步。
                                 //
                                 // 现在用服务端上报的阶段（agent 的 current_step）：
                                 // 「正在合成语音…（这一步最久，通常 1~3 分钟）」。
                                 // 没有阶段信息（刚开始、或服务端还没上报）时给通用文案。
+                                //
+                                // pending 也要显示：剪藏后到 worker 消费之间是 pending，
+                                // 那段时间用户正盯着这个页面。
                                 text = stringResource(stageLabelRes(uiState.stage)),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,

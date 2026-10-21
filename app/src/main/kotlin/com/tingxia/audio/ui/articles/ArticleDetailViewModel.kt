@@ -170,6 +170,9 @@ class ArticleDetailViewModel @Inject constructor(
                         article = article,
                         status = article.status,
                         audioUrl = initialAudioUrl,
+                        // 首屏就带上阶段（详情接口的 stage 是现读的，不走缓存）——
+                        // 否则要等第一次轮询（15s）才看到「正在合成语音…」。
+                        stage = article.stage,
                         isLoading = false,
                     )
                 }
@@ -187,10 +190,18 @@ class ArticleDetailViewModel @Inject constructor(
                         playerController.seekTo(pos)
                     }
                 }
-                // 文章没 ready 且有 taskId → 启动轮询
-                if (article.taskId != null &&
-                    article.status != DistillStatus.READY &&
-                    article.status != DistillStatus.LISTENED
+                // 状态还没到终态就启动轮询。
+                //
+                // ⚠️ 原来额外要求 `article.taskId != null` —— 但**剪藏后立刻进详情页**时，
+                // 蒸馏任务行（distilled_articles）可能还没建（Arq worker 还没消费到），
+                // task_id 仍是 null → **不启动轮询** → 页面永远停在「待处理」：
+                // 既看不到阶段（正在合成语音…），也等不到就绪，只能靠用户手动下拉刷新。
+                //
+                // 轮询本身只用 articleId 查 /status（taskId 参数在函数体里没被用到），
+                // 所以没有 taskId 也能正常轮询 —— 任务行建好后 /status 会带上它。
+                if (article.status != DistillStatus.READY &&
+                    article.status != DistillStatus.LISTENED &&
+                    article.status != DistillStatus.FAILED
                 ) {
                     startPolling(id, article.taskId)
                 }
@@ -206,7 +217,7 @@ class ArticleDetailViewModel @Inject constructor(
      * ready 后 §1.3 响应已自带 audio_url，可省去再调一次 §1.4 的往返（仅在
      * §1.3 响应缺 audio_url 时回退 §1.4）。
      */
-    private fun startPolling(articleId: String, taskId: String) {
+    private fun startPolling(articleId: String, taskId: String?) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             var attempts = 0
