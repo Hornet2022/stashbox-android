@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  debug 源集专属清单（2026-10-21）。
+
+  这里只声明**调试用**的组件，release / minifyDebug 变体的合并清单里不会有它。
+  刻意不碰 app/src/main/AndroidManifest.xml —— 那个是所有变体共用的，
+  在那里声明 exported 的广播接收器等于把"往剪贴板写任意文本"的能力
+  带进正式包。
+
+  相对类名 `.debug.DebugClipboardReceiver` 里的包名前缀取自
+  build.gradle.kts 的 namespace（com.tingxia.audio），与 applicationId 后缀无关。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+
+        <!--
+          把一段文本写进系统剪贴板（真机 E2E 辅助：adb shell input text 打不了中文）。
+
+          exported=true 是必须的 —— 发广播的是 adb shell（另一个 uid）。
+          风险由"只在 debug 源集存在"来兜底，不是靠权限；
+          lint 的 ExportedReceiver（exported 且不要求权限）在这里是**已知且接受**的。
+        -->
+        <receiver
+            android:name=".debug.DebugClipboardReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="com.tingxia.audio.debug.SET_CLIPBOARD" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>
