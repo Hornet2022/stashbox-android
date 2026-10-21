@@ -1,11 +1,16 @@
 package com.tingxia.audio.audio
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
+import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -18,8 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -65,28 +68,82 @@ class OfflineDownloadManager @Inject constructor(
     /** 持久化缓存目录：<cacheDir>/audio_cache */
     private val cacheDir: File = File(context.cacheDir, "audio_cache")
 
-    private val cache: Cache by lazy {
-        SimpleCache(
-            cacheDir,
-            LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
-            StandaloneDatabaseProvider(context),
-        )
-    }
+    /**
+     * 当前 SimpleCache 实例。
+     *
+     * 刻意**不用 `by lazy`**：登出时要把缓存 release 掉再换一个新的（见 [clearCache]），
+     * 而 `by lazy` 的 val 一旦初始化就再也换不掉 —— release 之后播放器还握着一个
+     * 已释放的 SimpleCache，再播就会撞上 "Cache is already released"。
+     */
+    @Volatile
+    private var cacheInstance: Cache? = null
+
+    /** 换缓存时的锁：保证「release 旧的」与「建新的」不会撞在一起。 */
+    private val cacheLock = Any()
+
+    private val cache: Cache
+        get() = synchronized(cacheLock) {
+            cacheInstance ?: SimpleCache(
+                cacheDir,
+                LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES),
+                StandaloneDatabaseProvider(context),
+            ).also { cacheInstance = it }
+        }
 
     /**
      * 为 ExoPlayer 提供带缓存的 DataSource.Factory。
      * PlayerController.initialize() + AudioPlayerService.onCreate() 调一次即可。
+     *
+     * ## 为什么下载也要走这个工厂（2026-10-21 真机 E2E）
+     *
+     * 离线下载和播放器必须写**同一个缓存条目**，否则下载了也白下 ——
+     * 播放器读的是 key=CacheKeyFactory.DEFAULT(dataSpec) 的条目。
+     *
+     * media3 1.4.1 把 key **哈希**成 `<hash>.uid` 存盘，**没法从文件名反解出 key**：
+     * - legacy 的 `SimpleCache.startFile` / `commitFile` 要靠解析文件名拿 key，
+     *   面对哈希名只能返回 null → `Assertions.checkNotNull` 抛 NPE（message 为 null）
+     *   → UI 上只剩一句「下载失败」，日志里什么都没有；
+     * - v3 路径（`CacheDataSource` / `CacheWriter`）走 `CacheFileMetadataIndex`
+     *   这张真实的索引表，不依赖文件名，所以能正常工作。
+     *
+     * 所以**下载必须用 v3 路径**，而且必须和播放器用**同一个工厂** ——
+     * 否则 key、文件格式、flags 任何一处对不上，下载的文件播放器都读不到。
+     *
+     * @param upstreamFactory 仅供单测注入"上游被调用就炸"的假实现；
+     *        生产走默认的 DefaultHttpDataSource。
      */
-    fun buildCacheDataSourceFactory(): DataSource.Factory {
-        val upstreamFactory = DefaultHttpDataSource.Factory()
+    fun buildCacheDataSourceFactory(
+        upstreamFactory: DataSource.Factory = defaultUpstreamFactory(),
+    ): DataSource.Factory {
+        // 这里**不能**把 cache 实例直接焊进 CacheDataSource.Factory：
+        // 那样播放器会永远握着建工厂那一刻的实例，登出 release 掉它之后再播
+        // 就会撞上 "Cache is already released"。
+        // 包一层：每次建 DataSource 时才去取**当前**的缓存实例，
+        // 于是登出换缓存后播放器自动跟上，不需要重建 ExoPlayer。
+        return DataSource.Factory { buildCacheDataSource(upstreamFactory) }
+    }
+
+    /**
+     * 建一个带缓存的 DataSource（用的是**当前**的缓存实例）。
+     *
+     * 离线下载和播放器都必须经过这里 —— 它们的 key 工厂、flags、文件格式
+     * 必须完全一致，否则下载的音频播放器读不到。
+     */
+    fun buildCacheDataSource(
+        upstreamFactory: DataSource.Factory = defaultUpstreamFactory(),
+    ): CacheDataSource = CacheDataSource.Factory()
+        .setCache(cache)
+        .setUpstreamDataSourceFactory(upstreamFactory)
+        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        .createDataSource()
+
+    /** 默认的上游：普通 HTTP 拉流。 */
+    private fun defaultUpstreamFactory(): DataSource.Factory =
+        DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(DEFAULT_TIMEOUT_MS)
             .setReadTimeoutMs(DEFAULT_TIMEOUT_MS)
             .setAllowCrossProtocolRedirects(true)
-        return CacheDataSource.Factory()
-            .setCache(cache)
-            .setUpstreamDataSourceFactory(upstreamFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-    }
+            .setUserAgent(DOWNLOAD_USER_AGENT)
 
     /**
      * 查某个 URL 是否**已完整**缓存在本地。
@@ -110,13 +167,27 @@ class OfflineDownloadManager @Inject constructor(
      * 再叠一层台账字节数校验，避免 LRU 只留下部分 span 时误报「已下载」。
      */
     suspend fun isCached(audioUrl: String): Boolean {
+        // 2026-10-21 真机 E2E 修（此前会把"半截"误报成"已下载"）：
+        //
+        // 原来没有台账记录时，只要缓存里**有任意 span** 就返回 true。
+        // 但"有 span"不等于"下载完了"——**播放器边播边写也会留下 span**，
+        // 那是正在流的半截。真机上就复现了：用户点"下载到本地"，
+        // 按钮立刻变成"已下载到本地"，而缓存里只有 4878 字节（总共 4.4MB）。
+        //
+        // 台账（downloaded_audio）才是"我们**主动**下载完了"的凭据：
+        // 它只在下载流程走完时才写入，还带着真实的字节数。
+        // 所以：**没有台账记录 = 没下载过**，不能靠 span 猜。
+        //
+        // 台账的完整性判据用实体自带的 `isComplete`（expectedBytes > 0 &&
+        // cachedBytes >= expectedBytes）—— 注意**不是** `fileSizeBytes`：
+        // 那一列是多码率变体用的遗留字段，下载路径从来不写它，
+        // 读它等于永远读到 null，于是判据整个失效。
+        val row = dao.byAudioUrl(audioUrl) ?: return false
+        if (!row.isComplete) return false
         val spans = cache.getCachedSpans(cacheKey(audioUrl))
         if (spans.isNullOrEmpty()) return false
-        val expected = dao.byAudioUrl(audioUrl)?.fileSizeBytes
-        if (expected != null && expected > 0L) {
-            return spans.sumOf { it.length } >= expected
-        }
-        return true
+        // 再叠一层：LRU 可能把文件淘汰了，台账还写着"下完过"
+        return spans.sumOf { it.length } >= row.expectedBytes
     }
 
     /**
@@ -146,57 +217,69 @@ class OfflineDownloadManager @Inject constructor(
         _states.value = _states.value + (articleId to DownloadState.Downloading(0f))
 
         try {
-            val conn = (URL(audioUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = DEFAULT_TIMEOUT_MS
-                readTimeout = DEFAULT_TIMEOUT_MS
-                instanceFollowRedirects = true
-                requestMethod = "GET"
-            }
+            // ── 用 media3 官方的 CacheWriter 写缓存 ──────────────────────────
+            //
+            // 2026-10-21 真机 E2E 挖出来的：离线下载之前**恒失败**，
+            // 而 CI 的单测是绿的。原因有三层，缺一层都跑不通：
+            //
+            // 1) **key 不一致**（最致命）
+            //    播放器走 `CacheDataSource`，它的 key 由 `CacheKeyFactory.DEFAULT`
+            //    哈希得到；下载路径原来直接用原始 URL。于是写的是两份不同的缓存，
+            //    而且原始 URL 根本不是合法文件名 → commit 阶段
+            //    `createCacheEntry` 解析不出 key → 返回 null →
+            //    `Assertions.checkNotNull` 抛 NPE（message 为 null）→
+            //    UI 上只剩一句「下载失败」。
+            //    现在 key 统一走 `cacheKey()`（见 companion object 的说明）。
+            //
+            // 2) **前置条件**
+            //    `SimpleCache.startFile` 字节码第一件事就是
+            //    `contentIndex.get(key) → Assertions.checkNotNull(...)`，
+            //    要求 content 条目已存在（那是 startReadWrite 才建的）。
+            //    直接调 startFile → NPE。
+            //
+            // 3) **文件格式**
+            //    legacy 的 `startFile` 写的是 `key.<index>`，
+            //    而 `CacheDataSource` 写的是 `index.<ts>.v3.exo`。
+            //    两套格式的 commit 互不认 —— 手写 legacy 那套，
+            //    播放器根本读不到。
+            //
+            // `CacheWriter` 把这三件事一次解决：它内部就是
+            // `CacheDataSource` + 同一个 `CacheKeyFactory.DEFAULT`，
+            // key、锁、临时文件、commit 全部由 media3 自己管。
+            //
+            // 为什么以前没人发现：旧版 media3 没有这些前置条件；
+            // 单测绕开了 download()（它要连真服务器）；
+            // CI 里没有"真下载"这条路径。
+            // 症状是内测用户点"下载"永远失败，而"通勤预下载"是产品的招牌功能。
+            // 复用**播放器那个工厂** —— 这是"下载完播放器读得到"的前提。
+            // 自己另建一个 CacheDataSource.Factory 的话，key 工厂 / flags /
+            // 文件格式任何一处对不上，下载就白下了。
+            val dataSource = buildCacheDataSource()
 
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                _states.value = _states.value + (articleId to DownloadState.DownloadError("HTTP $code"))
-                conn.disconnect()
-                return@withContext false
-            }
-
-            val expected = conn.contentLengthLong
+            var expected = 0L
             var written = 0L
-
-            // 通过 Cache 的 span 写入：startFile 拿到临时文件，写完 commitFile。
-            // 注意签名（javap 实测 media3-datasource 1.4.1）：
-            //   startFile(String, long, long) : File        ← 返回 File，不是 CacheSpan
-            //   commitFile(File, long)         : Unit
-            //   isCached(String, long, long)   : Boolean     ← 1.4.1 **是公开的**
-            val pendingFile = cache.startFile(key, 0, if (expected > 0) expected else CACHE_LENGTH_UNSET)
-            try {
-                pendingFile.outputStream().use { out ->
-                    conn.inputStream.use { input ->
-                        val buf = ByteArray(64 * 1024)
-                        while (true) {
-                            if (Thread.currentThread().isInterrupted) {
-                                throw InterruptedException("下载被取消")
-                            }
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            out.write(buf, 0, n)
-                            written += n
-                            if (expected > 0) {
-                                _states.value = _states.value +
-                                    (articleId to DownloadState.Downloading(written.toFloat() / expected))
-                            }
-                        }
-                    }
+            val writer = CacheWriter(
+                dataSource,
+                DataSpec(Uri.parse(audioUrl)),
+                ByteArray(CacheWriter.DEFAULT_BUFFER_SIZE_BYTES),
+            ) { bytesCached, newContentLength, _ ->
+                written = bytesCached
+                if (newContentLength > 0) {
+                    expected = newContentLength
+                    _states.value = _states.value +
+                        (articleId to DownloadState.Downloading(bytesCached.toFloat() / newContentLength))
                 }
+            }
+
+            try {
+                writer.cache()
             } catch (e: Exception) {
-                // 半截文件必须清掉，否则下次 isCached 会误判
+                // 半截文件必须清掉，否则下次 isCached 会误判成"已下载"
                 cache.removeResource(key)
                 throw e
-            } finally {
-                conn.disconnect()
             }
 
-            cache.commitFile(pendingFile, written)
+            if (expected <= 0) expected = written
 
             dao.upsert(
                 DownloadedAudioEntity(
@@ -211,6 +294,10 @@ class OfflineDownloadManager @Inject constructor(
             )
             _states.value = _states.value + (articleId to DownloadState.Downloaded)
             true
+        } catch (e: HttpDataSource.InvalidResponseCodeException) {
+            _states.value = _states.value +
+                (articleId to DownloadState.DownloadError("HTTP ${e.responseCode}"))
+            false
         } catch (e: Exception) {
             _states.value = _states.value +
                 (articleId to DownloadState.DownloadError(e.message ?: "下载失败"))
@@ -232,6 +319,35 @@ class OfflineDownloadManager @Inject constructor(
         cache.removeResource(cacheKey(audioUrl))
         dao.delete(articleId)
         _states.value = _states.value - articleId
+    }
+
+    /**
+     * 清空音频缓存（登出用）。
+     *
+     * 三步都不能省：
+     * 1. `removeResource` 逐个删 —— 走 Media3 自己的 API，索引和文件一起清，
+     *    不会留下"台账说已下载、文件其实还在"的残骸；
+     * 2. `release` —— 释放目录锁。不 release 的话，下一个用户新建 SimpleCache
+     *    会因为同一个目录已被占用而直接抛 IllegalStateException；
+     * 3. 删掉缓存目录 —— 清掉索引文件与写了一半的临时文件，保证下一个用户
+     *    拿到的是一个**全新的空目录**。
+     *
+     * 全部在 [cacheLock] 里做：中途若有别的线程来取缓存，不能让它建出一个
+     * 半路被删掉的 SimpleCache。删完把实例置空，下次用到时 [cache] 会现建一个干净的。
+     */
+    suspend fun clearCache() = withContext(Dispatchers.IO) {
+        synchronized(cacheLock) {
+            val current = cacheInstance
+            cacheInstance = null
+            if (current != null) {
+                // 这两个调用都不是挂起函数，不会被取消，吞掉异常即可
+                runCatching { current.getKeys().toList().forEach { current.removeResource(it) } }
+                runCatching { current.release() }
+            }
+            runCatching { cacheDir.deleteRecursively() }
+        }
+        // 下载状态是内存里的用户数据，一并清掉
+        _states.value = emptyMap()
     }
 
     /**
@@ -280,20 +396,34 @@ class OfflineDownloadManager @Inject constructor(
         const val DEFAULT_TIMEOUT_MS: Int = 60_000
 
         /**
-         * Media3 里表示"长度未知 / 一直到末尾"的哨兵值。
+         * 下载用的 User-Agent。
          *
-         * 定义在 `androidx.media3.common.C`（值 -1），**不在** cache 包里 ——
-         * 最初写成 `Cache.LENGTH_UNSET` 编译不过，实测 javap 逐个类扫过，
-         * cache 包下没有任何类定义它。
+         * 为什么不用 OkHttp 默认的：部分 CDN/静态托管会对没有 UA 的请求给 403，
+         * 而播放器和下载器是两个独立的 HTTP 栈，UA 不一致容易被区别对待。
+         * 带上 UA 让下载请求和播放请求看起来像同一类客户端。
          */
-        private val CACHE_LENGTH_UNSET: Long = androidx.media3.common.C.LENGTH_UNSET.toLong()
+        const val DOWNLOAD_USER_AGENT: String = "Tingxia/0.1.0 (Android)"
 
         /**
-         * SimpleCache 的默认 key 就是 URI 字符串，与 CacheDataSource 默认行为一致。
-         * 显式写出来是为了：如果哪天给 CacheDataSourceFactory 设了
-         * setCacheKeyFactory，两边还能对上。
+         * 缓存条目 key —— **必须和播放器用的是同一个**。
+         *
+         * 2026-10-21 真机 E2E 挖出来的坑：
+         * media3 1.4.1 的 `CacheDataSource`（播放器走它）不是直接用 URL 当 key，
+         * 而是经 `CacheKeyFactory.DEFAULT` **哈希**成一个安全字符串
+         * （设备上实测缓存文件名是 `1b9a4ac57b74997b.uid` 这种 16 位十六进制）。
+         *
+         * 而这里原来直接返回原始 URL —— 于是：
+         * - 下载写的是 key=URL 的条目，播放器读的是 key=hash(URL) 的条目，
+         *   **两者根本不是同一份缓存**：下载成功了播放器也读不到；
+         * - 原始 URL 里有 `://` 和 `/`，根本不是合法的文件名，
+         *   commitFile 阶段 `createCacheEntry` 解析不出 key → 返回 null →
+         *   `Assertions.checkNotNull` 抛 NPE（**message 为 null**）→
+         *   UI 上只剩一句没头没脑的「下载失败」。
+         *
+         * 所以 key 必须走同一个 CacheKeyFactory.DEFAULT。
          */
-        fun cacheKey(audioUrl: String): String = audioUrl
+        fun cacheKey(audioUrl: String): String =
+            CacheKeyFactory.DEFAULT.buildCacheKey(DataSpec(Uri.parse(audioUrl)))
     }
 }
 
