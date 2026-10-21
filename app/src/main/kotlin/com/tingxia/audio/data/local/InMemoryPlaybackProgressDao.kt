@@ -35,4 +35,8 @@ class InMemoryPlaybackProgressDao : PlaybackProgressDao {
     override suspend fun delete(articleId: String) {
         rows.remove(articleId)
     }
+
+    override suspend fun clearAll() {
+        rows.clear()
+    }
 }

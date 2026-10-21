@@ -32,4 +32,14 @@ object DatabaseModule {
 
     @Provides
     fun providePlaybackProgressDao(db: AppDatabase): PlaybackProgressDao = db.playbackProgressDao()
+
+    /**
+     * 登出清数据用的清理器（2026-10-21）。
+     *
+     * 绑接口而不是直接用实现类，是为了让 [com.tingxia.audio.auth.AuthRepository]
+     * 的单测能塞一个假实现进去（Room 库 / Media3 缓存 / WorkManager 都不是好 mock 的）。
+     */
+    @Provides
+    @Singleton
+    fun provideUserDataCleaner(cleaner: LocalUserDataCleaner): UserDataCleaner = cleaner
 }

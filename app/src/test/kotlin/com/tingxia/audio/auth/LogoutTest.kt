@@ -1,6 +1,7 @@
 package com.tingxia.audio.auth
 
 import android.content.Context
+import com.tingxia.audio.data.local.UserDataCleaner
 import com.tingxia.audio.ui.auth.AuthState
 import com.tingxia.audio.ui.auth.AuthViewModel
 import kotlinx.coroutines.CompletableDeferred
@@ -106,10 +107,18 @@ class LogoutTest {
 
     private fun newTokenManager() = FakeTokenManager(RuntimeEnvironment.getApplication())
 
+    /**
+     * 假的本机数据清理器：本文件只关心 token 有没有被清掉，
+     * 真正"Room/缓存/后台任务被清空"的验证在 LogoutClearsLocalDataTest 里。
+     */
+    private class NoopUserDataCleaner : UserDataCleaner {
+        override suspend fun clearAll() = Unit
+    }
+
     @Test
     fun `正常登出会清掉本地 token`() = runTest {
         val tokenManager = newTokenManager()
-        val repo = AuthRepository(FakeAuthApi(), tokenManager)
+        val repo = AuthRepository(FakeAuthApi(), tokenManager, NoopUserDataCleaner())
 
         repo.logout()
 
@@ -122,6 +131,7 @@ class LogoutTest {
         val repo = AuthRepository(
             FakeAuthApi { throw IOException("connection reset") },
             tokenManager,
+            NoopUserDataCleaner(),
         )
 
         repo.logout() // 不应抛出
@@ -133,7 +143,7 @@ class LogoutTest {
     fun `协程被取消时本地 token 仍要清掉`() = runTest {
         val gate = CompletableDeferred<Unit>() // 永不完成，模拟卡住的网络请求
         val tokenManager = newTokenManager()
-        val repo = AuthRepository(FakeAuthApi { gate.await() }, tokenManager)
+        val repo = AuthRepository(FakeAuthApi { gate.await() }, tokenManager, NoopUserDataCleaner())
 
         val job = launch { repo.logout() }
         runCurrent() // 让协程跑到 api.logout() 里挂住
@@ -149,7 +159,7 @@ class LogoutTest {
     @Test
     fun `AuthViewModel 登出后状态切到 NotLoggedIn`() = runTest(dispatcher) {
         val tokenManager = newTokenManager()
-        val repo = AuthRepository(FakeAuthApi(), tokenManager)
+        val repo = AuthRepository(FakeAuthApi(), tokenManager, NoopUserDataCleaner())
         val viewModel = AuthViewModel(repo)
 
         // 先置成已登录

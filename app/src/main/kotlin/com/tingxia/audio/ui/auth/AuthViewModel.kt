@@ -1,9 +1,13 @@
 package com.tingxia.audio.ui.auth
 
+import android.os.Build
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.SessionExpirySignal
+import com.tingxia.audio.data.repository.DeviceRepository
 import com.tingxia.audio.ui.AUTH_EXPIRED_MESSAGE
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +31,15 @@ import javax.inject.Inject
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    /**
+     * 推送设备注册（登录后登记本机，登出前解绑）。
+     *
+     * 声明成**可空 + 默认值**：单测里有 `AuthViewModel(repo)` 这样的直接构造
+     * （见 auth/LogoutTest.kt、auth/AuthExpiryClassificationTest.kt），
+     * 加一个必填参数会把那些不属于本次改动的测试文件一起改坏。
+     * Hilt 侧照常注入（AppUpdateModule 里有 DeviceRepository 的绑定）。
+     */
+    private val deviceRepository: DeviceRepository? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<AuthState>(AuthState.Checking)
@@ -51,10 +64,14 @@ class AuthViewModel @Inject constructor(
             // 归属全记到共享的 user-0 桶，且界面上完全看不出异常。
             // 老版本已经写脏的 0 也会在这里被挡下 → 走一次正常登录即修复。
             val userId = authRepository.getUserId()?.takeIf { it > 0L }
-            _state.value = if (token != null && userId != null) {
-                AuthState.LoggedIn(userId)
+            if (token != null && userId != null) {
+                _state.value = AuthState.LoggedIn(userId)
+                // 已经是登录态（App 重启后）→ 补一次设备登记。
+                // 推送投递目标会随 App 版本变化（app_version / device_model 会被刷新），
+                // 而且重装后本机 id 会变 —— 只在"刚登录"时登记会漏掉这些情况。
+                registerDeviceForPush()
             } else {
-                AuthState.NotLoggedIn
+                _state.value = AuthState.NotLoggedIn
             }
         }
     }
@@ -81,6 +98,8 @@ class AuthViewModel @Inject constructor(
             _state.value = AuthState.Loading
             try {
                 val resp = authRepository.wechatLogin(code)
+                // 登录成功 → 登记本机为推送设备（失败不影响登录本身）。
+                registerDeviceForPush()
                 _state.value = loggedInOrError(resp.userId)
             } catch (e: Exception) {
                 _state.value = AuthState.Error(friendlyError(e, fallback = "登录失败，请稍后再试"))
@@ -99,6 +118,7 @@ class AuthViewModel @Inject constructor(
             _state.value = AuthState.Loading
             try {
                 val resp = authRepository.devImpersonate(userId)
+                registerDeviceForPush()
                 _state.value = loggedInOrError(resp.userId)
             } catch (e: Exception) {
                 val msg = friendlyError(e, fallback = "联调登录失败")
@@ -117,9 +137,65 @@ class AuthViewModel @Inject constructor(
     /** 登出：清空本地 token，回到登录页。 */
     fun logout() {
         viewModelScope.launch {
+            // ⚠️ 顺序：先解绑推送设备，再登出。
+            // 解绑接口需要鉴权，token 一清就调不通了 —— 那样共享设备上会残留
+            // 上一个账号的推送登记（厂商通道一旦接上就可能把上一个账号的消息
+            // 推给这台手机）。解绑失败也不能挡住登出，所以这里吞掉异常。
+            unregisterDeviceForPush()
             authRepository.logout()
             _state.value = AuthState.NotLoggedIn
         }
+    }
+
+    /**
+     * 登录后登记本机为推送设备。
+     *
+     * 刻意**不阻塞**登录：推送登记是"锦上添花"，一个网络抖动不该让用户
+     * 卡在"登录中"。失败只记日志。
+     */
+    private fun registerDeviceForPush() {
+        val repo = deviceRepository ?: return
+        viewModelScope.launch {
+            runCatching {
+                repo.registerCurrentDevice(
+                    appVersion = BuildConfig.VERSION_NAME,
+                    deviceModel = Build.MODEL,
+                )
+            }.onFailure {
+                Log.w(TAG, "推送设备登记失败：${it.message}")
+            }
+        }
+    }
+
+    /**
+     * 登出前解绑本机。
+     *
+     * 是 suspend 且**顺序等待**：调用方必须 await 它，
+     * 否则会跟 [AuthRepository.logout] 抢 token（token 先被清掉，
+     * 解绑请求就变成 401，共享设备上的推送登记会留在上一个账号名下）。
+     */
+    private suspend fun unregisterDeviceForPush() {
+        val repo = deviceRepository ?: return
+        runCatching { repo.unregisterCurrentDevice() }
+            .onFailure { Log.w(TAG, "推送设备解绑失败：${it.message}") }
+    }
+
+    /**
+     * 账号已在服务端注销 → 本机已清空 → 回到登录页。
+     *
+     * ## 为什么不复用 [logout]
+     *
+     * [logout] 会去调服务端的 `POST /api/v1/auth/logout`。可注销之后账号已经
+     * 没了、token 也被全部吊销，那一次请求只会换来 401，
+     * 紧接着冒出"登录已失效，请重新登录" —— 用户**主动**注销，却看到一句
+     * "登录已失效"，是纯噪声，还容易被当成 bug 报上来。
+     *
+     * 所以注销链路自己清本机（见
+     * [com.tingxia.audio.data.repository.AccountRepository.logoutLocalOnly]），
+     * 这里只负责把界面翻回登录页 —— 状态只有这一处能改。
+     */
+    fun onAccountDeleted() {
+        _state.value = AuthState.NotLoggedIn
     }
 
     /**
@@ -136,6 +212,10 @@ class AuthViewModel @Inject constructor(
         } else {
             AuthState.Error("账号信息无效（用户 ID 无法识别），请重新登录")
         }
+
+    private companion object {
+        const val TAG = "AuthViewModel"
+    }
 }
 
 sealed interface AuthState {

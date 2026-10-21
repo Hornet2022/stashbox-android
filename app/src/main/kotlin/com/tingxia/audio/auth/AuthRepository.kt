@@ -1,6 +1,7 @@
 package com.tingxia.audio.auth
 
 import android.util.Base64
+import com.tingxia.audio.data.local.UserDataCleaner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -24,6 +25,7 @@ import javax.inject.Inject
 class AuthRepository @Inject constructor(
     private val api: AuthApi,
     private val tokenManager: TokenManager,
+    private val userDataCleaner: UserDataCleaner,
 ) {
 
     /** 当前 access token（无则返回 null）。 */
@@ -99,7 +101,7 @@ class AuthRepository @Inject constructor(
     }
 
     /**
-     * 登出：尽力通知服务端，然后 **无条件** 清空本地 token。
+     * 登出：尽力通知服务端，然后 **无条件** 清空本地 token 与本机数据。
      *
      * 这里原来写的是 `runCatching { api.logout() }` + `tokenManager.clear()`，
      * 有一个必然踩中的坑：`runCatching` 捕获 `Throwable`，连 `CancellationException`
@@ -108,18 +110,36 @@ class AuthRepository @Inject constructor(
      * 表现为「点了退出登录，账户还登着」。
      *
      * 取消也可能来自"用户点完就离开该页面"（协程作用域被回收），所以：
-     * - 被取消 → 在 NonCancellable 里清完 token 再把取消信号继续抛上去（不吞协程契约）
+     * - 被取消 → 在 NonCancellable 里清完本机数据再把取消信号继续抛上去（不吞协程契约）
      * - 普通网络失败 → 服务端注销失败不该阻塞本地登出，照样清
+     *
+     * ⚠️ 本机数据（Room 下载台账/播放进度、Media3 音频缓存、后台预下载任务）
+     * 也必须一起清 —— 只清 token 的话，共享手机上下一个登录的人会直接看到
+     * 上一个用户的下载与续播位置（2026-10-21 修，跨账号数据泄漏）。
      */
     suspend fun logout() {
         try {
             api.logout()
         } catch (e: CancellationException) {
-            withContext(NonCancellable) { tokenManager.clear() }
+            withContext(NonCancellable) { clearLocalState() }
             throw e
         } catch (_: Exception) {
             // 服务端注销失败不阻塞本地登出
         }
+        withContext(NonCancellable) { clearLocalState() }
+    }
+
+    /**
+     * 清本机的一切：token + 上一个用户留下的数据。
+     *
+     * 顺序：**先**清 token —— 后台补传 worker 靠 token 鉴权，token 一清，
+     * 它们的请求就 401，不会把上一个用户的播放进度记到新账号头上。
+     *
+     * 整段跑在 NonCancellable 里：清本地数据是 IO（DataStore 写盘 + Room 事务），
+     * 撞上协程取消就等于"清了半个"—— 那比不清更糟。
+     */
+    private suspend fun clearLocalState() {
         tokenManager.clear()
+        userDataCleaner.clearAll()
     }
 }
