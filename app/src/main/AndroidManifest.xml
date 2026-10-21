@@ -8,6 +8,19 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+      2026-10-21：应用内更新要能装 APK。
+
+      REQUEST_INSTALL_PACKAGES 是 Android 8+ 的"安装未知来源应用"权限。
+      没有它，下载好的 APK 装不了（系统直接拒绝跳转安装器）。
+
+      ⚠️ 这个权限在应用商店上架时会被审核关注（能装任意 APK）。
+      内测阶段是必要的 —— 没有它，测试员只能自己去浏览器下载 APK，
+      "应用内更新"就只剩个提示作用。
+      正式上架前要评估：可以改成引导用户去应用商店更新（那时就不需要这个权限）。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".TingxiaApp"
         android:allowBackup="false"
@@ -34,6 +47,27 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+        </provider>
+
+        <!--
+          2026-10-21：FileProvider —— 应用内更新下载完 APK 后要把它交给系统安装器。
+
+          为什么必须用 FileProvider：Android 7+ 不允许跨应用传 file:// Uri
+          （FileUriExposedException），只能传 content:// Uri，
+          而 content:// Uri 要靠 FileProvider 把文件路径映射出来。
+          路径映射写在 res/xml/file_paths.xml。
+
+          ⚠️ authorities 用 ${applicationId}.fileprovider —— 带 applicationId 是必须的，
+          debug 包（.debug）和 release 包（无后缀）authority 不同，否则会串。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
         </provider>
 
         <activity

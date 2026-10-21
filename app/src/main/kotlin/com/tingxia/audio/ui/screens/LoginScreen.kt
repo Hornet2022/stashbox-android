@@ -1,5 +1,7 @@
 package com.tingxia.audio.ui.screens
 
+import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,11 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.tingxia.audio.BuildConfig
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.imePadding
+import java.util.UUID
 
 /**
  * 登录页。
@@ -43,6 +47,17 @@ import androidx.compose.foundation.layout.imePadding
  *   （比如带历史数据的 user 1）。服务端默认关闭，失败会给出可照做的提示。
  *
  * release 包不渲染任何联调入口，登录路径只有一条。
+ *
+ * ## dev code 是**每安装一个**的（2026-10-21）
+ *
+ * 原来默认 code 写死成 `dev_wechat_${BuildConfig.DEBUG_USER_ID}`。后端按
+ * `open_id = "wx_" + code` 派生账号，于是**每个没手改这个输入框的测试员
+ * 都登进同一个账号**：文章、配额、收藏、反馈、评分全部串给下一个人，
+ * 而且配额是共享的 —— 第一个登录的人把大家这个月的额度用掉一半。
+ * 那是数据串台，不是界面难看。
+ *
+ * 现在默认 code 由 [DevLoginCodeProvider] 生成：**每安装一个随机串**、
+ * 装一次存一次（杀进程重开还是同一个账号）。详见该类的说明。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,7 +68,15 @@ fun LoginScreen(
     isLoading: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    var codeInput by remember { mutableStateOf("dev_wechat_${BuildConfig.DEBUG_USER_ID}") }
+    // dev 登录 code：**每安装一个**（见文件下方 DevLoginCodeProvider 的说明）。
+    //
+    // 用 remember(context) 缓存：组合期读一次 SharedPreferences 就够，
+    // 重组时不该反复读盘；context 真变了才重新取。
+    val context = LocalContext.current
+    val devCode = remember(context) {
+        DevLoginCodeProvider(SharedPreferencesDevLoginCodeStore(context)).code()
+    }
+    var codeInput by remember(devCode) { mutableStateOf(devCode) }
     var userIdInput by remember { mutableStateOf(BuildConfig.DEBUG_USER_ID) }
 
     Scaffold(
@@ -84,7 +107,12 @@ fun LoginScreen(
             OutlinedTextField(
                 value = codeInput,
                 onValueChange = { codeInput = it },
-                label = { Text("登录 code（接入微信 OAuth 前为稳定串）") },
+                label = { Text("登录 code（微信 OAuth 接入前的临时占位）") },
+                // 说清楚这个框现在到底是什么：它**仍然只是 OAuth 的替身**，
+                // 只不过替身不再共用一个账号了。
+                supportingText = {
+                    Text("临时占位：本机随机生成，接入真 OAuth 后由微信下发")
+                },
                 singleLine = true,
                 enabled = !isLoading,
                 modifier = Modifier.padding(bottom = 16.dp),
@@ -125,9 +153,97 @@ fun LoginScreen(
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "微信 OAuth AppID 待申请，当前按 code 派生用户",
+                "微信 OAuth AppID 待申请，当前按本机 code 派生独立测试账号",
                 style = MaterialTheme.typography.labelSmall,
             )
         }
     }
 }
+
+/**
+ * dev 登录 code 的**每安装唯一**生成与持久化（2026-10-21）。
+ *
+ * ## 为什么必须是"每安装一个"
+ *
+ * 后端按 `open_id = "wx_" + code` 派生账号（user-service 的 `wechat_login`），
+ * 所以 **code 相同 = 同一个账号**。写死一个常量意味着每个没手改输入框的
+ * 测试员都登进同一个账号 —— 文章、配额、收藏、反馈、评分全部串给下一个人，
+ * 配额还是共享的（第一个登录的人把大家这个月的额度用掉一半）。
+ *
+ * ## 为什么落盘而不是每次启动现生成
+ *
+ * 现生成的 code 每次冷启动都变 → 同一个测试员在地铁里退出重进 App 就变成
+ * 另一个账号，之前下的音频、记的进度全对不上。所以 code 必须在**安装维度**稳定：
+ * 生成一次、存下来、之后一直用同一个。
+ *
+ * ## 为什么是 SharedPreferences 而不是 DataStore
+ *
+ * 只需要一个字符串，而且要在**组合期同步**拿到（输入框的默认值），
+ * DataStore 的 Flow + 挂起读在这里只会更绕。工程里没有为它引新依赖。
+ *
+ * 卸载重装会换新 code —— 一期可接受（那时本来就是"新用户"）。
+ */
+internal class DevLoginCodeProvider(
+    private val store: DevLoginCodeStore,
+    /** 随机源可注入：单测据此模拟"两次不同的安装"。 */
+    private val randomSuffix: () -> String = { newDevLoginCodeSuffix() },
+) {
+
+    /**
+     * 本安装的 dev 登录 code：存过就复用，没存过就生成一个并落盘。
+     *
+     * 空串视作"没存过" —— 宁可换一个新账号，也不要拿空 code 去登录
+     * （空 code 会被 `ifBlank { "anonymous" }` 兜成 "anonymous"，
+     * 那还是一个共享账号）。
+     */
+    fun code(): String {
+        store.read()?.takeIf { it.isNotBlank() }?.let { return it }
+        val code = DEV_LOGIN_CODE_PREFIX + randomSuffix()
+        store.write(code)
+        return code
+    }
+}
+
+/** dev code 的存储：抽成接口是为了让单测能注入两个互不相干的"安装"。 */
+internal interface DevLoginCodeStore {
+    fun read(): String?
+    fun write(code: String)
+}
+
+/** [DevLoginCodeStore] 的 SharedPreferences 实现。 */
+internal class SharedPreferencesDevLoginCodeStore(context: Context) : DevLoginCodeStore {
+
+    private val prefs: SharedPreferences = context.applicationContext
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    override fun read(): String? = prefs.getString(KEY_CODE, null)
+
+    /**
+     * 用 `commit()` 而不是 `apply()`。
+     *
+     * 这是**首启一次性**的写盘，而 `apply()` 的落盘是异步的 —— 写完立刻被系统
+     * 杀进程的话 code 就丢了，下次启动会换一个账号（用户以为还是刚才那个号）。
+     * `commit()` 同步落盘，代价只是首启几毫秒，换来"写完就一定在"。
+     *
+     * （lint 的 ApplySharedPref 建议用 apply()，这里刻意不采纳 —— 理由同上。）
+     */
+    @Suppress("ApplySharedPref")
+    override fun write(code: String) {
+        prefs.edit().putString(KEY_CODE, code).commit()
+    }
+
+    companion object {
+        const val PREFS_NAME = "dev_login"
+        const val KEY_CODE = "wechat_code"
+    }
+}
+
+/** dev code 前缀：一眼看出是占位串，不是真 OAuth code。 */
+internal const val DEV_LOGIN_CODE_PREFIX = "dev_wechat_"
+
+/** 随机后缀长度（十六进制字符）。 */
+internal const val DEV_LOGIN_CODE_RANDOM_LENGTH = 12
+
+/** 默认随机源：UUID 去掉分隔符取前 N 位。 */
+internal fun newDevLoginCodeSuffix(): String =
+    UUID.randomUUID().toString().replace("-", "").take(DEV_LOGIN_CODE_RANDOM_LENGTH)

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的路径声明（应用内更新用）。
+
+  用途：把下载到本机的 APK 通过 content:// URI 交给系统安装器。
+  Android 7.0 之后不能直接传 file:// URI（会抛 FileUriExposedException），
+  必须走 FileProvider 授权。
+
+  对应代码：ui/update/ApkInstaller.kt 的 SystemApkInstaller。
+  ⚠️ 还需要在 AndroidManifest.xml 里注册 provider（见交付说明里的 manifest 片段），
+  没有注册时安装会退回"用浏览器打开下载地址"。
+
+  tools:ignore="UnusedResources：manifest 里还没注册这个 provider（manifest 由另一处改动负责），
+  注册之后这条忽略就可以删掉了。
+-->
+<paths xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="UnusedResources">
+    <!--
+      外部私有目录：getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+      → <外部存储>/Android/data/<包名>/files/Download/
+      应用私有目录，不需要任何存储权限，卸载即清理。
+    -->
+    <external-files-path
+        name="external_updates"
+        path="Download/" />
+
+    <!--
+      内部私有目录兜底：context.filesDir/updates/
+      （拿不到外部存储时用得到）
+    -->
+    <files-path
+        name="internal_updates"
+        path="updates/" />
+</paths>

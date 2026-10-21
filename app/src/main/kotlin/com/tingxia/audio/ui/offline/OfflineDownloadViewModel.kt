@@ -9,6 +9,7 @@ import com.tingxia.audio.data.remote.LaterListen
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.VariantRepository
+import com.tingxia.audio.data.sync.COMMUTE_PREFETCH_BITRATE
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,8 +54,13 @@ class OfflineDownloadViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    /** §3.2 默认预热档位：通勤场景优先 64k */
-    private val targetBitrate: Int = 64
+    /** §3.2 默认预热档位：通勤场景优先 64k。
+     *
+     * 刻意引用 [COMMUTE_PREFETCH_BITRATE] 而不是就地写 64：
+     * 自动通勤预加载（[com.tingxia.audio.data.sync.CommutePrefetcher]）下的是同一档，
+     * 两边档位不一致会让台账里的 URL 和缓存条目对不上。
+     */
+    private val targetBitrate: Int = COMMUTE_PREFETCH_BITRATE
 
     fun load() {
         _uiState.update { it.copy(isLoading = true, error = null) }
@@ -163,7 +169,7 @@ class OfflineDownloadViewModel @Inject constructor(
         val progressTotal: Int = 0,
         val batchSummary: BatchSummary? = null,
         val error: String? = null,
-        val targetBitrate: Int = 64,
+        val targetBitrate: Int = COMMUTE_PREFETCH_BITRATE,
     ) {
         val progressFraction: Float get() = if (progressTotal > 0) progressIndex.toFloat() / progressTotal else 0f
     }

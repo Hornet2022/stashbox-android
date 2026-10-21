@@ -4,6 +4,7 @@ import android.content.Context
 import com.tingxia.audio.auth.AuthApi
 import com.tingxia.audio.auth.AuthRepository
 import com.tingxia.audio.auth.TokenManager
+import com.tingxia.audio.data.local.UserDataCleaner
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
@@ -74,5 +75,6 @@ object AppModule {
     fun provideAuthRepository(
         api: AuthApi,
         tokenManager: TokenManager,
-    ): AuthRepository = AuthRepository(api, tokenManager)
+        userDataCleaner: UserDataCleaner,
+    ): AuthRepository = AuthRepository(api, tokenManager, userDataCleaner)
 }

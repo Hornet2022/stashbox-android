@@ -19,13 +19,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,6 +50,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,6 +64,9 @@ import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
 import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.ui.tts.formatSpeedLabel
+import com.tingxia.audio.ui.update.AppUpdateDialog
+import com.tingxia.audio.ui.update.AppUpdateViewModel
+import com.tingxia.audio.ui.update.rememberPushPermissionState
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,7 +88,10 @@ import javax.inject.Inject
  * 而后端 G2 端点是否就绪始终没有确认 —— 出货界面里留一个点不动的开关，
  * 只会让用户以为 App 坏了。要重做请从 `GET/PUT /api/v1/user/consent` 端点开始。
  *
- * 不在主仓：注销功能（等 G2 上线）；推送设置（接口文档未定义）。
+ * 2026-10-21：新增「危险操作」区（注销账号）。
+ * 注销是**不可逆**的终局操作，所以它被单独隔在一个红色区块里，
+ * 不跟「退出登录」「反馈历史」这些日常条目混在一起 ——
+ * 混在一起时用户会以为它和「退出登录」差不多，点之前不会多想。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,17 +100,39 @@ fun SettingsScreen(
     onNavigateToOfflineDownload: () -> Unit = {},
     onNavigateToFeedbackHistory: () -> Unit = {},
     onLogout: () -> Unit = {},
+    /**
+     * 跳到「注销账号」页。
+     *
+     * 传 null（默认）时**不显示**这一行：宁可不显示，也好过一个点了没反应的死按钮
+     * （这个文件里已经因为死按钮吃过亏，见 SettingsRow 的注释）。
+     */
+    onNavigateToAccountDeletion: (() -> Unit)? = null,
     // 2026-10-02: 供「意见反馈」打开通用反馈 sheet（由 MainActivity 注入传入，
     // 与 ArticleListScreen 同一套取法）
     feedbackRepository: com.tingxia.audio.data.repository.FeedbackRepository? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
+    /**
+     * 应用内更新（点「版本」行触发检查更新）。
+     *
+     * 单独一个 ViewModel：更新流程有自己的状态机（检查中 / 有新版本 / 下载中），
+     * 不该跟设置页其它状态混在一起。
+     */
+    updateViewModel: AppUpdateViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+    // 推送通知权限：Android 13+ 需要运行时授权，放在用户点「推送通知」时才申请
+    // （启动就弹会让人莫名其妙地拒绝，之后再也收不到提醒）。
+    val pushPermission = rememberPushPermissionState()
     val context = LocalContext.current
+    val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
     // CP-TTS-VOICE: 音色 + 语速
     var showVoicePicker by remember { mutableStateOf(false) }
     // 2026-10-02: 「意见反馈」不再是死按钮，直接复用已存在的通用反馈 sheet
     var showFeedbackSheet by remember { mutableStateOf(false) }
+    // 2026-10-21: 「注销账号」是终局操作，进页面前先要一次明确的确认 ——
+    // 设置页里点一下就跳到一个要打字的界面，对用户来说太容易顺手点到了。
+    var showDeleteAccountConfirm by remember { mutableStateOf(false) }
 
     val ttsViewModel: TtsPreferenceViewModel = hiltViewModel()
     val ttsState by ttsViewModel.uiState.collectAsStateWithLifecycle()
@@ -163,7 +196,9 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     title = "退出登录",
-                    subtitle = "清空本地 token，回到登录页",
+                    // 2026-10-21：不再只是清 token —— 下载台账、播放进度、
+                    // 音频缓存也一并清掉（共享手机上的跨账号泄漏）。
+                    subtitle = "清空本机数据，回到登录页",
                     destructive = true,
                     onClick = {
                         // 只交给 onLogout（由 MainActivity 调 AuthViewModel.logout()）。
@@ -225,13 +260,38 @@ fun SettingsScreen(
 
             // ── 关于 ──
             SettingsSection("关于") {
+                // 2026-10-21：这一行从"只显示版本号"变成"检查更新的入口"。
+                // 之前内测用户要拿新包只能自己去蒲公英重下 —— 现在点一下就知道
+                // 有没有新版本，有的话弹窗里直接下载安装。
+                // 检查结果贴在副标题上（不是 Toast）：Toast 会消失，用户回头
+                // 就不知道自己刚才看到的"有新版本"是什么。
+                val versionBase = "${uiState.versionName} (${uiState.versionCode})"
                 SettingsRow(
                     icon = Icons.Filled.Info,
                     title = "版本",
-                    subtitle = "${uiState.versionName} (${uiState.versionCode})",
+                    subtitle = when {
+                        updateState.isChecking -> "$versionBase · 检查中…"
+                        updateState.error != null -> "$versionBase · ${updateState.error}"
+                        updateState.message != null -> "$versionBase · ${updateState.message}"
+                        else -> versionBase
+                    },
+                    subtitleIsError = updateState.error != null,
                     onClick = {
                         Toast.makeText(context, "构建 ${uiState.commitHash.take(7)}", Toast.LENGTH_SHORT).show()
+                        updateViewModel.check()
                     },
+                )
+                // 推送通知：Android 13 起通知是运行时权限，只能在用户点了这一行
+                // 之后申请 —— 文案说清"开了能收到什么"，用户才知道该不该给。
+                SettingsRow(
+                    icon = Icons.Filled.Notifications,
+                    title = "推送通知",
+                    subtitle = when {
+                        notificationsEnabled -> "已开启：新文章与蒸馏完成会提醒你"
+                        pushPermission.needsRequest -> "点击开启：接收新文章与蒸馏完成提醒"
+                        else -> "通知已关闭，可在系统设置里重新开启"
+                    },
+                    onClick = { pushPermission.request() },
                 )
                 // 2026-10-02：原来是死按钮。这里接上**已经存在**的
                 // FeedbackBottomSheet（articleId 传 null = 不针对具体文章的
@@ -247,6 +307,23 @@ fun SettingsScreen(
                         null
                     },
                 )
+            }
+
+            // ── 危险操作（2026-10-21）──
+            // 单独一个红色区块，不跟日常条目混在一起。
+            // 注销和「退出登录」长得像但完全不是一回事：
+            // 退出登录 = 数据还在、随时能回来；注销 = 不可逆、账号没了。
+            // 混排时用户会以为点的是前者。
+            if (onNavigateToAccountDeletion != null) {
+                SettingsSection("危险操作", danger = true) {
+                    SettingsRow(
+                        icon = Icons.Filled.DeleteForever,
+                        title = "注销账号",
+                        subtitle = "不可撤销：账号将被注销，个人数据将被删除",
+                        destructive = true,
+                        onClick = { showDeleteAccountConfirm = true },
+                    )
+                }
             }
 
             // ── 调试入口(仅 debug 构建可见) ──
@@ -265,6 +342,51 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    // 注销账号的二次确认（2026-10-21）。
+    // 这一步不是"多余的仪式"：注销不可逆，设置页又是随手能点的地方，
+    // 一次误触的代价是永久丢数据。
+    if (showDeleteAccountConfirm && onNavigateToAccountDeletion != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountConfirm = false },
+            title = { Text("确认注销账号？") },
+            text = {
+                Text(
+                    "注销后账号将被永久删除，个人信息会被匿名化，全部文章会被软删除。\n" +
+                        "这一步不可撤销，也无法恢复。",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAccountConfirm = false
+                        onNavigateToAccountDeletion()
+                    },
+                ) {
+                    Text("继续注销", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountConfirm = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    // 应用内更新弹窗（检查到新版本时弹出）。
+    // 强制更新也**允许**关掉：客户端只如实转达服务端的策略，没有替服务端
+    // 强制关门的资格；但弹窗里会写明"当前版本已不再支持"。
+    val updateCheck = updateState.check
+    if (updateState.showUpdateDialog && updateCheck != null) {
+        AppUpdateDialog(
+            check = updateCheck,
+            isDownloading = updateState.isDownloading,
+            downloadProgress = updateState.downloadProgress,
+            onConfirm = { updateViewModel.downloadAndInstall() },
+            onDismiss = { updateViewModel.dismissDialog() },
+        )
     }
 
     // CP-TTS-VOICE: 音色选择 + 播放速度两个 sheet。
@@ -298,18 +420,35 @@ fun SettingsScreen(
 private fun speedSubtitle(speed: Float): String =
     "${formatSpeedLabel(speed)} — 立即生效，不影响已生成的音频"
 
+/**
+ * 一个设置分组。
+ *
+ * @param danger 危险操作分组 —— 红色标题 + 淡红底色。
+ *   为什么要单独一个形态：注销账号和「退出登录」在同一个列表里长得几乎一样，
+ *   而两者的后果差着量级（一个随时能回来，一个永久没了）。
+ *   视觉上分开 = 用户在点之前有机会意识到自己点的是哪个。
+ */
 @Composable
-private fun SettingsSection(title: String, content: @Composable () -> Unit) {
+private fun SettingsSection(
+    title: String,
+    danger: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     Column(modifier = Modifier.padding(top = 16.dp)) {
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.primary,
+            color = if (danger) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
         )
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            color = if (danger) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            },
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()

@@ -23,6 +23,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+// 2026-10-21：`var privacyAgreed by remember { mutableStateOf(false) }` 要用 setValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,6 +55,9 @@ import com.tingxia.audio.ui.capture.CaptureScreen
 import com.tingxia.audio.ui.distill.DistillScreen
 import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.offline.OfflineDownloadScreen
+// 2026-10-21：注销账号页 + 隐私政策同意门
+import com.tingxia.audio.ui.account.AccountDeletionScreen
+import com.tingxia.audio.ui.privacy.PrivacyConsentGate
 import com.tingxia.audio.ui.settings.SettingsScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
@@ -166,6 +171,14 @@ private fun AuthRoot() {
     val prefs = remember { context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE) }
     val hasOnboarded = remember { mutableStateOf(prefs.getBoolean("has_onboarded", false)) }
 
+    // 2026-10-21：隐私政策同意是否已通过。
+    //
+    // 放在 AuthRoot 层级（而不是 LoggedIn 分支里）是有意的：
+    // 放分支里的话，退出登录再登录会让它重置为 false，
+    // 用户会**再看一次**同意页（虽然服务端说"你已经同意过"，
+    // 但那中间还是会闪一下空白/加载态）。
+    var privacyAgreed by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) { viewModel.checkLogin() }
 
     // 会话在后台过期时，必须有人把 AuthRoot 拉回登录页。
@@ -195,7 +208,17 @@ private fun AuthRoot() {
         )
 
         is AuthState.LoggedIn -> {
-            if (hasOnboarded.value) {
+            // 2026-10-21：隐私政策同意门。
+            //
+            // 顺序：**同意 → 引导**。合规上"同意"要在用之前拿到，
+            // 所以它排在产品引导前面 —— 先让用户知道我们收集什么，再教他怎么用。
+            //
+            // 为什么用 `if (!privacyAgreed)` 包住：
+            // 门通过后要把整个门从组合里摘掉，否则它那层 fillMaxSize 的空 Box
+            // 会把下面的内容顶出屏幕。
+            if (!privacyAgreed) {
+                PrivacyConsentGate(onAgreed = { privacyAgreed = true })
+            } else if (hasOnboarded.value) {
                 AppNavigation()
             } else {
                 OnboardingScreen(
@@ -460,7 +483,27 @@ private fun AppNavigation() {
                 onBack = { navController.popBackStack() },
                 onNavigateToOfflineDownload = { navController.navigate("offline_download") },
                 onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
+                // 2026-10-21：注销账号入口（危险操作，单独隔在设置页底部红区）
+                onNavigateToAccountDeletion = { navController.navigate("account-deletion") },
                 onLogout = { authViewModel.logout() },
+            )
+        }
+        // 2026-10-21：注销账号页。
+        //
+        // 注销是不可逆的终局操作，所以它在**自己的页面**里（要打字确认），
+        // 而不是设置页里弹个对话框。设置页里那个入口还会先弹一次确认，
+        // 两层确认是故意的：误触一次不该丢掉全部数据。
+        composable("account-deletion") {
+            AccountDeletionScreen(
+                onBack = { navController.popBackStack() },
+                // 注销完成后由 AuthViewModel 把登录态翻回未登录 ——
+                // 和「退出登录」走同一条路（AuthRoot 按 state 分支渲染登录页，
+                // 登录页不是 NavHost 的 destination，所以这里**不能** navigate）。
+                //
+                // 用 onAccountDeleted() 而不是 logout()：注销流程里
+                // AccountRepository.logoutLocalOnly() 已经清了 token + 本机数据，
+                // 再走一遍 logout() 会多打一次注定 401 的服务端请求。
+                onAccountDeleted = { authViewModel.onAccountDeleted() },
             )
         }
     }
