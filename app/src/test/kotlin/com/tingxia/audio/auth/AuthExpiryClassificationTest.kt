@@ -1,6 +1,7 @@
 package com.tingxia.audio.auth
 
 import android.content.Context
+import com.tingxia.audio.data.local.UserDataCleaner
 import com.tingxia.audio.data.remote.ApiException
 import com.tingxia.audio.data.remote.isAuthExpired
 import com.tingxia.audio.ui.AUTH_EXPIRED_MESSAGE
@@ -135,8 +136,13 @@ class AuthExpiryClassificationTest {
         override suspend fun issueToken(req: TokenIssueRequest): TokenIssueResponse = error("not used")
     }
 
+    /** 假的本机数据清理器：本文件只测会话失效的分类与落地，不碰本机数据。 */
+    private class NoopUserDataCleaner : UserDataCleaner {
+        override suspend fun clearAll() = Unit
+    }
+
     private fun newViewModel(tm: FakeTokenManager) =
-        AuthViewModel(AuthRepository(NoopAuthApi(), tm))
+        AuthViewModel(AuthRepository(NoopAuthApi(), tm, NoopUserDataCleaner()))
 
     private fun newTokenManager() = FakeTokenManager(RuntimeEnvironment.getApplication())
 
