@@ -10,6 +10,7 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLException
 
 /**
@@ -24,52 +25,60 @@ import javax.net.ssl.SSLException
  * IP 入口（https://8.148.9.151/）**与备案无关**（IP 证书不需要备案），
  * 是唯一一条不受上面这些影响的路径 → 主地址失败时用它兜底。
  *
- * ## 什么时候切：按「幂等性」分，不按异常类型分
+ * ## 两层机制
  *
- * 第一版按异常类型分（只切 UnknownHost/Connect/SSL），在真机上**漏了一类**：
- * 用户所在网络把到域名的 TLS 连接直接 RST 掉 → `SocketException:
- * Connection reset` → 没切 → 用户看到的还是「连不上」。
- * 这类错误发生时连接已经建立，异常类型看不出请求有没有发出去，
- * **只有幂等性说了算**：
+ * ### ① 切换：什么时候该换地址重试
+ * 切分依据是**幂等性**，不是异常类型 —— 异常类型看不出「请求有没有已经
+ * 发出去」，只有幂等性能判断：
  *
- *   · **幂等方法**（GET/HEAD）→ 任何失败都值得换地址再试一次
- *     （重发 GET 不会造成任何副作用）。
- *   · **有副作用的方法**（POST/PUT/PATCH/DELETE）→ 只在「连接阶段就失败」
- *     时切（DNS 解析不了、连不上、证书握手失败）—— 这三种情况下
- *     请求**肯定还没发出去**，重试是干净的。
- *     其它情况（读超时、连接被重置）请求可能已经到达服务端，
- *     换地址重试等于把同一个操作提交两遍（"删除文章"会真删两次）→ 不切。
- *     **例外**：白名单里的**幂等 POST**（见 IDEMPOTENT_POST_*）——
- *     登录、发 token、进度上报、设备登记。少了这一条，在会 RST 掉域名的
- *     网络里**连登录都做不了**（登录是 POST）→ App 直接不可用。
+ *   · **幂等方法**（GET/HEAD/OPTIONS/PUT/DELETE，按 HTTP 规范幂等）→
+ *     任何失败都值得换地址再试一次。
+ *   · **幂等 POST**（白名单）→ 同上。白名单按**后端语义**逐个确认过：
+ *     登录/发 token、剪藏（CP-DUPLICATE-CLIP 查重复用已有文章、不重复计费）、
+ *     收藏（UNIQUE 约束保证）、进度上报（覆盖写）、设备登记（upsert）。
+ *     少了这些，在会 RST 掉域名的网络里**连登录、隐私同意都过不去**
+ *     （登录是 POST、隐私同意是 PUT）→ App 直接不可用。
+ *   · **不幂等的 POST**（评分、反馈、手动触发蒸馏）→ 只在「连接阶段就失败」
+ *     时切（DNS 解析不了、连不上、证书握手失败）—— 这三种情况下请求
+ *     **肯定还没发出去**。其余情况（读超时、连接被重置）请求可能已经到达
+ *     服务端，换地址重试等于把同一个操作提交两遍 → 不切。
+ *   · **读超时一律不切**：那是服务端慢，换地址大概率也慢，白等一个 timeout。
  *
- * **读超时一律不切**：那是服务端慢，换地址大概率也慢，切了只会让用户
- * 等两倍时间（65s × 2）却不一定拿到结果。
+ * ### ② 熔断：失败过一次就别再逐个试
+ * 光有切换不够：主地址坏掉时，**每一个**请求都要先失败一次才切到备用
+ * 地址 —— 用户看到的是「每个按钮都要等一次失败」。而且那些**不幂等**的
+ * 写操作（评分、反馈）第一次就是这么失败的。
  *
- * ## 位置
- * 注册成 **application interceptor**（不是 network interceptor）：
- * 只有 application interceptor 能看到并改写整条请求的 URL，
- * 且它不影响鉴权头（头是按原 URL 生成的，换 host 后 Authorization
- * 照样带上 —— 网关认的是 token 不是 host）。
+ * 所以主地址一旦失败，就在 [COOLDOWN_MS] 内**直接走备用地址**，不再试
+ * 主地址。等这一段过去再重新试主（域名可能已经恢复）。
+ *
+ * ⚠️ 这只影响「主地址不可用」这一种情况：主地址正常时行为完全不变。
  */
 class FallbackBaseUrlInterceptor(
     private val fallbackBaseUrl: String,
 ) : Interceptor {
+
+    /** 主地址最近一次失败的时刻（毫秒）；0 = 没失败过。 */
+    private val primaryFailedAt = AtomicLong(0)
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val fallback: HttpUrl = fallbackBaseUrl.toHttpUrlOrNull()
             ?: return chain.proceed(request)
 
+        // 熔断中：主地址刚失败过，直接走备用地址（省掉一次必然失败的往返）
+        if (isPrimaryCircuitOpen()) {
+            val switched = switchTo(request, fallback)
+            Log.w(TAG, "主地址处于熔断期，直接走备用地址：${request.url} → $switched")
+            return chain.proceed(request.newBuilder().url(switched).build())
+        }
+
         return try {
             chain.proceed(request)
         } catch (e: IOException) {
             if (!shouldSwitch(request, e)) throw e
-            val switched = request.url.newBuilder()
-                .scheme(fallback.scheme)
-                .host(fallback.host)
-                .port(fallback.port)
-                .build()
+            primaryFailedAt.set(System.currentTimeMillis())
+            val switched = switchTo(request, fallback)
             Log.w(
                 TAG,
                 "主地址失败（${e.javaClass.simpleName}: ${e.message}），切到备用地址：${request.url} → $switched",
@@ -78,6 +87,22 @@ class FallbackBaseUrlInterceptor(
             chain.proceed(request.newBuilder().url(switched).build())
         }
     }
+
+    /** 熔断是否打开（主地址刚失败过，且还在冷却期内）。 */
+    private fun isPrimaryCircuitOpen(): Boolean {
+        val failedAt = primaryFailedAt.get()
+        if (failedAt == 0L) return false
+        val elapsed = System.currentTimeMillis() - failedAt
+        return elapsed in 0 until COOLDOWN_MS
+    }
+
+    /** 只换 host/scheme/port，路径与 query 原样保留。 */
+    private fun switchTo(request: Request, fallback: HttpUrl): HttpUrl =
+        request.url.newBuilder()
+            .scheme(fallback.scheme)
+            .host(fallback.host)
+            .port(fallback.port)
+            .build()
 
     /**
      * 这次失败值不值得换地址再试一次。
@@ -102,35 +127,59 @@ class FallbackBaseUrlInterceptor(
     /**
      * 这个请求重发一次有没有副作用。
      *
-     * GET/HEAD 显然没有。POST 要**逐个端点看**——不能一刀切：
+     * GET/HEAD 显然。POST 要**逐个端点看**——不能一刀切：
      *   · 登录 / 发 token / 刷新 token：多签一个 token 而已 → 幂等
+     *   · 剪藏同一链接：后端查重复用已有文章、不重复计费 → 幂等
+     *   · 收藏：UNIQUE 约束保证 → 幂等
      *   · 进度上报：进度值本来就是覆盖写 → 幂等
      *   · 设备登记：upsert → 幂等
-     *   · 反馈提交、创建文章：**不幂等** → 绝不能重发
+     *   · 评分 / 反馈文本：feedback 表**追加**一行，没有唯一约束 → 不幂等
+     *   · 手动触发蒸馏：重复触发会跑两遍 → 不幂等
      * 所以这里用白名单，而不是「POST 一律切」或「POST 一律不切」。
      */
     private fun isIdempotent(request: Request): Boolean {
         val method = request.method
         if (method in IDEMPOTENT_METHODS) return true
-        if (method !in setOf("POST", "PUT")) return false
+        if (method != "POST") return false
         val path = request.url.encodedPath
-        return IDEMPOTENT_POST_SUFFIXES.any { path.endsWith(it) } ||
-            IDEMPOTENT_POST_PREFIXES.any { path.startsWith(it) }
+        return IDEMPOTENT_POST_EXACT.contains(path) ||
+            IDEMPOTENT_POST_PREFIXES.any { path.startsWith(it) } ||
+            IDEMPOTENT_POST_SUFFIXES.any { path.endsWith(it) }
     }
 
     private companion object {
         const val TAG = "FallbackBaseUrl"
 
-        /** 重复执行不产生额外副作用的方法。 */
-        val IDEMPOTENT_METHODS = setOf("GET", "HEAD")
+        /**
+         * 主地址失败后的冷却期：这期间直接走备用地址。
+         *
+         * 60 秒是权衡：够长到「一次会话里的连续请求」都走 IP（不再逐个失败），
+         * 又够短到域名恢复后很快能自动切回去。
+         */
+        const val COOLDOWN_MS = 60_000L
 
         /**
-         * 幂等 POST 的路径**后缀**白名单。
+         * 重复执行不产生额外副作用的方法。
          *
-         * · /progress —— 进度上报，是覆盖写（同一篇的同一位置写多次一样）
-         * · /devices  —— 设备登记，后端是 upsert
+         * GET/HEAD 显然。**PUT/DELETE 按 HTTP 规范就是幂等方法**：
+         * 重复 PUT 同一资源 = 同样的最终状态；重复 DELETE = 第二次是 no-op。
+         *
+         * ⚠️ 别漏掉 PUT —— 隐私同意走的就是
+         * `PUT /api/v1/users/me/consent`（后端是「取或建 + 覆盖写」，
+         * 完全幂等）。漏了它的后果是：某个网络把到域名的连接 RST 掉时，
+         * **App 卡在隐私同意页出不来**（登录后第一道门）。
          */
-        val IDEMPOTENT_POST_SUFFIXES = setOf("/progress", "/devices")
+        val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS", "PUT", "DELETE")
+
+        /** 幂等 POST 的**精确**路径。 */
+        val IDEMPOTENT_POST_EXACT = setOf(
+            // 剪藏：后端 CP-DUPLICATE-CLIP 先查重，重复提交同一链接
+            // 复用已有文章、配额不动 → 幂等。
+            // ⚠️ 必须精确匹配：/api/v1/articles/{id}/rate 与 /distill 不幂等。
+            "/api/v1/articles",
+            // 注销账号：重复删 → 已删 → no-op。
+            "/api/v1/users/me/account/delete",
+        )
 
         /**
          * 幂等 POST 的路径**前缀**白名单。
@@ -140,12 +189,25 @@ class FallbackBaseUrlInterceptor(
          *   派生**确定性** user_id，同一个 code 重复登录不会建出两个用户。
          * · /api/v1/admin/auth/ —— 后台登录，同理。
          *
-         * ⚠️ 用前缀而不是逐个端点列举：端点清单会变（前缀匹配不会漏），
+         * 用前缀而不是逐个端点列举：端点清单会变（前缀匹配不会漏），
          * 而认证类端点天然幂等，往这个前缀下加端点不需要改这里。
          */
         val IDEMPOTENT_POST_PREFIXES = setOf(
             "/api/v1/auth/",
             "/api/v1/admin/auth/",
+        )
+
+        /**
+         * 幂等 POST 的路径**后缀**白名单。
+         *
+         * · /progress     —— 进度上报，是覆盖写（同一篇的同一位置写多次一样）
+         * · /devices      —— 设备登记，后端是 upsert
+         * · /favorites    —— 加收藏，favorites 表有 UNIQUE 约束，重复加是幂等分支
+         */
+        val IDEMPOTENT_POST_SUFFIXES = setOf(
+            "/progress",
+            "/devices",
+            "/favorites",
         )
     }
 }

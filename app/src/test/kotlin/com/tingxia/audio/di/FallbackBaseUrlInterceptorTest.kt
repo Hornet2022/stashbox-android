@@ -212,8 +212,35 @@ class FallbackBaseUrlInterceptorTest {
     }
 
     @Test
-    fun `创建文章这种非幂等 post 不切换`() {
-        // 同理是 POST，但**不幂等**：重发会创建两篇文章 → 绝不能切。
+    fun `剪藏这种幂等 post 遇到连接被重置时切换`() {
+        // 剪藏（POST /api/v1/articles）后端是 CP-DUPLICATE-CLIP：
+        // 先查重，重复提交同一链接**复用已有文章、配额不动** → 幂等 → 该切。
+        // 不切的后果：用户在坏网络下点「剪藏」直接失败 —— 那是 App 的核心功能。
+        val reset = SocketException("Connection reset")
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        val client = OkHttpClient.Builder()
+            .addInterceptor(FallbackBaseUrlInterceptor(fallbackServer.url("/").toString()))
+            .addInterceptor(Interceptor { chain ->
+                if (calls.getAndIncrement() == 0) throw reset
+                chainProceed(chain)
+            })
+            .build()
+        fallbackServer.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        val code = client.newCall(
+            Request.Builder().url(primaryServer.url("/api/v1/articles"))
+                .post("{}".toRequestBody(null)).build()
+        ).execute().use { it.code }
+
+        assertEquals(200, code)
+        assertEquals(1, fallbackServer.requestCount)
+    }
+
+    @Test
+    fun `评分这种非幂等 post 不切换`() {
+        // 评分（POST /api/v1/articles/{id}/rate）写 feedback(type=rate)，
+        // 那是**追加**一行、feedback 表没有唯一约束 → 重发会多一行埋点
+        // （统计被灌水）→ 绝不能切。
         val reset = SocketException("Connection reset")
         val calls = java.util.concurrent.atomic.AtomicInteger(0)
         val client = OkHttpClient.Builder()
@@ -226,13 +253,71 @@ class FallbackBaseUrlInterceptorTest {
 
         val thrown = runCatching {
             client.newCall(
-                Request.Builder().url(primaryServer.url("/api/v1/articles"))
+                Request.Builder().url(primaryServer.url("/api/v1/articles/art-1/rate"))
                     .post("{}".toRequestBody(null)).build()
             ).execute()
         }.exceptionOrNull()
 
         assertTrue("期望原样抛出，实际：$thrown", thrown is SocketException)
         assertEquals(0, fallbackServer.requestCount)
+    }
+
+    @Test
+    fun `put 遇到连接被重置时切换`() {
+        // 隐私同意走的是 PUT /api/v1/users/me/consent（后端「取或建 + 覆盖写」，
+        // 完全幂等）。PUT 按 HTTP 规范就是幂等方法 → 该切。
+        // 不切的后果：某个网络 RST 掉到域名的连接时，**App 卡在隐私同意页出不来**。
+        val reset = SocketException("Connection reset")
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        val client = OkHttpClient.Builder()
+            .addInterceptor(FallbackBaseUrlInterceptor(fallbackServer.url("/").toString()))
+            .addInterceptor(Interceptor { chain ->
+                if (calls.getAndIncrement() == 0) throw reset
+                chainProceed(chain)
+            })
+            .build()
+        fallbackServer.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        val code = client.newCall(
+            Request.Builder().url(primaryServer.url("/api/v1/users/me/consent"))
+                .put("{}".toRequestBody(null)).build()
+        ).execute().use { it.code }
+
+        assertEquals(200, code)
+        assertEquals(1, fallbackServer.requestCount)
+    }
+
+    @Test
+    fun `主地址失败一次后进入熔断，后续请求直接走备用地址`() {
+        // 光有「切换」不够：主地址坏掉时每个请求都要先失败一次。
+        // 熔断期内应该直接走备用地址 —— 省掉必然失败的那一次往返。
+        val reset = SocketException("Connection reset")
+        val calls = java.util.concurrent.atomic.AtomicInteger(0)
+        val client = OkHttpClient.Builder()
+            .addInterceptor(FallbackBaseUrlInterceptor(fallbackServer.url("/").toString()))
+            .addInterceptor(Interceptor { chain ->
+                // 主地址（primaryServer）上的请求一律 reset，并计数
+                // （两个 MockWebServer 同 host 不同端口，要用端口区分）
+                if (chain.request().url.port == primaryServer.port) {
+                    calls.incrementAndGet()
+                    throw reset
+                }
+                chainProceed(chain)
+            })
+            .build()
+        fallbackServer.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
+        fallbackServer.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
+
+        // 第一次：主地址失败 → 切备用
+        client.newCall(Request.Builder().url(primaryServer.url("/a")).build())
+            .execute().use { it.body!!.string() }
+        // 第二次：熔断期内 → **不再试主地址**，直接走备用
+        client.newCall(Request.Builder().url(primaryServer.url("/b")).build())
+            .execute().use { it.body!!.string() }
+
+        assertEquals(2, fallbackServer.requestCount)
+        // 主地址只被试过第一次
+        assertEquals(1, calls.get())
     }
 
     @Test
