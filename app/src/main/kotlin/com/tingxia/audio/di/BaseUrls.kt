@@ -94,6 +94,23 @@ object BaseUrls {
     val isOverridden: Boolean get() = buildTimeOverride.isNotBlank()
 
     /**
+     * 备用后端地址（构建期 `-PfallbackApiBaseUrl` /
+     * `TINGXIA_FALLBACK_API_BASE_URL`），空串 = 不兜底。
+     *
+     * ## 为什么需要它
+     * 主地址是**域名**（api.stashbox.cn），域名这条链路上有域名自己的失败模式：
+     * ICP 备案未过被拦、DNS 没生效、证书过期/失配……
+     * 这些都不该让内测用户看到一个「连不上」的 App。
+     *
+     * IP 入口（https://8.148.9.151/）**与备案无关**（IP 证书不需要备案），
+     * 是唯一一条不受上面这些影响的路径 → 交给 [FallbackBaseUrlInterceptor] 兜底。
+     *
+     * ⚠️ 兜底只覆盖**连接层**失败，不覆盖业务错误、也不覆盖读超时
+     * （那两种情况请求可能已经发出去了，换地址重试 = 重复提交）。
+     */
+    val fallbackGatewayBaseUrl: String = BuildConfig.FALLBACK_API_BASE_URL
+
+    /**
      * App 实际连的后端。
      *
      * debug / minifyDebug：显式覆盖优先，否则 emulator → 10.0.2.2、真机 → Mac-mini.local。

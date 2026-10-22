@@ -29,9 +29,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROPS_FILE="${STASHBOX_SIGNING_PROPS:-$HOME/.stashbox/tingxia-release.properties}"
 
 API_BASE_URL=""
+FALLBACK_API_BASE_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --api-base-url) API_BASE_URL="${2:-}"; shift 2 ;;
+    # 备用地址（可选）：主地址连不上时自动切过去。IP 入口与备案无关。
+    --fallback-api-base-url) FALLBACK_API_BASE_URL="${2:-}"; shift 2 ;;
     -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "未知参数：$1（--help 看用法）" >&2; exit 2 ;;
   esac
@@ -59,11 +62,13 @@ done < "$PROPS_FILE"
 
 echo "▶ 打 release 包"
 echo "  后端地址：$API_BASE_URL"
+echo "  备用地址：${FALLBACK_API_BASE_URL:-（无，不兜底）}"
 echo "  签名凭据：$PROPS_FILE"
 
 cd "$REPO_ROOT"
 ./gradlew assembleRelease \
   "-PapiBaseUrl=$API_BASE_URL" \
+  ${FALLBACK_API_BASE_URL:+"-PfallbackApiBaseUrl=$FALLBACK_API_BASE_URL"} \
   "${props[@]}" \
   --console=plain "$@"
 

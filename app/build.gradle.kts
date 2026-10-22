@@ -37,6 +37,17 @@ val apiBaseUrlOverride: String = (
     ?.let { if (it.endsWith("/")) it else "$it/" }
     ?: ""
 
+// 备用后端地址（可选）。主地址是域名，域名有自己的失败模式（备案未过被拦、
+// DNS 没生效、证书失配）—— 这些不该让内测用户看到「连不上」。
+// IP 入口与备案无关，用它兜底。空串 = 不兜底（行为与以前完全一样）。
+val fallbackApiBaseUrlOverride: String = (
+    (project.findProperty("fallbackApiBaseUrl") as String?)?.trim()
+        ?: System.getenv("TINGXIA_FALLBACK_API_BASE_URL")?.trim()
+    )
+    ?.takeIf { it.isNotEmpty() }
+    ?.let { if (it.endsWith("/")) it else "$it/" }
+    ?: ""
+
 // ─────────────────────────────────────────────────────────────────────────────
 // release 签名：不生成密钥、不把密钥写进仓库，从 Gradle property / 环境变量读
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,9 +121,11 @@ android {
         // ⚠️ 换签名密钥同样会强制重装（Android 要求签名一致）。
         // 所以密钥**只生成一次**，之后一直用同一个 keystore。
         //
-        // 0.3.0：蒸馏中显示当前阶段（正在合成语音…）+ 修正「约需 12 分钟」的过时文案
-        versionCode = 3
-        versionName = "0.3.0"
+        // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
+        // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
+        // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
+        versionCode = 4
+        versionName = "0.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -121,6 +134,9 @@ android {
 
         // 见文件头 apiBaseUrlOverride 的说明。空串 = 走 BaseUrls 原逻辑。
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrlOverride\"")
+
+        // 见文件头 fallbackApiBaseUrlOverride 的说明。空串 = 不兜底。
+        buildConfigField("String", "FALLBACK_API_BASE_URL", "\"$fallbackApiBaseUrlOverride\"")
     }
 
     signingConfigs {
@@ -419,4 +435,10 @@ dependencies {
 // Robolectric 本地 Compose UI 测试需要 Android 资源
 android.testOptions {
     unitTests.isIncludeAndroidResources = true
+    // android.util.Log 在 JVM 单测里默认直接抛
+    // 「Method w in android.util.Log not mocked」——
+    // 于是任何在**异常处理路径**里打日志的类（interceptor 之类）
+    // 根本没法被单测覆盖，只能靠真机验证。
+    // 这个开关让 android.* 的桩方法返回默认值而不是抛异常。
+    unitTests.isReturnDefaultValues = true
 }

@@ -55,6 +55,10 @@ object NetworkModule {
             // CP-ANDROID-MDNS-FALLBACK：mDNS 解析失败时降级到局域网 IP。
             // host 仍是 Mac-mini.local，所以明文白名单不用动（见 MdnsFallbackDns）。
             .dns(MdnsFallbackDns())
+            // 主地址是域名，域名有自己的失败模式（备案未过被拦、DNS 没生效、
+            // 证书失配）→ 连接层失败时自动切到 IP 入口（与备案无关）。
+            // 放在 auth 之前：换 host 不影响 Authorization 头，网关认 token 不认 host。
+            .addInterceptor(FallbackBaseUrlInterceptor(BaseUrls.fallbackGatewayBaseUrl))
             // JWT 鉴权：自动附加 Authorization: Bearer ***
             .addInterceptor(authInterceptor)
             // CP11.0.6 P2.2: 响应时间埋点（放在 auth 后，这样可以拿到最终 URL）
