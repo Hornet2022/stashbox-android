@@ -36,6 +36,9 @@ class FallbackBaseUrlInterceptorTest {
 
     @Before
     fun setUp() {
+        // 熔断状态是**进程级共享**的（见 PrimaryEndpoint）→ 每个用例开始前
+        // 必须重置，否则上一个用例标记的熔断会污染下一个。
+        PrimaryEndpoint.markPrimaryHealthy()
         fallbackServer = MockWebServer()
         fallbackServer.start()
         primaryServer = MockWebServer()

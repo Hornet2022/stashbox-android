@@ -10,7 +10,6 @@ import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
-import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLException
 
 /**
@@ -53,13 +52,16 @@ import javax.net.ssl.SSLException
  * 主地址。等这一段过去再重新试主（域名可能已经恢复）。
  *
  * ⚠️ 这只影响「主地址不可用」这一种情况：主地址正常时行为完全不变。
+ *
+ * ## 熔断状态是**共享**的
+ * 见 [PrimaryEndpoint]：App 里有三条独立的网络线（Retrofit / D9 裸
+ * OkHttp / Media3 的 DefaultHttpDataSource），「主地址坏掉」是全局事实，
+ * 不能各线各记一份 —— 否则音频那条线知道域名连不上，API 这条线还在
+ *一次次试域名。
  */
 class FallbackBaseUrlInterceptor(
     private val fallbackBaseUrl: String,
 ) : Interceptor {
-
-    /** 主地址最近一次失败的时刻（毫秒）；0 = 没失败过。 */
-    private val primaryFailedAt = AtomicLong(0)
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -67,7 +69,9 @@ class FallbackBaseUrlInterceptor(
             ?: return chain.proceed(request)
 
         // 熔断中：主地址刚失败过，直接走备用地址（省掉一次必然失败的往返）
-        if (isPrimaryCircuitOpen()) {
+        // 状态是**进程级共享**的（见 PrimaryEndpoint）—— 音频那条线
+        // （Media3，不走 OkHttp）发现主地址坏了，这里也立刻知道。
+        if (!PrimaryEndpoint.isPrimaryHealthy()) {
             val switched = switchTo(request, fallback)
             Log.w(TAG, "主地址处于熔断期，直接走备用地址：${request.url} → $switched")
             return chain.proceed(request.newBuilder().url(switched).build())
@@ -77,7 +81,7 @@ class FallbackBaseUrlInterceptor(
             chain.proceed(request)
         } catch (e: IOException) {
             if (!shouldSwitch(request, e)) throw e
-            primaryFailedAt.set(System.currentTimeMillis())
+            PrimaryEndpoint.markPrimaryFailed()
             val switched = switchTo(request, fallback)
             Log.w(
                 TAG,
@@ -86,14 +90,6 @@ class FallbackBaseUrlInterceptor(
             )
             chain.proceed(request.newBuilder().url(switched).build())
         }
-    }
-
-    /** 熔断是否打开（主地址刚失败过，且还在冷却期内）。 */
-    private fun isPrimaryCircuitOpen(): Boolean {
-        val failedAt = primaryFailedAt.get()
-        if (failedAt == 0L) return false
-        val elapsed = System.currentTimeMillis() - failedAt
-        return elapsed in 0 until COOLDOWN_MS
     }
 
     /** 只换 host/scheme/port，路径与 query 原样保留。 */
@@ -151,14 +147,6 @@ class FallbackBaseUrlInterceptor(
         const val TAG = "FallbackBaseUrl"
 
         /**
-         * 主地址失败后的冷却期：这期间直接走备用地址。
-         *
-         * 60 秒是权衡：够长到「一次会话里的连续请求」都走 IP（不再逐个失败），
-         * 又够短到域名恢复后很快能自动切回去。
-         */
-        const val COOLDOWN_MS = 60_000L
-
-        /**
          * 重复执行不产生额外副作用的方法。
          *
          * GET/HEAD 显然。**PUT/DELETE 按 HTTP 规范就是幂等方法**：
@@ -195,6 +183,10 @@ class FallbackBaseUrlInterceptor(
         val IDEMPOTENT_POST_PREFIXES = setOf(
             "/api/v1/auth/",
             "/api/v1/admin/auth/",
+            // D9 分享回跳：后端也是剪藏（CP-DUPLICATE-CLIP 查重复用已有文章）→ 幂等。
+            // 这条线走的是**裸 OkHttpClient**（不过 Retrofit），所以它对
+            // 「主地址坏掉」这件事的感知，必须和主 API 那条线共享状态。
+            "/api/v1/callback/",
         )
 
         /**

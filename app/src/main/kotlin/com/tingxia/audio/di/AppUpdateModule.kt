@@ -74,6 +74,10 @@ object AppUpdateModule {
     @ApkDownloadClient
     fun provideApkDownloadClient(): OkHttpClient =
         OkHttpClient.Builder()
+            // APK 放在**咱们自己的域名**上（/downloads/xxx.apk），
+            // 所以它同样会撞上「域名连不上」那类故障 —— 这个 client 不走
+            // Retrofit，拿不到 NetworkModule 那个兜底拦截器，得自己加一份。
+            .addInterceptor(FallbackBaseUrlInterceptor(BaseUrls.fallbackGatewayBaseUrl))
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.MINUTES)
             .writeTimeout(10, TimeUnit.MINUTES)

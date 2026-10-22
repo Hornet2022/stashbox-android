@@ -12,6 +12,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import com.tingxia.audio.di.BaseUrls
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
 import com.tingxia.audio.data.local.DownloadedAudioDao
@@ -137,13 +138,24 @@ class OfflineDownloadManager @Inject constructor(
         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         .createDataSource()
 
-    /** 默认的上游：普通 HTTP 拉流。 */
+    /**
+     * 默认的上游：普通 HTTP 拉流 + **兜底**。
+     *
+     * 为什么包一层 [FallbackHttpDataSource]：Media3 不走 OkHttp，
+     * 所以 [com.tingxia.audio.di.FallbackBaseUrlInterceptor] 管不到它。
+     * 音频是几分钟的连续大文件传输，连接被打断的概率远高于 API 小请求
+     * —— 实测音频下到 57% 就断（position=172s, state=ERROR）。
+     * 不包这层，音频就是唯一一条没有兜底的网络线。
+     */
     private fun defaultUpstreamFactory(): DataSource.Factory =
-        DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(DEFAULT_TIMEOUT_MS)
-            .setReadTimeoutMs(DEFAULT_TIMEOUT_MS)
-            .setAllowCrossProtocolRedirects(true)
-            .setUserAgent(DOWNLOAD_USER_AGENT)
+        FallbackHttpDataSource.Factory(
+            fallbackBaseUrl = BaseUrls.fallbackGatewayBaseUrl,
+            delegateFactory = DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(DEFAULT_TIMEOUT_MS)
+                .setReadTimeoutMs(DEFAULT_TIMEOUT_MS)
+                .setAllowCrossProtocolRedirects(true)
+                .setUserAgent(DOWNLOAD_USER_AGENT),
+        )
 
     /**
      * 查某个 URL 是否**已完整**缓存在本地。

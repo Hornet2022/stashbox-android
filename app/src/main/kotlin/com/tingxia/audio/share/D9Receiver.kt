@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.Log
 import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.di.BaseUrls
+import com.tingxia.audio.di.FallbackBaseUrlInterceptor
 import com.tingxia.audio.di.MdnsFallbackDns
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -41,6 +42,11 @@ object D9Receiver {
             // CP-ANDROID-MDNS-FALLBACK：D9 走裸 OkHttpClient（不过 Retrofit），
             // 所以这里也要单独注入降级 Dns，否则分享回跳在 mDNS 不可用的真机上必然失败。
             .dns(MdnsFallbackDns())
+            // 主地址是域名，域名有自己的失败模式（备案未过被拦、DNS 没生效、
+            // 证书失配、用户所在网络把到域名的 TLS 连接重置）。
+            // D9 这条线不走 Retrofit → 拿不到 NetworkModule 那个 client 上
+            // 的兜底拦截器，得自己加一份（熔断状态与主 API 那条线共享）。
+            .addInterceptor(FallbackBaseUrlInterceptor(BaseUrls.fallbackGatewayBaseUrl))
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
