@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui.screens
 
+import android.provider.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -7,6 +8,8 @@ import androidx.compose.ui.test.onNodeWithText
 import com.tingxia.audio.BuildConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -16,21 +19,25 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * 登录页 dev code 必须**每安装一个**（2026-10-21）。
+ * 登录页 dev code 必须**每设备一个**（2026-10-22 改口径）。
  *
- * ## 背景
+ * ## 背景：两个相反的坑
  *
- * 原来默认 code 写死成 `dev_wechat_${BuildConfig.DEBUG_USER_ID}`，后端按
- * `open_id = "wx_" + code` 派生账号 —— 于是**每个没手改这个输入框的测试员
- * 都登进同一个账号**。真机上那个共享账号（id 2648）已经攒了 5 篇文章，
- * 而且配额是共享的：第一个登录的人把大家这个月的额度用掉一半。
- * 文章、配额、收藏、反馈、评分全部串给下一个人 —— 这是数据串台。
+ * **坑一（2026-10-21 修的）**：默认 code 写死成
+ * `dev_wechat_${BuildConfig.DEBUG_USER_ID}`，后端按 `open_id = "wx_" + code`
+ * 派生账号 —— 于是**每个没手改输入框的测试员都登进同一个账号**。
+ * 文章、配额、收藏、反馈、评分全部串给下一个人，配额还是共享的。
  *
- * ## 现在要求的两条性质
+ * **坑二（2026-10-22 修的）**：改成「每安装一个随机串」之后，
+ * **清数据 / 重装就换一个 code → 换一个新 uid**。于是后台用户列表
+ * 会因为「重装一次」而膨胀；开发/测试反复 pm clear 更是天天多几行
+ * （实测一天 pm clear 4 次就多 4 个用户，用户列表被测试行为淹没）。
  *
- * - **同一次安装内稳定**：杀进程重开 App 还得是同一个账号（否则用户昨天下的
- *   音频、记的进度全对不上）
- * - **不同安装之间不同**：否则两台手机上的测试员还是撞在同一个账号上
+ * ## 现在要求的三条性质
+ *
+ * - **同一台设备恒定**：重装 / 清数据后还是同一个 uid（靠 ANDROID_ID 派生）
+ * - **不同设备不同**：两台手机上的测试员不能撞在同一个账号上
+ * - **取不到设备指纹时退回随机**：宁可多一个账号，也不能所有人共用一个
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -54,25 +61,125 @@ class LoginScreenDevCodeTest {
     }
 
     @Test
-    fun `两次安装拿到不同的 code`() {
-        // 两个互相独立的 store = 两台设备（各自的"安装"）
-        val installA = DevLoginCodeProvider(InMemoryStore(), randomSuffix = { "aaaaaaaaaaaa" })
-        val installB = DevLoginCodeProvider(InMemoryStore(), randomSuffix = { "bbbbbbbbbbbb" })
+    fun `两台不同设备拿到不同的 code`() {
+        // 两个互相独立的 store = 两台设备，各自的设备指纹不同
+        val deviceA = DevLoginCodeProvider(
+            InMemoryStore(),
+            deviceSuffix = { "aaaaaaaaaaaa" },
+            randomSuffix = { "zzzzzzzzzzzz" },
+        )
+        val deviceB = DevLoginCodeProvider(
+            InMemoryStore(),
+            deviceSuffix = { "bbbbbbbbbbbb" },
+            randomSuffix = { "zzzzzzzzzzzz" },
+        )
 
         assertNotEquals(
-            "不同安装必须拿到不同 code —— 相同 code 就是同一个账号，数据会串",
-            installA.code(),
-            installB.code(),
+            "不同设备必须拿到不同 code —— 相同 code 就是同一个账号，数据会串",
+            deviceA.code(),
+            deviceB.code(),
         )
     }
 
     @Test
-    fun `默认随机源下两次安装也不同`() {
-        // 用真实的随机源（UUID）再验一次：不能因为"恰好注入了不同随机源"才通过
+    fun `同一台设备重装后还是同一个 code`() {
+        // 重装 = 存档没了（新的空 store），但设备指纹没变
+        val device = DevLoginCodeProvider(
+            InMemoryStore(),
+            deviceSuffix = { "aaaa1111bbbb" },
+            randomSuffix = { "zzzzzzzzzzzz" },
+        )
+        val first = device.code()
+
+        // 模拟"卸载重装"：全新的 store（没有存档）+ 同一个设备指纹
+        val afterReinstall = DevLoginCodeProvider(
+            InMemoryStore(),
+            deviceSuffix = { "aaaa1111bbbb" },
+            randomSuffix = { "yyyyyyyyyyyy" },
+        ).code()
+
+        assertEquals(
+            "同一台设备重装后必须还是同一个 code（否则后台用户列表会膨胀）",
+            first,
+            afterReinstall,
+        )
+    }
+
+    @Test
+    fun `取不到设备指纹时退回随机`() {
+        // ANDROID_ID 拿不到（或命中已知坏值）→ 退回随机，
+        // 绝不能让所有这类设备共用一个账号（那是 2026-10-21 那个 bug 的翻版）。
+        val provider = DevLoginCodeProvider(
+            InMemoryStore(),
+            deviceSuffix = { null },
+            randomSuffix = { "randomfallback" },
+        )
+        assertEquals("dev_wechat_randomfallback", provider.code())
+    }
+
+    @Test
+    fun `默认取不到设备指纹时两次也不同`() {
+        // 用真实的随机源（UUID）再验一次：不能因为"恰好注入了不同随机源"才通过。
+        // 默认 deviceSuffix = null → 走随机兜底。
         val codeA = DevLoginCodeProvider(InMemoryStore()).code()
         val codeB = DevLoginCodeProvider(InMemoryStore()).code()
 
-        assertNotEquals("不同安装必须拿到不同 code", codeA, codeB)
+        assertNotEquals("取不到设备指纹时不同安装也必须不同 code", codeA, codeB)
+    }
+
+    @Test
+    fun `android_id 取到时后缀稳定且不是原文`() {
+        val context = RuntimeEnvironment.getApplication()
+        Settings.Secure.putString(
+            context.contentResolver,
+            Settings.Secure.ANDROID_ID,
+            "1234567890abcdef",
+        )
+        val first = androidIdSuffix(context)
+        val second = androidIdSuffix(context)
+
+        assertNotNull("应当取到设备指纹", first)
+        assertEquals("同一台设备的后缀必须稳定", first, second)
+        assertEquals(DEV_LOGIN_CODE_RANDOM_LENGTH, first!!.length)
+        assertNotEquals(
+            "不能把 ANDROID_ID 原文送出去（那是设备标识/个人信息）",
+            "1234567890abcdef",
+            first,
+        )
+    }
+
+    @Test
+    fun `已知坏值的 android_id 视为取不到设备指纹`() {
+        // 部分定制 ROM 对所有设备返回同一个常量 —— 拿它当指纹会让
+        // 所有这类设备共用一个账号（数据串台 + 配额共享）。
+        val context = RuntimeEnvironment.getApplication()
+        Settings.Secure.putString(
+            context.contentResolver,
+            Settings.Secure.ANDROID_ID,
+            KNOWN_BAD_ANDROID_ID,
+        )
+        assertNull("坏值必须当无效处理", androidIdSuffix(context))
+    }
+
+    @Test
+    fun `android_id 为空时视为取不到设备指纹`() {
+        val context = RuntimeEnvironment.getApplication()
+        Settings.Secure.putString(context.contentResolver, Settings.Secure.ANDROID_ID, "")
+        assertNull(androidIdSuffix(context))
+    }
+
+    @Test
+    fun `已存过 code 时不因设备指纹变化而改_零迁移`() {
+        // 老用户（已经存了随机 code）必须继续用自己那个 ——
+        // 否则他们下次登录会变成新账号，文章/配额"看起来丢了"。
+        val store = InMemoryStore("dev_wechat_legacycode")
+        val provider = DevLoginCodeProvider(
+            store,
+            deviceSuffix = { "newdevice01" },
+            randomSuffix = { "shouldnotuse" },
+        )
+        assertEquals("dev_wechat_legacycode", provider.code())
+        assertEquals("不该重新落盘", 0, store.writeCount)
     }
 
     @Test
