@@ -1,6 +1,7 @@
 package com.tingxia.audio.ui.articles
 
 import androidx.lifecycle.ViewModel
+import com.tingxia.audio.ui.friendlyError
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.repository.ArticleRepository
@@ -89,6 +90,17 @@ class ArticleListViewModel @Inject constructor(
     private val _deletingId = MutableStateFlow<String?>(null)
     val deletingId: StateFlow<String?> = _deletingId.asStateFlow()
 
+    /**
+     * 提示已发出后清空 error。
+     *
+     * 为什么需要：`_error` 是 StateFlow，**同一条错误连续发生两次时值没变** →
+     * `LaunchedEffect(error)` 不再触发 → 第二次删除失败**连提示都没有**，
+     * 用户以为第二次成功了。发出即清空，才能让同样的错误再次响。
+     */
+    fun consumeError() {
+        _error.value = null
+    }
+
     fun deleteArticle(id: String) {
         if (_deletingId.value != null) return // 串行防重复点
         _deletingId.value = id
@@ -98,7 +110,10 @@ class ArticleListViewModel @Inject constructor(
                 _articles.value = _articles.value.filterNot { it.id == id }
             } catch (e: Exception) {
                 android.util.Log.w("ArticleListViewModel", "deleteArticle failed: ${e.message}")
-                _error.value = e.message ?: "删除失败"
+                // ⚠️ 原来直接用 e.message → 弹出 "HTTP 500" 这种原始异常；
+                // 而且 _error 是 StateFlow，**同一条错误再发生时值没变** →
+                // LaunchedEffect(error) 不再触发 → 第二次删除失败**连提示都没有**。
+                _error.value = friendlyError(e, fallback = "删除失败，请稍后重试")
             } finally {
                 _deletingId.value = null
             }

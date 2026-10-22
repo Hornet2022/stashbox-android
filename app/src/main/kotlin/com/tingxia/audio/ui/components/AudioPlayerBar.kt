@@ -29,6 +29,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -252,6 +253,14 @@ fun AudioPlayerBar(
                                     // 完听判定会静默失效（listen-complete 不上报、
                                     // 听感评分卡不弹）。见 PlayerController.currentArticleId。
                                     controller.play(audioUrl, title, articleId = articleId)
+                                } else {
+                                    // ⚠️ 原来这里什么都不做 —— 音频地址还没取到时，
+                                    // 播放键就是个死按钮（点了像 App 坏了）。给个提示。
+                                    Toast.makeText(
+                                        context,
+                                        "音频地址还没准备好，请稍后重试",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
                                 }
                             }
                         },

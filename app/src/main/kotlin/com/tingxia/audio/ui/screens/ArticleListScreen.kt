@@ -141,6 +141,9 @@ fun ArticleListScreen(
         if (!error.isNullOrBlank()) {
             android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_SHORT)
                 .show()
+            // 提示发出后消费掉：否则**同一条错误**再发生时值没变 →
+            // 这个 LaunchedEffect 不再触发 → 用户以为第二次成功了。
+            viewModel.consumeError()
         }
     }
 

@@ -246,6 +246,15 @@ class ArticleDetailViewModel @Inject constructor(
                                 it.copy(
                                     status = DistillStatus.READY,
                                     audioUrl = url,
+                                    // 已就绪却**取不到音频地址** → 底部播放条的播放键
+                                    // 会变成死按钮（audioUrl == null 时点击什么都不做）。
+                                    // 原来这里静默变 null，界面停在「已就绪却没有播放器」，
+                                    // 用户点了没反应也没提示。
+                                    pollError = if (url == null) {
+                                        "音频地址暂不可用，请下拉重试"
+                                    } else {
+                                        it.pollError
+                                    },
                                     tags = resp.tags.orEmpty(),
                                     qualityScore = resp.qualityScore,
                                     audioDurationSec = resp.audioDurationSec,
