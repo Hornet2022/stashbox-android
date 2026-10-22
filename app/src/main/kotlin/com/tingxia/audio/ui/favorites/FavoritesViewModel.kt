@@ -75,9 +75,17 @@ class FavoritesViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         favorites = _uiState.value.favorites.filter { it.id != favoriteId },
                     )
+                } else {
+                    // ⚠️ ok == false 时原来既不移除也不报错 → 弹窗关了、条目还在、
+                    // 屏幕零变化，用户以为删掉了（其实还在服务端）。
+                    _uiState.value = _uiState.value.copy(error = "删除失败，请稍后重试")
                 }
-            } catch (_: Exception) {
-                // silent failure
+            } catch (e: Exception) {
+                // 屏幕本来就有 Toast 通路（FavoritesScreen 的 LaunchedEffect(error)），
+                // 但这里从不给 error 赋值 → 那条通路永远不触发。补上。
+                _uiState.value = _uiState.value.copy(
+                    error = friendlyError(e, fallback = "删除失败，请稍后重试"),
+                )
             }
         }
     }

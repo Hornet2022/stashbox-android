@@ -56,9 +56,17 @@ class LaterListensViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         laterListens = _uiState.value.laterListens.filter { it.article_id != articleId },
                     )
+                } else {
+                    // ⚠️ ok == false 时原来既不移除也不报错 → 条目不消失、无提示，
+                    // 用户反复点多少次都一样，像 App 坏了。
+                    _uiState.value = _uiState.value.copy(error = "取消失败，请稍后重试")
                 }
-            } catch (_: Exception) {
-                // silent failure
+            } catch (e: Exception) {
+                // 屏幕本来就有 Toast 通路（LaterListensScreen 的 LaunchedEffect(error)），
+                // 但这里从不给 error 赋值 → 那条通路永远不触发。补上。
+                _uiState.value = _uiState.value.copy(
+                    error = friendlyError(e, fallback = "取消失败，请稍后重试"),
+                )
             }
         }
     }

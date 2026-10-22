@@ -409,7 +409,18 @@ fun SettingsScreen(
                 playerController.setSpeed(value)
                 scope.launch {
                     runCatching { ttsViewModel.persistSpeed(value) }
-                        .onFailure { friendlyError(it, "语速已生效，但同步到云端失败") }
+                        .onFailure {
+                            // ⚠️ 这里以前写成 `.onFailure { friendlyError(it, ...) }`，
+                            // 文案算出来就被丢掉 = 静默吞掉失败：用户看到「变速了」，
+                            // 以为存上了，换设备/重启后档位悄悄变回去。
+                            // 同一型 bug 在全屏播放器（FullScreenPlayerScreen）已修，
+                            // 这次把设置页也补上 —— 两处现在都是真的提示。
+                            Toast.makeText(
+                                context,
+                                friendlyError(it, "语速已生效，但同步到云端失败"),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
                 }
             },
         )
