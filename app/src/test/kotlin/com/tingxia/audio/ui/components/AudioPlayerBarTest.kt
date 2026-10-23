@@ -50,7 +50,7 @@ class AudioPlayerBarTest {
     @Before
     fun setup() {
         val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
-        controller = PlayerController(player)
+        controller = PlayerController(player, RuntimeEnvironment.getApplication())
         barClicked = false
     }
 
