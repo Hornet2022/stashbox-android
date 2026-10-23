@@ -41,7 +41,11 @@ import javax.net.ssl.SSLException
  *     时切（DNS 解析不了、连不上、证书握手失败）—— 这三种情况下请求
  *     **肯定还没发出去**。其余情况（读超时、连接被重置）请求可能已经到达
  *     服务端，换地址重试等于把同一个操作提交两遍 → 不切。
- *   · **读超时一律不切**：那是服务端慢，换地址大概率也慢，白等一个 timeout。
+ *   · **读超时**（2026-10-23 改判据）→ **幂等请求切、不幂等不切**。
+ *     原来是一律不切，理由是「服务端慢，换地址也慢」—— 但备用地址是
+ *     **另一条网络路径**（域名 ←→ 直连 IP），不是同一个入口换个写法。
+ *     真机实测：同一网络对域名时好时坏（多数 RST、偶尔黑洞），
+ *     黑洞那次不切 → 隐私同意页卡死、整个 App 用不了。详见 [shouldSwitch]。
  *
  * ### ② 熔断：失败过一次就别再逐个试
  * 光有切换不够：主地址坏掉时，**每一个**请求都要先失败一次才切到备用
@@ -107,13 +111,34 @@ class FallbackBaseUrlInterceptor(
      * 按文案匹配会在升级时静默失效。
      */
     private fun shouldSwitch(request: Request, e: IOException): Boolean {
-        // 读超时 = 服务端慢。换了地址大概率也慢，白等一个 timeout。
-        if (e is SocketTimeoutException) return false
-
         // 连接阶段就失败：请求肯定还没发出去 → 任何方法都安全。
         if (e is UnknownHostException) return true   // DNS 解析不了
         if (e is ConnectException) return true       // 连不上 / 被拒
         if (e is SSLException) return true           // 证书握手失败
+
+        // 读超时（2026-10-23 改判据）。
+        //
+        // 原来这里是「读超时一律不切」，理由是「服务端慢，换地址大概率也慢，
+        // 白等一个 timeout」。**但那个前提在本项目里不成立** ——
+        // 备用地址不是「同一个入口换个写法」，而是**另一条网络路径**
+        // （备案域名 api.stashbox.cn ←→ 直连 IP 8.148.9.151）。
+        //
+        // 真机实测（小米 Mi 11，172.16.6.0/20 网络）：
+        //   同一个 App 里，一批请求对域名是「Connection reset」（→ 切了，正常），
+        //   而 `GET /api/v1/policies/privacy` 是「Read timed out」（65 秒），
+        //   **没切** → 隐私同意页卡在「正在加载隐私政策…」→
+        //   整个 App 用不了（连同意页都过不去）。
+        //
+        // 也就是说这条网络对域名是**时好时坏**的：多数时候 RST（切了），
+        // 偶尔黑洞（超时 → 不切 → 卡死）。后者是「看运气」的故障，
+        // 最难查 —— 因为同一个 App、同一个网络，上一分钟还好好的。
+        //
+        // 现在的判据：
+        //   · **幂等请求**（GET 等）→ 切。代价是最多等两个 timeout
+        //     （服务端真的慢时），换来的是「域名路径被黑洞时 App 仍然可用」；
+        //   · **不幂等的写操作** → 仍然不切。读超时说明请求**可能已经到达
+        //     服务端**（它已经开始处理了只是没回完），重发等于提交两遍。
+        if (e is SocketTimeoutException) return isIdempotent(request)
 
         // 其余（SocketException: Connection reset 等）：异常类型看不出
         // 请求有没有已经发出去，**只有幂等性能做判断依据**。

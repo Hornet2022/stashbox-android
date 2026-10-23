@@ -2,6 +2,7 @@ package com.tingxia.audio.di
 
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
@@ -337,10 +338,36 @@ class FallbackBaseUrlInterceptorTest {
     }
 
     @Test
-    fun `读超时不切换`() {
-        // 连接已建立、服务端就是不回 → 读超时。
-        // 这时**请求可能已经发出去了**，换地址重试等于把同一个操作提交两次
-        // （"删除文章"这种不幂等的操作会真删两次）→ 必须不切。
+    fun `读超时：幂等请求会切到备用地址`() {
+        // 2026-10-23 改判据。
+        //
+        // 原来「读超时一律不切」，理由是「服务端慢，换地址也慢」——
+        // 但备用地址是**另一条网络路径**（域名 ←→ 直连 IP），
+        // 不是同一个入口换个写法。
+        //
+        // 真机实测（小米 Mi 11，172.16.6.0/20）：同一网络对域名时好时坏 ——
+        // 多数请求是「Connection reset」（切了，正常），
+        // 而隐私政策那次是「Read timed out」（没切）→ 同意页卡死、App 不可用。
+        // 幂等的 GET 重试一次没有副作用 → 该切。
+        primaryServer.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        fallbackServer.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
+        val client = OkHttpClient.Builder()
+            .addInterceptor(FallbackBaseUrlInterceptor(fallbackServer.url("/").toString()))
+            .readTimeout(500, TimeUnit.MILLISECONDS)
+            .build()
+
+        val body = client.newCall(Request.Builder().url(primaryServer.url("/x")).build())
+            .execute().use { it.body!!.string() }
+
+        assertEquals("ok", body)
+        assertEquals(1, fallbackServer.requestCount)
+    }
+
+    @Test
+    fun `读超时：不幂等的写操作不切`() {
+        // 读超时说明连接已建立、请求**可能已经到达服务端**（它已经开始处理
+        // 只是没回完）→ 重发等于把同一个操作提交两次
+        // （"删除文章"这种操作会真删两次）→ 必须不切。
         primaryServer.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         val client = OkHttpClient.Builder()
             .addInterceptor(FallbackBaseUrlInterceptor(fallbackServer.url("/").toString()))
@@ -348,7 +375,12 @@ class FallbackBaseUrlInterceptorTest {
             .build()
 
         val thrown = runCatching {
-            client.newCall(Request.Builder().url(primaryServer.url("/x")).build()).execute()
+            client.newCall(
+                Request.Builder()
+                    .url(primaryServer.url("/x"))
+                    .post("{}".toRequestBody("text/plain".toMediaType()))
+                    .build()
+            ).execute()
         }.exceptionOrNull()
 
         assertTrue("期望读超时，实际：$thrown", thrown is SocketTimeoutException)
