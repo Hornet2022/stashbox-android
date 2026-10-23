@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 品牌底色：纸感渐变（与落地页的 cream 纸底同色）。
+     不用 @color 的纯色：adaptive icon 的 background 会被遮罩裁成
+     圆形/圆角，纯色会显得平；渐变让纸的质感保留下来。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:startColor="#F5F2EB"
+        android:endColor="#EFE9DE"
+        android:type="linear" />
+</shape>

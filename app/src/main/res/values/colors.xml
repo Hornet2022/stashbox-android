@@ -8,6 +8,7 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- Adaptive launcher icon -->
-    <color name="ic_launcher_background">#FF6200EE</color>
+    <!-- Adaptive launcher icon 的底色搬到了 drawable/ic_launcher_bg.xml
+         （纸感渐变，纯色在遮罩裁圆后太平）。这里不再定义
+         ic_launcher_background —— 留着会变成没人引用的孤儿资源。 -->
 </resources>

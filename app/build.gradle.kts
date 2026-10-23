@@ -121,6 +121,9 @@ android {
         // ⚠️ 换签名密钥同样会强制重装（Android 要求签名一致）。
         // 所以密钥**只生成一次**，之后一直用同一个 keystore。
         //
+        // 0.3.8：换品牌 logo —— 启动器图标改成「听匣」二字（竖排），
+        // 前景是抽出来的字形路径，纸底是渐变 shape。
+        // 旧图标还是 Android 模板默认的紫色机器人。
         // 0.3.7：ICP 备案通过 —— 主地址域名化后的第一次发版
         // （主地址一直是 api.stashbox.cn，这版是把「IP 兜底」的定位
         //  从「备案未过期的必需品」改成「冗余保险」写进注释，并验证
@@ -136,8 +139,8 @@ android {
         // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
         // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
         // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
-        versionCode = 10
-        versionName = "0.3.7"
+        versionCode = 11
+        versionName = "0.3.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
