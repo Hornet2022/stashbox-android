@@ -39,6 +39,7 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.navArgument
 import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.audio.AudioPlayerService
+import com.tingxia.audio.audio.RequestPlaybackNotificationPermission
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.share.D9Receiver
 import com.tingxia.audio.share.D9Result
@@ -70,6 +71,7 @@ import com.tingxia.audio.ui.feedback.FeedbackHistoryScreen
 import dagger.hilt.android.AndroidEntryPoint
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
 import javax.inject.Inject
@@ -97,6 +99,23 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher
 
+    /**
+     * 待跳转的路由（2026-10-23 新增）。
+     *
+     * 通知栏点「播放」要能**回到播放器**，而不是停在首页。
+     * 而 Media3 的通知 contentIntent = `mediaSession.getSessionActivity()`，
+     * 没设的话 contentIntent 为 null → **点通知什么都不会发生**
+     * （DefaultMediaNotificationProvider 的源码就是这么写的：
+     * `builder.setContentIntent(mediaSession.getSessionActivity())`）。
+     *
+     * 为什么不走 deep link（`stashbox://player`）：全项目**没有任何地方**调
+     * `navController.handleDeepLink(intent)`，所以清单里声明的
+     * `stashbox://detail/{id}` 其实是**不生效**的 —— 靠它导航等于埋一个
+     * 看起来能跑、实际不动的机关。走「显式 Intent + extra」最直接：
+     * 意图由本 App 自己发出，不依赖系统按 scheme 匹配。
+     */
+    internal val pendingRoute = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -111,6 +130,8 @@ class MainActivity : ComponentActivity() {
         // 让 AudioPlayerService（MediaSessionService）常驻，系统方可接管锁屏 / 通知控制
         // （共享 ExoPlayer 由 Hilt PlayerModule 提供，PlayerController 与 Service 共用同一实例）
         startAudioService()
+        // 冷启动就带着「去播放器」的意图（比如从通知栏点进来）
+        pendingRoute.value = intent?.getStringExtra(EXTRA_NAVIGATE_TO)
         enableEdgeToEdge()
         setContent {
             TingxiaTheme {
@@ -129,6 +150,9 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleD9Intent(intent)
+        // 通知栏点「播放」：App 已在后台运行 → singleTask 复用本 Activity，
+        // 走 onNewIntent 而不是 onCreate。
+        intent.getStringExtra(EXTRA_NAVIGATE_TO)?.let { pendingRoute.value = it }
     }
 
     /**
@@ -152,6 +176,19 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             // 启动失败不影响 UI；CP4.5 会补通知 / 锁屏细节
         }
+    }
+
+    companion object {
+        /**
+         * 「跳到某个路由」的 Intent extra key。
+         *
+         * 定义在 Activity 这一侧（而不是服务侧）：**导航路由是界面的知识**，
+         * 音频服务只负责「告诉系统点通知要去哪儿」。
+         */
+        const val EXTRA_NAVIGATE_TO = "com.tingxia.audio.NAVIGATE_TO"
+
+        /** 全屏播放器的路由名 —— 与下面 NavHost 里的 `composable("player")` 同一个。 */
+        const val ROUTE_PLAYER = "player"
     }
 }
 
@@ -180,6 +217,14 @@ private fun AuthRoot() {
     var privacyAgreed by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { viewModel.checkLogin() }
+
+    // 播放通知的权限（2026-10-23 新增）。
+    //
+    // Android 13+ 没这个权限时的现象是「**声音在播但通知栏没有控制条**」
+    // —— 前台服务照跑、声音照出，用户却没法在通知栏暂停、没法锁屏控制。
+    // 申请时机选在「用户第一次播放」（见 RequestPlaybackNotificationPermission
+    // 的说明），不选在一进 App。
+    RequestPlaybackNotificationPermission((LocalContext.current as MainActivity).playerController)
 
     // 会话在后台过期时，必须有人把 AuthRoot 拉回登录页。
     //
@@ -272,6 +317,21 @@ private fun AppNavigation() {
     // 正确做法：清 token + 置 AuthState.NotLoggedIn，AuthRoot 自动换回 LoginScreen，
     // 同时整个 AppNavigation 子树被销毁。
     val authViewModel: AuthViewModel = hiltViewModel()
+
+    // 通知栏点「播放」→ 跳到全屏播放器（2026-10-23 新增）。
+    //
+    // 用 collect 而不是 collectAsStateWithLifecycle：这是一次性的「命令」，
+    // 不是界面状态 —— 跳完就要清空，否则转屏回来会又跳一次。
+    LaunchedEffect(Unit) {
+        activity.pendingRoute.collect { route ->
+            if (route != null) {
+                navController.navigate(route) {
+                    launchSingleTop = true
+                }
+                activity.pendingRoute.value = null
+            }
+        }
+    }
 
     // P1-3：D9 分享结果订阅 → toast + 跳转文章列表
     val context = LocalContext.current

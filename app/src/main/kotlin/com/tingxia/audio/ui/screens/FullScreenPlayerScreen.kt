@@ -155,6 +155,8 @@ fun FullScreenPlayerScreen(
     ObservePlayerPositionUpdates(controller)
 
     val playbackState by controller.state.collectAsStateWithLifecycle()
+    // 播放失败的用户可读原因（2026-10-23 新增）
+    val playbackError by controller.playbackError.collectAsStateWithLifecycle()
     val position by controller.position.collectAsStateWithLifecycle()
     val duration by controller.duration.collectAsStateWithLifecycle()
     // P1-2：真实曲目元数据来自 PlayerController（而非调用方写死的占位标题）
@@ -164,6 +166,8 @@ fun FullScreenPlayerScreen(
     val currentArticleId by controller.currentArticleId.collectAsStateWithLifecycle()
     // CP-TTS-VOICE: 语速的真实来源。档位由服务端下发，不再在 UI 里硬编码五档。
     val speed by controller.speed.collectAsStateWithLifecycle()
+    // 睡眠定时器剩余分钟数（0 = 未设置）。播放器层持有 —— 它必须活得比界面久。
+    val sleepTimerMinutes by controller.sleepTimerMinutes.collectAsStateWithLifecycle()
     val availableSpeeds by controller.availableSpeeds.collectAsStateWithLifecycle()
     // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
     val currentBitrate by controller.currentBitrate.collectAsStateWithLifecycle()
@@ -179,6 +183,7 @@ fun FullScreenPlayerScreen(
     var dragValue by remember { mutableFloatStateOf(0f) }
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showFeedbackSheet by remember { mutableStateOf(false) }
+    var showSleepTimerSheet by remember { mutableStateOf(false) }
     // 收藏是乐观更新：先翻图标，失败再翻回来并提示。播放器的收藏不该
     // 阻塞在一次网络往返上。
     var favoriteOverride by remember { mutableStateOf<Boolean?>(null) }
@@ -276,6 +281,25 @@ fun FullScreenPlayerScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // 播放失败提示 + 重试（2026-10-23 新增）
+            //
+            // 此前播放失败**完全没有反馈**：状态是乐观设成 PLAYING 的，
+            // 用户只看到「按了没声音」，既不知道失败了也不知道该干什么。
+            // 这里把 [com.tingxia.audio.audio.PlayerController.playbackError]
+            // 显示出来，并给一个**能点**的重试入口 ——
+            // 失败后状态是 ERROR，而 resume() 只认 PAUSED，
+            // 所以播放键在失败态必须走 retry()，否则又是一个死按钮。
+            playbackError?.let { message ->
+                PlaybackErrorBanner(
+                    message = message,
+                    onRetry = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        controller.retry()
+                    },
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // 5 个控制按钮 — 上一首 / 后退 15s / 播放 / 前进 30s / 下一首
             ControlButtons(
                 isPlaying = playbackState == PlaybackState.PLAYING,
@@ -287,6 +311,9 @@ fun FullScreenPlayerScreen(
                         PlaybackState.PLAYING -> controller.pause()
                         // P1-2：暂停态 → resume（沿用已加载的 MediaItem，不从头播放）
                         PlaybackState.PAUSED -> controller.resume()
+                        // 失败态 → 重试。走 play() 重来一遍，音频地址可能已失效，
+                        // 重新取一次比原地 prepare 更有机会成。
+                        PlaybackState.ERROR -> controller.retry()
                         else -> {
                             // IDLE / STOPPED：仅当控制器已有真实音频源时再 play，
                             // 避免以空 URL 重建 MediaItem 导致播放失败。
@@ -342,6 +369,15 @@ fun FullScreenPlayerScreen(
                 onShowSpeedSheet = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     showSpeedSheet = true
+                },
+                extraChip = {
+                    SleepTimerChip(
+                        minutes = sleepTimerMinutes,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showSleepTimerSheet = true
+                        },
+                    )
                 },
             )
 
@@ -454,6 +490,70 @@ fun FullScreenPlayerScreen(
     }
 
     // 反馈 —— 接线前这个键是空的
+    // 睡眠定时器 sheet（2026-10-23 新增）
+    if (showSleepTimerSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSleepTimerSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF3A2F26),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 32.dp),
+            ) {
+                Text(
+                    text = "睡眠定时器",
+                    color = Color(0xFFF5F2EB),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "到点自动暂停，播放位置会保留，醒来还能接着听。",
+                    color = Color(0xFFD4CFC6),
+                    fontSize = 13.sp,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                SLEEP_TIMER_OPTIONS.forEach { minutes ->
+                    val label = if (minutes == 0) "关闭定时器" else "$minutes 分钟"
+                    val active = sleepTimerMinutes == minutes
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (active) Color(0xFFFFFFFF).copy(alpha = 0.16f)
+                                else Color.Transparent
+                            )
+                            .clickable {
+                                controller.setSleepTimerMinutes(minutes)
+                                showSleepTimerSheet = false
+                            }
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = label,
+                            color = Color(0xFFF5F2EB),
+                            fontSize = 15.sp,
+                        )
+                        if (active) {
+                            Text(
+                                text = "当前",
+                                color = Color(0xFFD4CFC6),
+                                fontSize = 13.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (showFeedbackSheet && feedbackRepository != null) {
         val appVersion = remember {
             try {
@@ -707,6 +807,44 @@ private fun formatTime(ms: Long): String {
     return "%02d:%02d".format(min, sec)
 }
 
+/**
+ * 播放失败提示条（2026-10-23 新增）。
+ *
+ * 为什么单独一个组件而不是弹个 Toast：Toast 会自己消失，而「播放失败」
+ * 是**用户必须做点什么**才能继续的状态（重试）。消失了就等于没提示。
+ */
+@Composable
+private fun PlaybackErrorBanner(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x33FF5252), RoundedCornerShape(12.dp))
+            .border(1.dp, Color(0x66FF5252), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = message,
+            color = Color(0xFFFFE0E0),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = "重试",
+            color = Color(0xFFFFCDD2),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 // 5 控制按钮
 // ─────────────────────────────────────────────────────────
@@ -831,6 +969,7 @@ private fun PlayPauseButton(
 private fun SpeedRow(
     currentSpeed: Float,
     onShowSpeedSheet: () -> Unit,
+    extraChip: (@Composable () -> Unit)? = null,
 ) {
     // CP-TTS-VOICE: 原来是 `var currentSpeed by remember { mutableStateOf("1.0x") }`
     // —— 纯粹本地 state,点哪个 chip 都只改这个变量,播放器速度纹丝不动,
@@ -843,6 +982,8 @@ private fun SpeedRow(
     // 360 − 48 = 312dp —— 「更多」键被挤出屏幕，且 sheet 里列的还是同一批档位。
     // 单 chip 既不溢出又把当前档位一眼可见，展开后的 sheet 给的是完整列表。
     Row(
+        // 不用 fillMaxWidth —— 语速 chip 与定时器 chip 要**并排居中**，
+        // 填满宽度会把第二个 chip 顶到边上（360dp 机型上直接被截断）。
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
@@ -891,6 +1032,72 @@ private fun SpeedRow(
                 modifier = Modifier.size(18.dp),
             )
         }
+
+        // 附加 chip（睡眠定时器）—— 与语速 chip 并排。
+        if (extraChip != null) {
+            Spacer(modifier = Modifier.width(10.dp))
+            extraChip()
+        }
+    }
+}
+
+/**
+ * 睡眠定时器 chip（2026-10-23 新增）。
+ *
+ * 显示口径：没设就显示「定时器」，设了就显示剩余分钟数 ——
+ * 用户必须一眼看出「还剩多久会停」，否则不敢靠它睡觉。
+ *
+ * 为什么是 chip 而不是底部第四个图标键：底部那排是
+ * 收藏/标签/反馈/分享，全是**立刻见效**的动作；
+ * 定时器是**设置型**的，和语速同类，放一起更合理。
+ */
+@Composable
+private fun SleepTimerChip(
+    minutes: Int,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
+        label = "timerChipScale",
+    )
+    val bgColor by animateColorAsState(
+        targetValue = Color(0xFFFFFFFF).copy(alpha = 0.12f),
+        animationSpec = tween(durationMillis = 160),
+        label = "timerChipBg",
+    )
+    Row(
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = if (minutes > 0) "定时 $minutes 分钟" else "定时器",
+            color = Color(0xFFF5F2EB),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Icon(
+            imageVector = Icons.Default.ExpandMore,
+            contentDescription = "设置睡眠定时器",
+            tint = Color(0xFFD4CFC6),
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -1092,3 +1299,6 @@ private fun Icon(
         modifier = Modifier.size(iconSizeDp.dp),
     )
 }
+
+/** 睡眠定时器的档位（分钟）。0 = 关闭。 */
+private val SLEEP_TIMER_OPTIONS = listOf(0, 15, 30, 45, 60)

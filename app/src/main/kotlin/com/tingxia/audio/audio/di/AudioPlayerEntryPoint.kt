@@ -25,4 +25,13 @@ import dagger.hilt.components.SingletonComponent
 interface AudioPlayerEntryPoint {
     fun offlineDownloadManager(): OfflineDownloadManager
     fun exoPlayer(): ExoPlayer
+
+    /**
+     * [com.tingxia.audio.audio.PlayerController] 单例。
+     *
+     * 服务里的自定义命令（上一首 / 下一首 / 快进快退 / 睡眠定时器）要落到
+     * **和界面同一个** 控制器上 —— 否则通知里点「下一首」跳的和 App 里跳的
+     * 不是同一首（两套队列 = 两套真相）。
+     */
+    fun playerController(): com.tingxia.audio.audio.PlayerController
 }
