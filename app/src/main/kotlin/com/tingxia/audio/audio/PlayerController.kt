@@ -388,8 +388,9 @@ class PlayerController @Inject constructor(
         // 立刻刷一次：不等下一个 500ms 的跳，这样换曲后字幕/进度不会
         // 慢半拍才跟上（用户看到的是「标题变了、内容还没变」）。
         updateSubtitle()
-        val idx = player.currentMediaItemIndex
-        if (idx != androidx.media3.common.C.INDEX_UNSET) _queueIndex.value = idx
+        // 队列边界（有没有上一首/下一首）跟着换曲变 ——
+        // 界面据此把到头/到尾的那颗按钮灰掉（见 hasNextItem 的说明）。
+        refreshQueueBounds()
     }
 
     /**
@@ -725,11 +726,13 @@ class PlayerController @Inject constructor(
         val queueIndex = articleId?.let { id -> queue.indexOfFirst { it.articleId == id } } ?: -1
         if (queueIndex >= 0) {
             player.setMediaItems(queue.map { it.toMediaItem() }, queueIndex, 0L)
-            _queueIndex.value = queueIndex
         } else {
             // 没有 articleId（不隶属于任何文章）或队列里没有它 → 单曲播放。
             player.setMediaItem(mediaItem)
         }
+        // 灌完队列立刻刷一次边界状态 ——
+        // 否则界面要等下一次换曲才知道「有没有下一首」。
+        refreshQueueBounds()
         player.prepare()
         // CP-TTS-VOICE: setPlaybackSpeed 是 player 级参数，理论上前后换 MediaItem
         // 不会丢。但这里显式重放一次 —— 漏掉的代价是「用户设了 1.5x，点开下一篇
@@ -767,11 +770,34 @@ class PlayerController @Inject constructor(
         val author: String? = null,
     )
 
-    private val _queue = MutableStateFlow<List<QueueItem>>(emptyList())
-    private val _queueIndex = MutableStateFlow(-1)
+    /**
+     * 队列里还有没有「下一首」。
+     *
+     * 真相来源是**播放器**（[Player.hasNextMediaItem]），不是 App 侧维护的列表 ——
+     * 播列表归播放器之后，系统媒体面板、耳机按键、通知栏按钮都能换曲，
+     * App 侧再维护一份游标就必然和播放器对不上。
+     *
+     * 用 StateFlow 而不是普通属性：界面要**跟着它变**（到末尾时把
+     * 「下一首」按钮灰掉）。普通 val 读一次就固定了，界面不会重绘。
+     *
+     * ⚠️ 这里原来有一对 `hasNext` / `hasPrevious` 普通属性 +
+     * 一个 `setQueue()` —— **三者都是死代码**：`setQueue` 从没被调用过，
+     * 那两个属性也没人读。而界面上「上一首/下一首」按钮照常亮着，
+     * 到末尾时点了没反应（本项目吃过好几次这种亏）。
+     * 现在改成由播放器驱动的响应式状态，并且真的接到按钮上。
+     */
+    private val _hasNextItem = MutableStateFlow(false)
+    val hasNextItem: StateFlow<Boolean> = _hasNextItem.asStateFlow()
 
-    val hasNext: Boolean get() = _queueIndex.value in 0 until _queue.value.size - 1
-    val hasPrevious: Boolean get() = _queueIndex.value > 0
+    /** 队列里还有没有「上一首」。 */
+    private val _hasPreviousItem = MutableStateFlow(false)
+    val hasPreviousItem: StateFlow<Boolean> = _hasPreviousItem.asStateFlow()
+
+    /** 刷新队列边界状态（换曲 / 灌队列之后调）。 */
+    private fun refreshQueueBounds() {
+        _hasNextItem.value = player.hasNextMediaItem()
+        _hasPreviousItem.value = player.hasPreviousMediaItem()
+    }
 
     /**
      * 把播放列表同步到播放器的播放列表。
@@ -865,31 +891,6 @@ class PlayerController @Inject constructor(
         audioUrl = audioUrl.orEmpty(),
         title = title,
     )
-
-    /**
-     * 灌入队列（**保留给外部显式指定队列的场合**）。
-     *
-     * ⚠️ 列表页**不再**自动调它了 —— 那个「隐式队列」正是本轮要解决的问题：
-     * 队列 = 列表页当前可见的文章，列表一刷新就变，用户看不见也管不了，
-     * 通知栏/耳机键的「上一首/下一首」因此常年是灰的。
-     *
-     * 现在的队列由**播放列表**驱动（见 [buildQueue] / [syncPlayerPlaylist]），
-     * 那是用户显式攒的一串，看得见、管得了、退出重进还在。
-     *
-     * 已经在播的那一篇会被定位到队列中的对应位置，这样「下一首」才是
-     * 用户视线里那篇，而不是从头开始。
-     */
-    fun setQueue(items: List<QueueItem>) {
-        if (items.isEmpty()) {
-            _queue.value = emptyList()
-            _queueIndex.value = -1
-            return
-        }
-        _queue.value = items
-        val currentId = _currentArticleId.value
-        _queueIndex.value = items.indexOfFirst { it.articleId == currentId }
-            .takeIf { it >= 0 } ?: 0
-    }
 
     /**
      * 跳到下一首；已在末尾则 no-op 返回 false。

@@ -170,6 +170,14 @@ fun FullScreenPlayerScreen(
     val sleepTimerMinutes by controller.sleepTimerMinutes.collectAsStateWithLifecycle()
     // 字幕（2026-10-23）：当前该显示的那一句。
     val currentSubtitle by controller.currentSubtitle.collectAsStateWithLifecycle()
+    // 队列边界（2026-10-23）：到头/到尾时把对应的按钮灰掉。
+    //
+    // 用户的原话是「上一首/下一首要等队列里真有下一项才亮」。
+    // 系统媒体控件（通知栏/锁屏/耳机键）本来就由 Media3 按
+    // `player.getAvailableCommands()` 自动处理；**App 内这两颗按钮**
+    // 之前是永远亮的 —— 到末尾点下去毫无反应（死按钮）。
+    val hasNextItem by controller.hasNextItem.collectAsStateWithLifecycle()
+    val hasPreviousItem by controller.hasPreviousItem.collectAsStateWithLifecycle()
     val availableSpeeds by controller.availableSpeeds.collectAsStateWithLifecycle()
     // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
     val currentBitrate by controller.currentBitrate.collectAsStateWithLifecycle()
@@ -374,6 +382,8 @@ fun FullScreenPlayerScreen(
                 // 宁可灰掉，也不给一个点了没反应的死按钮。
                 onSkipPrevious = { controller.playPrevious() },
                 onSkipNext = { controller.playNext() },
+                hasPreviousItem = hasPreviousItem,
+                hasNextItem = hasNextItem,
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -879,6 +889,8 @@ private fun ControlButtons(
     onSkipForward: () -> Unit,
     onSkipPrevious: () -> Unit,
     onSkipNext: () -> Unit,
+    hasPreviousItem: Boolean,
+    hasNextItem: Boolean,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -888,6 +900,7 @@ private fun ControlButtons(
         PressableIconButton(
             onClick = onSkipPrevious,
             sizeDp = 48,
+            enabled = hasPreviousItem,
         ) {
             Icon(
                 imageVector = Icons.Default.SkipPrevious,
@@ -926,6 +939,7 @@ private fun ControlButtons(
         PressableIconButton(
             onClick = onSkipNext,
             sizeDp = 48,
+            enabled = hasNextItem,
         ) {
             Icon(
                 imageVector = Icons.Default.SkipNext,
@@ -1273,6 +1287,7 @@ private fun SpeedSheetRow(
 private fun PressableIconButton(
     onClick: () -> Unit,
     sizeDp: Int,
+    enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -1282,8 +1297,13 @@ private fun PressableIconButton(
         animationSpec = tween(durationMillis = 160, easing = LinearEasing),
         label = "pressScale",
     )
+    // 禁用态：整颗按钮压暗，且**不响应点击**。
+    //
+    // 为什么要有禁用态而不是「点了没反应」：一个看得见却点不动的按钮
+    // 会让人以为是 App 坏了。本项目吃过好几次这种亏（通知栏按钮、
+    // 后台四个动作键、admin 的「失效音频」按钮…）。
     val alpha by animateFloatAsState(
-        targetValue = if (isPressed) 0.7f else 1f,
+        targetValue = if (enabled) (if (isPressed) 0.7f else 1f) else 0.28f,
         animationSpec = tween(durationMillis = 160, easing = LinearEasing),
         label = "pressAlpha",
     )
@@ -1298,6 +1318,7 @@ private fun PressableIconButton(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
+                enabled = enabled,
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
