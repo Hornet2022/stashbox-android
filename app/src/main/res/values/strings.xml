@@ -27,6 +27,11 @@
     <string name="source_browser">浏览器</string>
     <string name="source_share">分享</string>
     <string name="source_pdf">PDF</string>
+    <!-- 2026-10-23：新增两个来源码（后端 GitHub fetcher / 文档剪藏）。
+         不加的话它们会落到 source_generic 显示「通用」——
+         用户剪了一个开源库/上传了一份文档，列表里却看不出是什么。 -->
+    <string name="source_github">GitHub</string>
+    <string name="source_document">文档</string>
     <string name="source_generic">通用</string>
 
     <!-- Accessibility content descriptions -->

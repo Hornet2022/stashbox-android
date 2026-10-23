@@ -41,6 +41,11 @@ fun sourceLabelRes(source: String?): Int = when (source?.lowercase()) {
     "browser" -> R.string.source_browser
     "share" -> R.string.source_share
     "pdf" -> R.string.source_pdf
+    // 2026-10-23：GitHub 开源库剪藏 / 文档剪藏的两个新来源码。
+    // 不加这两个分支的话它们会落到 else 显示「通用」—— 用户剪了一个
+    // 开源库、上传了一份文档，列表里却看不出剪的是什么。
+    "github" -> R.string.source_github
+    "document" -> R.string.source_document
     // null / unknown / 未来新增的码 —— 宁可显示"通用"，也不要露出机器码
     else -> R.string.source_generic
 }

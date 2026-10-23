@@ -29,6 +29,18 @@ class SourceLabelTest {
     }
 
     @Test
+    fun `github 与 document 不再显示为通用`() {
+        // 2026-10-23：新增了 GitHub 开源库剪藏与文档剪藏两个来源码。
+        // 不加映射的话它们会落到 else → 徽章显示「通用」，
+        // 用户剪了一个开源库、上传了一份文档，列表里却看不出剪的是什么。
+        assertEquals(R.string.source_github, sourceLabelRes("github"))
+        assertEquals(R.string.source_document, sourceLabelRes("document"))
+        // 大小写也要认（sourceLabelRes 内部会 lowercase）
+        assertEquals(R.string.source_github, sourceLabelRes("GitHub"))
+        assertEquals(R.string.source_document, sourceLabelRes("Document"))
+    }
+
+    @Test
     fun `大小写不敏感`() {
         assertEquals(R.string.source_wechat, sourceLabelRes("WeChat"))
         assertEquals(R.string.source_wechat_mp, sourceLabelRes("WECHAT_MP"))
