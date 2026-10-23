@@ -11,6 +11,7 @@ import com.tingxia.audio.data.remote.MetricsInterceptor
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.QuotaApi
+import com.tingxia.audio.data.remote.SubscriptionApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.remote.TtsApi
 import com.tingxia.audio.onboarding.OnboardingApi
@@ -115,6 +116,11 @@ object NetworkModule {
     @Singleton
     fun provideNotificationApi(retrofit: Retrofit): NotificationApi =
         retrofit.create(NotificationApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideSubscriptionApi(retrofit: Retrofit): SubscriptionApi =
+        retrofit.create(SubscriptionApi::class.java)
 
     @Provides
     @Singleton

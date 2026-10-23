@@ -905,7 +905,26 @@ class PlayerController @Inject constructor(
     private fun syncPlayerPlaylist(items: List<PlaylistItemEntity>) {
         if (player.mediaItemCount == 0) return   // 还没开始播，等 play() 时一次性建
         val target = items.map { it.toQueueItem() }.filter { it.audioUrl.isNotBlank() }
-        val targetIds = target.map { it.articleId }
+
+        // ⚠️ 目标集必须与 [buildQueue] **同一个口径** —— 队列 = 播放列表 + 当前文章。
+        //
+        // 原来这里只用「播放列表」当目标，于是 `play()` 灌进去的「当前文章」
+        // （tail，不在 playlist_items 表里）每次同步都会被当成「不在目标里的」
+        // 而被 removeMediaItem 删掉 —— **正在播的那一项被删** → 声音直接断，
+        // 而界面还停在「正在播放」（onIsPlayingChanged 里 STATE_IDLE 落到
+        // else -> Unit，_state 不变）→ 用户看到「暂停图标却没声音」。
+        //
+        // 这条与仓库既有约定「队列 = 播放列表 + 当前文章」直接冲突：
+        // 只有 play() 兑现了它，sync 这条路把它拆了。
+        val currentId = _currentArticleId.value
+        val tail = currentId
+            ?.takeIf { id -> target.none { it.articleId == id } }
+            ?.let { id ->
+                val url = _currentAudioUrl.value
+                if (url.isBlank()) null else QueueItem(id, url, _currentTitle.value, _currentAuthor.value)
+            }
+        val fullTarget = if (tail != null) target + tail else target
+        val targetIds = fullTarget.map { it.articleId }
 
         // ① 删掉不在目标里的（倒序删，避免索引位移）
         for (i in (0 until player.mediaItemCount).reversed()) {
@@ -914,7 +933,7 @@ class PlayerController @Inject constructor(
         }
 
         // ② 按目标顺序补齐 / 移动
-        target.forEachIndexed { want, item ->
+        fullTarget.forEachIndexed { want, item ->
             val current = (0 until player.mediaItemCount)
                 .firstOrNull { player.getMediaItemAt(it).mediaId == item.articleId }
             when {

@@ -38,9 +38,12 @@ class NotificationCenterViewModel @Inject constructor(
                     notifications = notifications,
                     isLoading = false,
                 )
-                // 总未读数单独拉取
-                val all = repository.list(unreadOnly = false)
-                _unreadCount.value = all.count { !it.read }
+                // 未读数：后端已经在响应里给了 `unread_count`（用 models 里的
+                // unread_count 字段），不必再把全部通知拉一遍数一遍 ——
+                // 之前这里是 `repository.list(unreadOnly = false)` 再 count，
+                // 白打一次全量请求。
+                repository.refreshUnreadCount()
+                _unreadCount.value = repository.unreadCount.value
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
@@ -62,6 +65,8 @@ class NotificationCenterViewModel @Inject constructor(
                         error = null,
                     )
                     _unreadCount.value = maxOf(0, _unreadCount.value - 1)
+                    // 首页铃铛角标在**另一个屏幕**（单例仓库里），得同步减
+                    repository.decrementUnread()
                 } else {
                     // 服务端明确拒绝：告诉用户，而不是让角标卡住不动
                     _uiState.value = _uiState.value.copy(error = "标记已读失败，请稍后重试")

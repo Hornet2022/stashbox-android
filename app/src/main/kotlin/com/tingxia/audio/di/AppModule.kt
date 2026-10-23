@@ -10,12 +10,14 @@ import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.NotificationApi
 import com.tingxia.audio.data.remote.QuotaApi
+import com.tingxia.audio.data.remote.SubscriptionApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.NotificationRepository
 import com.tingxia.audio.data.repository.QuotaRepository
+import com.tingxia.audio.data.repository.SubscriptionRepository
 import com.tingxia.audio.data.repository.TagRepository
 import dagger.Module
 import dagger.Provides
@@ -53,6 +55,11 @@ object AppModule {
     @Singleton
     fun provideNotificationRepository(api: NotificationApi): NotificationRepository =
         NotificationRepository(api)
+
+    @Provides
+    @Singleton
+    fun provideSubscriptionRepository(api: SubscriptionApi): SubscriptionRepository =
+        SubscriptionRepository(api)
 
     @Provides
     @Singleton

@@ -34,10 +34,40 @@ object DistillNotifier {
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(NotificationManager::class.java) ?: return
-        if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
+        val existing = mgr.getNotificationChannel(CHANNEL_ID)
+        if (existing != null) {
+            // ⚠️ 老渠道是 IMPORTANCE_DEFAULT（**带提示音**）——
+            // 渠道一旦建成，**改代码不会改它**（系统属性，用户改过一次就再也改不了）。
+            // 所以升级后必须**删掉重建**，否则老设备上「文章好了」还是会「叮」一声
+            // 把正在播的音频抢停（播放器 handleAudioFocus=true）。
+            //
+            // 只在渠道还「响着」时删，避免每次启动都删（会丢用户的渠道设置）。
+            if (existing.importance == NotificationManager.IMPORTANCE_DEFAULT ||
+                existing.importance == NotificationManager.IMPORTANCE_HIGH
+            ) {
+                mgr.deleteNotificationChannel(CHANNEL_ID)
+            } else {
+                return
+            }
+        }
         mgr.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "文章蒸馏完成或失败时提醒" }
+            NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW)
+                .apply {
+                    description = "文章蒸馏完成或失败时提醒"
+                    // ⚠️ **不要出声**（2026-10-23）。
+                    //
+                    // 播放器是 `setAudioAttributes(..., handleAudioFocus = true)`
+                    // （PlayerModule.kt）—— 也就是说**系统给通知音申请的瞬时焦点
+                    // 会让正在播的音频被暂停**。于是：用户正在听一篇 → 剪藏的
+                    // 那篇约 12 分钟后蒸馏完成 → 通知「叮」一声 → 当前音频停住。
+                    // 用户完全会把这件事归因成「剪藏把声音弄没了」。
+                    //
+                    // 「文章好了」这件事**不需要声音**：它有本地通知、有角标、
+                    // 站内通知列表。留振动就够了，别抢用户的音频。
+                    setSound(null, null)
+                    enableVibration(true)
+                    vibrationPattern = longArrayOf(0L, 200L, 100L, 200L)
+                }
         )
     }
 

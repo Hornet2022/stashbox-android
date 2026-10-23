@@ -437,6 +437,10 @@ private fun AppNavigation() {
                 onTagClick = { slug ->
                     navController.navigate("article_list?tag=$slug")
                 },
+                // 2026-10-23：订阅闭环的「读回」一环 —— 点订阅更新里的文章进详情页
+                onArticleClick = { articleId ->
+                    navController.navigate("detail/$articleId")
+                },
             )
         }
         composable("notifications") {

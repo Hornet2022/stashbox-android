@@ -3,6 +3,7 @@ package com.tingxia.audio.ui.articles
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tingxia.audio.audio.PlaybackState
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
@@ -256,16 +257,48 @@ class ArticleDetailViewModel @Inject constructor(
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
                     playerController.setProgressRepository(progressRepository)
-                    // 起点直接交给播放器：它会落到那个位置，
-                    // 并把它当作**完听判定的基线**（这一轮是从这儿开始听的）。
-                    playerController.play(
-                        url,
-                        title = article.title ?: "",
-                        author = authorLabel(article.source),
-                        articleId = id,
-                        // 已听完的 → 从头（0）；没听完的 → 断点续听
-                        resumePositionMs = if (alreadyFinished) 0L else (savedPositionMs ?: 0L),
-                    )
+
+                    // ⚠️ **已经在播这一篇就别再起播**（2026-10-23）。
+                    //
+                    // `play()` 走的是 `setMediaItems(queue) + prepare()` ——
+                    // 它会把**当前项整体重建**并重新 prepare，表现为
+                    // 「正听着突然卡一下」（PlayerController.kt:801-803 自己写了
+                    // 这条注释）。而用户从通知栏/列表点进**正在听的那一篇**的
+                    // 详情页时，最自然的结果是「继续听」，不是「重新起播」。
+                    //
+                    // 之前这里无条件 play() → 每进一次详情页就重备一次 →
+                    // 内测听到的「剪藏后音频被打断」就是这类重备。
+                    //
+                    // 三种情况分开：
+                    //   · 正在播这一篇        → 什么都不做（别重备）
+                    //   · 这篇暂停着          → resume()（不重备，只继续）
+                    //   · 正在播别的 / 空闲    → 正常 play()（用户主动点开新文章，
+                    //                              顶掉当前播放是预期行为）
+                    val sameArticle = playerController.currentArticleId.value == id
+                    val state = playerController.state.value
+                    when {
+                        sameArticle && state == PlaybackState.PLAYING -> {
+                            android.util.Log.i(
+                                "ArticleDetailViewModel",
+                                "已在播放该文章，跳过自动起播（避免重备播放器打断声音）",
+                            )
+                        }
+                        sameArticle && state == PlaybackState.PAUSED -> {
+                            playerController.resume()
+                        }
+                        else -> {
+                            // 起点直接交给播放器：它会落到那个位置，
+                            // 并把它当作**完听判定的基线**（这一轮是从这儿开始听的）。
+                            playerController.play(
+                                url,
+                                title = article.title ?: "",
+                                author = authorLabel(article.source),
+                                articleId = id,
+                                // 已听完的 → 从头（0）；没听完的 → 断点续听
+                                resumePositionMs = if (alreadyFinished) 0L else (savedPositionMs ?: 0L),
+                            )
+                        }
+                    }
                 }
                 // 状态还没到终态就启动轮询。
                 //

@@ -79,11 +79,29 @@ class PlaylistRepository @Inject constructor(
      */
     suspend fun refreshUrl(articleId: String, audioUrl: String?, title: String? = null, durationSec: Int? = null) {
         val item = dao.byArticle(articleId) ?: return
+
+        // ⚠️ **值没变就不写** —— 这不是优化，是断一个死循环。
+        //
+        // 播放列表的 observer（PlayerController.setPlaylistRepository）在表变化时
+        // 会回调 → 回调里跑 backfillPlaylistUrls → 它对「缺地址/缺时长」的条目
+        // 调 refreshUrl → 若无条件 upsert → Room 又 emit → observer 又回调 →
+        // …… 每轮都会写一次、都会触发一次 syncPlayerPlaylist。
+        //
+        // 而「文章还没蒸馏好」时 article.audioUrl 本来就是 null → 补不上 →
+        // 下一轮又把它挑成「缺的」→ 又写一次 → **永远停不下来**。
+        // 后果不只是白写：每轮 syncPlayerPlaylist 都会动播放器的列表。
+        val newUrl = audioUrl ?: item.audioUrl
+        val newTitle = title ?: item.title
+        val newDuration = durationSec ?: item.durationSec
+        if (newUrl == item.audioUrl && newTitle == item.title && newDuration == item.durationSec) {
+            return
+        }
+
         dao.upsert(
             item.copy(
-                audioUrl = audioUrl,
-                title = title ?: item.title,
-                durationSec = durationSec ?: item.durationSec,
+                audioUrl = newUrl,
+                title = newTitle,
+                durationSec = newDuration,
             ),
         )
     }

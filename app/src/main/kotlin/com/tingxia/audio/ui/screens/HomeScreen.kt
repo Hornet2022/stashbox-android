@@ -57,7 +57,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.articles.ArticleListViewModel
+import com.tingxia.audio.ui.components.UnreadBadge
 import com.tingxia.audio.ui.components.sourceLabelRes
+import com.tingxia.audio.ui.notifications.NotificationBadgeViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 data class SkillItem(
@@ -95,8 +97,13 @@ fun HomeScreen(
     onNavigateToOfflineDownload: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     viewModel: ArticleListViewModel = hiltViewModel(),
+    badgeViewModel: NotificationBadgeViewModel = hiltViewModel(),
 ) {
     val articles by viewModel.articles.collectAsStateWithLifecycle()
+    // 未读角标（2026-10-23）。进首页时拉一次；Navigation 离开再回来
+    // 会重建 composition → LaunchedEffect(Unit) 重跑 → 数字是最新的。
+    val unreadCount by badgeViewModel.unreadCount.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { badgeViewModel.refresh() }
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
@@ -112,7 +119,16 @@ fun HomeScreen(
                         Icon(Icons.Filled.Favorite, contentDescription = "收藏")
                     }
                     IconButton(onClick = onNavigateToNotifications) {
-                        Icon(Icons.Filled.Notifications, contentDescription = "通知")
+                        Box {
+                            Icon(Icons.Filled.Notifications, contentDescription = "通知")
+                            // 2026-10-23：未读角标。
+                            // 之前完全没有角标 → 用户不知道「订阅有更新」，
+                            // 于是订阅看起来像个没有回报的开关。
+                            UnreadBadge(
+                                count = unreadCount,
+                                modifier = Modifier.align(Alignment.TopEnd),
+                            )
+                        }
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "设置")

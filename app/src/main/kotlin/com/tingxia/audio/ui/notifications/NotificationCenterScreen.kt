@@ -197,11 +197,22 @@ fun NotificationCenterScreen(
                                     notification = notification,
                                     onClick = {
                                         viewModel.markRead(notification.id)
-                                        notification.deeplink?.let { deeplink ->
-                                            val articleId = parseArticleId(deeplink)
-                                            if (articleId != null) {
-                                                onNavigateToArticle(articleId)
-                                            }
+                                        // ⚠️ **优先用 article_id 字段**，别去解析 deeplink 字符串。
+                                        //
+                                        // 之前这里只解析 `stashbox://article/` 前缀，而：
+                                        //   · 后端订阅推送写的是 `/articles/{id}`（旧版）
+                                        //   · 后端推送模块 docstring 约定 `stashbox://detail/xxx`
+                                        //   · 安卓 NavHost 注册的是 `stashbox://detail/{id}`
+                                        //   · 安卓自己的通知跳转也用 `stashbox://detail/`
+                                        // → **四种说法没有一对**，于是点通知「只标已读、不跳转」。
+                                        //
+                                        // `article_id` 是后端直接给的**结构化字段**，
+                                        // 不用猜格式、不用兼容历史 deeplink —— 订阅闭环
+                                        // 的最后一跳就靠它。deeplink 只作兜底。
+                                        val articleId = notification.article_id?.takeIf { it.isNotBlank() }
+                                            ?: notification.deeplink?.let { parseArticleId(it) }
+                                        if (articleId != null) {
+                                            onNavigateToArticle(articleId)
                                         }
                                     },
                                 )
@@ -374,11 +385,29 @@ private fun tagSlugToColor(tagSlug: String): Color = when (tagSlug.lowercase()) 
     else -> TagDefault
 }
 
+/**
+ * 从 deeplink 里取文章 id（**兜底**用）。
+ *
+ * 首选路径其实是 [Notification.article_id] —— 那是后端给的结构化字段，
+ * 不用猜格式。deeplink 只在老数据没有 article_id 时才用。
+ *
+ * 这里兼容仓库里出现过的**全部**前缀写法：
+ *   · `stashbox://detail/{id}` —— 后端推送模块约定 + 安卓 NavHost 注册的
+ *   · `stashbox://article/{id}` —— 安卓旧解析器认的
+ *   · `/articles/{id}`        —— 后端订阅推送原来写的
+ */
 private fun parseArticleId(deeplink: String): String? {
     return try {
-        if (deeplink.startsWith("stashbox://article/")) {
-            deeplink.removePrefix("stashbox://article/")
-        } else null
+        val id = when {
+            deeplink.startsWith("stashbox://detail/") ->
+                deeplink.removePrefix("stashbox://detail/")
+            deeplink.startsWith("stashbox://article/") ->
+                deeplink.removePrefix("stashbox://article/")
+            deeplink.startsWith("/articles/") ->
+                deeplink.removePrefix("/articles/")
+            else -> null
+        }
+        id?.takeIf { it.isNotBlank() }
     } catch (_: Exception) {
         null
     }
