@@ -1,5 +1,6 @@
 package com.tingxia.audio.audio
 
+import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -7,11 +8,15 @@ import android.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.tingxia.audio.audio.di.PlayerModule
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.remote.ProgressUpdateRequest
+import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.EntryPoint
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
@@ -29,8 +34,13 @@ import javax.inject.Singleton
 
 /**
  * 播放器状态机。
+ *
+ * [ERROR] 是 2026-10-23 加的：此前**没有任何** `Player.Listener`，
+ * 而播放状态是 [play] 里乐观设成 `PLAYING` 的 —— 于是播放失败（网络断 /
+ * 音频 404 / 解码错）时界面毫无反应：进度条不动、按钮还是「暂停」、
+ * 什么提示都没有。`ERROR` 让失败成为**可观察的状态**而不是沉默。
  */
-enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
+enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED, ERROR }
 
 /**
  * ExoPlayer 封装 + 真实播放状态（CP4.4）。
@@ -53,10 +63,27 @@ enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED }
 @Singleton
 class PlayerController @Inject constructor(
     private val player: ExoPlayer,
+    // 「继续播放」的状态要落盘（SharedPreferences），而 SharedPreferences 需要 Context。
+    // 注入 ApplicationContext 而不是从 player 里刨 —— ExoPlayer 不对外暴露它。
+    @ApplicationContext private val appContext: Context,
 ) {
 
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
+
+    /**
+     * 播放失败的**用户可读**原因（2026-10-23 新增）。
+     *
+     * 为什么单独一个流而不是把文案塞进状态枚举：状态是给控制逻辑用的
+     * （按钮显示暂停还是播放），文案是给人看的，两者生命周期不同 ——
+     * 状态回到 PLAYING 时错误文案必须**同时**清掉，否则会留着一句
+     * 「网络不给力」在已经正常播放的界面上。
+     *
+     * 文案统一走 [com.tingxia.audio.ui.ErrorMessages.friendlyError] ——
+     * 那是仓内唯一的错误文案定义处，不在这里另写一套。
+     */
+    private val _playbackError = MutableStateFlow<String?>(null)
+    val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
 
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position.asStateFlow()
@@ -140,8 +167,118 @@ class PlayerController @Inject constructor(
     }
 
     /**
-     * 位置轮询泵。这条 Handler 有**两个消费者**，不是只有 UI：
+     * 当前曲目的封面 URL —— [retry] 重播时要**连封面一起**还原，
+     * 否则重试成功后通知栏/播放条会变成「有标题没封面」。
+     */
+    private val _currentCoverUrl = MutableStateFlow<String?>(null)
+
+    /**
+     * 播放器的状态监听（2026-10-23 新增）。
      *
+     * 此前**全项目零 `Player.Listener`**，而播放状态是 [play] 里乐观设成
+     * `PLAYING` 的 —— 后果是播放失败（网络断 / 音频 404 / 解码错）时
+     * 界面毫无反应：进度条不动、按钮还是「暂停」、没有任何提示。
+     * 用户只能看到「按了没声音」，既不知道失败了，也不知道该干什么。
+     *
+     * 这里只处理**状态与错误**，不碰进度（进度仍由轮询泵负责，
+     * 理由见 [positionHandler] 的说明）。
+     */
+    private val playerListener = object : Player.Listener {
+
+        override fun onPlayerError(error: PlaybackException) {
+            // PlaybackException 只是个壳，真正的原因在 cause 里（通常是 IOException）。
+            notifyPlaybackError(error.cause ?: error)
+        }
+
+        /**
+         * 换曲了（上一首/下一首，或系统媒体面板里直接选了另一项）。
+         *
+         * 「当前是哪一篇」从 `player.currentMediaItem?.mediaId` 读 ——
+         * mediaId 承载的就是 articleId（见 [play]）。
+         *
+         * 为什么不在 App 侧自己维护游标：播放列表归播放器管之后，
+         * **系统媒体面板、耳机按键、通知栏按钮**都能换曲，
+         * App 侧再维护一份游标就必然和播放器对不上 ——
+         * 两套状态迟早漂移，而漂移的表象是「进度回传报到了错的文章上」
+         * （完听判定 / 评分卡挂到别的文章）。
+         */
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val articleId = mediaItem?.mediaId
+            if (!articleId.isNullOrBlank() && articleId != _currentArticleId.value) {
+                _currentArticleId.value = articleId
+                _currentAudioUrl.value = mediaItem.localConfiguration?.uri?.toString() ?: _currentAudioUrl.value
+                _currentTitle.value = mediaItem.mediaMetadata.title?.toString() ?: _currentTitle.value
+                _currentAuthor.value = mediaItem.mediaMetadata.artist?.toString() ?: _currentAuthor.value
+                resetListenCompletionFlag()
+            }
+            val idx = player.currentMediaItemIndex
+            if (idx != androidx.media3.common.C.INDEX_UNSET) _queueIndex.value = idx
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) {
+                if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.PLAYING
+                return
+            }
+            // 不在播了 —— 要区分「暂停」和「播完了」和「正在缓冲」：
+            // 只有 READY（就绪但不播）才是暂停；ENDED 是播完；BUFFERING/IDLE
+            // 期间状态**保持不变**（否则缓冲一下就闪成「暂停」）。
+            when (player.playbackState) {
+                Player.STATE_READY -> if (_state.value != PlaybackState.ERROR) {
+                    _state.value = PlaybackState.PAUSED
+                }
+                Player.STATE_ENDED -> {
+                    if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.IDLE
+                    // 完听判定交给轮询泵里的 checkListenCompletion（它会读
+                    // STATE_ENDED），这里不重复触发，免得同一篇报两次。
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    init {
+        player.addListener(playerListener)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 睡眠定时器（2026-10-23 新增）
+    //
+    // 音频 App 的标配：设了 N 分钟就自动停，避免播着播着睡过去。
+    //
+    // 为什么放在**播放器**这一层而不是界面上：定时器到点的动作是「停止播放」，
+    // 而播放是播放器的事；界面只是设置它。放在界面上会出现「页面被销毁 →
+    // 定时器跟着没了 → 用户在后台听着，第二天早上还在放」——
+    // 而 PlayerController 是进程级单例，定时器活得比界面久。
+    // ─────────────────────────────────────────────────────────────────────
+    private val _sleepTimerMinutes = MutableStateFlow(0)
+    val sleepTimerMinutes: StateFlow<Int> = _sleepTimerMinutes.asStateFlow()
+
+    private val sleepTimerRunnable = Runnable {
+        _sleepTimerMinutes.value = 0
+        Log.i(TAG, "sleep timer fired")
+        pause()
+    }
+
+    /**
+     * 设置睡眠定时器（分钟）。0 = 取消定时器。
+     *
+     * 到点做的是 [pause] 而不是 [stop]：暂停保留了播放位置，
+     * 用户醒来还能接着听；stop 会把位置清零。
+     *
+     * 用**主线程 Handler** 而不是协程 delay：Handler 在 Robolectric 里
+     * 可以被确定性地推进时间（`ShadowLooper.idleFor`），协程的 delay 做不到 ——
+     * 「到点会停」这件事就没法写单测，只能靠真机等一分钟。
+     */
+    fun setSleepTimerMinutes(minutes: Int) {
+        positionHandler.removeCallbacks(sleepTimerRunnable)
+        _sleepTimerMinutes.value = minutes.coerceAtLeast(0)
+        if (minutes <= 0) return
+        positionHandler.postDelayed(sleepTimerRunnable, minutes.toLong() * 60_000L)
+    }
+
+    /**
+     * 位置轮询泵。这条 Handler 有**两个消费者**，不是只有 UI：     *
      * 1. UI —— Compose 侧 [position] / [duration] 进度条（全屏播放器 + 迷你条）。
      *    它要 500ms 的细粒度才不跳手，但它**只在有人看的时候**才有意义。
      * 2. 非 UI —— [reportProgressIfNeeded]（断点续听，每 10s 一次）与
@@ -371,10 +508,21 @@ class PlayerController @Inject constructor(
             _currentArticleId.value = articleId
         }
         _state.value = PlaybackState.PLAYING
+        _playbackError.value = null
         _currentTitle.value = title
         _currentAuthor.value = author ?: ""
         _currentAudioUrl.value = audioUrl
-        val mediaItem = MediaItem.Builder()
+        _currentCoverUrl.value = coverUrl
+        // mediaId 承载 articleId —— 「当前播的是哪一篇」从播放器直接读得出。
+        //
+        // ⚠️ 没有 articleId 时**不设** mediaId（而不是塞 URL）：
+        // 监听器会用 mediaId 覆盖 _currentArticleId，塞 URL 就等于
+        // 把「当前文章」变成一个 URL —— 完听判定与进度回传会报到一个
+        // 不存在的文章上。而 `play()` 不传 articleId 的那条路径（全屏播放器的
+        // IDLE 恢复）语义是「**沿用**原来的文章」，所以这里要沿用
+        // _currentArticleId 而不是置空。
+        val mediaId = articleId ?: _currentArticleId.value
+        val mediaItemBuilder = MediaItem.Builder()
             .setUri(audioUrl)
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -383,8 +531,28 @@ class PlayerController @Inject constructor(
                     .setArtworkUri(coverUrl?.let(Uri::parse))
                     .build(),
             )
-            .build()
-        player.setMediaItem(mediaItem)
+        if (!mediaId.isNullOrBlank()) mediaItemBuilder.setMediaId(mediaId)
+        val mediaItem = mediaItemBuilder.build()
+
+        // 2026-10-23：**把队列灌进播放器**。
+        //
+        // 为什么非灌不可：Media3 1.4.1 的通知按钮依据是
+        // `player.getAvailableCommands()` —— 单曲播放器的
+        // COMMAND_SEEK_TO_NEXT 不可用 → **通知栏/锁屏/系统媒体面板
+        // 永远没有「下一首」按钮**。App 里自己画按钮绕不过这一层。
+        //
+        // 灌的时机是「开始播放这一刻」，而不是列表每次刷新 ——
+        // setMediaItems 会重新 prepare 当前项，列表刷新时正在播就会被
+        // 打断（声音卡一下）。详见 [setQueue] 的说明。
+        val queue = _queue.value
+        val queueIndex = articleId?.let { id -> queue.indexOfFirst { it.articleId == id } } ?: -1
+        if (queueIndex >= 0) {
+            player.setMediaItems(queue.map { it.toMediaItem() }, queueIndex, 0L)
+            _queueIndex.value = queueIndex
+        } else {
+            // 不在队列里（比如从推送/分享直接进详情）→ 单曲播放。
+            player.setMediaItem(mediaItem)
+        }
         player.prepare()
         // CP-TTS-VOICE: setPlaybackSpeed 是 player 级参数，理论上前后换 MediaItem
         // 不会丢。但这里显式重放一次 —— 漏掉的代价是「用户设了 1.5x，点开下一篇
@@ -395,6 +563,8 @@ class PlayerController @Inject constructor(
         resetListenCompletionFlag()
         startPolling()
         startProgressReporting()
+        // 记下「刚才在听什么」—— 系统媒体面板的「继续播放」要用（见 PlaybackResumption）。
+        PlaybackResumption.save(appContext, articleId, audioUrl, title)
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -428,6 +598,17 @@ class PlayerController @Inject constructor(
      *
      * 已经在播的那一篇会被定位到队列中的对应位置，这样「下一首」才是
      * 用户视线里那篇，而不是从头开始。
+     *
+     * ## 这里**不**动播放器的播放列表（2026-10-23）
+     *
+     * 播放列表在**播放开始的那一刻**才灌进播放器（见 [play]）。
+     * 原因是：`setMediaItems` / `replaceMediaItems` 会重新 prepare 当前项 ——
+     * 列表每次刷新都调本方法，而列表刷新可能发生在**正在播放**时
+     * （用户从别的页面回列表 → 列表重新加载 → 正在播的那一篇被重新 prepare
+     * → 声音卡一下，位置还可能丢）。
+     *
+     * 所以这里只更新 App 侧的队列镜像；播放器的播放列表是
+     * 「开始播放那一刻的快照」，由 [play] 灌一次。
      */
     fun setQueue(items: List<QueueItem>) {
         if (items.isEmpty()) {
@@ -441,29 +622,48 @@ class PlayerController @Inject constructor(
             .takeIf { it >= 0 } ?: 0
     }
 
-    /** 跳到下一首；已在末尾则 no-op 返回 false。 */
+    /**
+     * 跳到下一首；已在末尾则 no-op 返回 false。
+     *
+     * 2026-10-23 起**由播放器接管**：播放列表已经在 [play] 里灌进了 ExoPlayer，
+     * 所以这里用 `seekToNextMediaItem()`，而不是自己维护游标 + 重建 MediaItem。
+     *
+     * 这么改的意义：通知栏/锁屏/系统媒体面板的「下一首」走的是**同一个**
+     * 播放列表（Media3 的按钮看的是 `player.getAvailableCommands()`，
+     * 单曲播放器就没有这个命令 → 通知栏永远没有「下一首」按钮）。
+     * App 内自己维护游标、系统用播放器的列表 = 两套队列 = 两套真相，
+     * 用户在通知栏点「下一首」和 App 里点「下一首」会跳到不同的曲子。
+     */
     fun playNext(): Boolean {
-        val items = _queue.value
-        val next = _queueIndex.value + 1
-        if (next !in items.indices) return false
-        _queueIndex.value = next
-        playQueueItem(items[next])
+        if (!player.hasNextMediaItem()) return false
+        player.seekToNextMediaItem()
         return true
     }
 
     /** 跳到上一首；已在开头则 no-op 返回 false。 */
     fun playPrevious(): Boolean {
-        val items = _queue.value
-        val prev = _queueIndex.value - 1
-        if (prev !in items.indices) return false
-        _queueIndex.value = prev
-        playQueueItem(items[prev])
+        if (!player.hasPreviousMediaItem()) return false
+        player.seekToPreviousMediaItem()
         return true
     }
 
-    private fun playQueueItem(item: QueueItem) {
-        play(item.audioUrl, item.title ?: "", articleId = item.articleId, author = item.author)
-    }
+    /**
+     * 把队列条目转成播放器的 MediaItem。
+     *
+     * `mediaId` 承载 **articleId** —— 这样「当前播的是哪一篇」可以直接从
+     * 播放器读出来（`player.currentMediaItem?.mediaId`），不必再单独维护一个
+     * 字段跟播放列表对账（两个状态迟早会不一致）。
+     */
+    private fun QueueItem.toMediaItem(): MediaItem = MediaItem.Builder()
+        .setUri(audioUrl)
+        .setMediaId(articleId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title ?: "")
+                .setArtist(author)
+                .build(),
+        )
+        .build()
 
     /**
      * §3 多码率切换：替换当前 MediaItem 的 URI 但**保持当前播放位置**。
@@ -483,7 +683,20 @@ class PlayerController @Inject constructor(
                     .build(),
             )
             .build()
-        player.setMediaItem(mediaItem, savedPos)
+        // 2026-10-23：播放列表模式下不能 `setMediaItem` ——
+        // 那会把整个播放列表换成**一项**（通知栏/系统面板的「下一首」当场消失）。
+        // 正确做法是替换**当前那一项**（replaceMediaItem），播放列表原封不动。
+        //
+        // ⚠️ replaceMediaItem **不保留播放位置**（Media3 文档明写），
+        // 所以要自己 seekTo 回去 —— 否则「切档从头来」，
+        // 而这正是这个方法当初要解决的问题。
+        val index = player.currentMediaItemIndex
+        if (index != C.INDEX_UNSET && player.mediaItemCount > 0) {
+            player.replaceMediaItem(index, mediaItem)
+            player.seekTo(index, savedPos)
+        } else {
+            player.setMediaItem(mediaItem, savedPos)
+        }
         player.prepare()
         player.play()
         _currentAudioUrl.value = newAudioUrl
@@ -503,9 +716,61 @@ class PlayerController @Inject constructor(
         startProgressReporting()
     }
 
+    /**
+     * 播放失败的处理入口（2026-10-23 新增，internal 便于单测）。
+     *
+     * 抽成方法而不是只写在 [Player.Listener] 里，是为了**可测**：
+     * 触发真实的 ExoPlayer 错误要靠网络/解码失败，不确定而且慢；
+     * 而这里要断言的是「状态变 ERROR + 文案友好 + 不再上报进度」——
+     * 那是本方法的语义，与错误**怎么来的**无关。
+     *
+     * 文案统一走 [friendlyError] —— 仓内唯一的错误文案定义处。
+     */
+    internal fun notifyPlaybackError(cause: Throwable) {
+        val message = friendlyError(cause, fallback = "播放失败，请点重试")
+        Log.w(TAG, "playback error: article=${_currentArticleId.value}, cause=$cause")
+        _playbackError.value = message
+        _state.value = PlaybackState.ERROR
+        // 失败后不要再上报进度：位置停住了，继续上报只会把「卡住的位置」
+        // 当成「听到的位置」写进服务端，断点续听会跳回一个错误的位置。
+        stopProgressReporting()
+    }
+
+    /**
+     * 重播当前曲目（2026-10-23 新增）。
+     *
+     * 存在的理由：播放失败后状态是 [PlaybackState.ERROR]，而 [resume] 只认
+     * PAUSED —— 于是用户在「播放失败」的界面上按播放键**什么都不会发生**
+     * （按钮点了没反应，是最让人抓狂的一类死按钮）。
+     *
+     * 这里用 [play] 重来一遍而不是 `player.prepare()`：失败可能来自
+     * 音频地址失效（服务器换了 OSS 签名），重播时应当**重新取一次地址** ——
+     * 而 [play] 的入参来自调用方，重试正好能把最新的地址带进来。
+     * 当前这一路（自己持有的 URL）则原样重来。
+     */
+    fun retry() {
+        val url = _currentAudioUrl.value
+        if (url.isBlank()) {
+            // 没有可重播的地址（比如还没拿到 audioUrl 就失败了）→ 回到 IDLE，
+            // 让 UI 显示「未在播放」而不是一直挂着错误。
+            _state.value = PlaybackState.IDLE
+            _playbackError.value = null
+            return
+        }
+        play(
+            audioUrl = url,
+            title = _currentTitle.value,
+            author = _currentAuthor.value.ifBlank { null },
+            coverUrl = _currentCoverUrl.value,
+            articleId = _currentArticleId.value,
+        )
+    }
+
     fun pause() {
         _state.value = PlaybackState.PAUSED
         player.pause()
+        // 位置也记一份：恢复时要从这儿接着听。
+        PlaybackResumption.savePosition(appContext, _position.value)
         // 暂停后 position 不再变化，此刻没有任何一方的需求要 10s 粒度的数据，
         // 于是把慢跳也撤掉。UI 仍在观察时 scheduleNextPositionTick 会保留 500ms，
         // 让用户拖完进度条还能看到位置。
@@ -525,6 +790,33 @@ class PlayerController @Inject constructor(
     fun seekTo(positionMs: Long) {
         _position.value = positionMs
         player.seekTo(positionMs)
+    }
+
+    /**
+     * 快退 / 快进（2026-10-23 新增）。
+     *
+     * 步长取 [com.tingxia.audio.audio.di.PlayerModule] 里的唯一定义 ——
+     * 那里同时也是 ExoPlayer 的 `setSeekBackIncrementMs` /
+     * `setSeekForwardIncrementMs`，所以 App 内 UI、通知栏按钮、耳机双击、
+     * 系统媒体面板用的是**同一个步长**（10s / 30s）。
+     *
+     * 为什么不各写各的：之前 App 内 UI 退 10 秒，而 ExoPlayer 默认是 5 秒 ——
+     * 同一个「快退」在不同入口有两个步长，用户按耳机键和点屏幕得到的结果
+     * 不一样，是最容易被当成「App 抽风」的那类不一致。
+     */
+    fun seekBack() {
+        val target = (_position.value - PlayerModule.SEEK_BACK_MS).coerceAtLeast(0L)
+        seekTo(target)
+    }
+
+    fun seekForward() {
+        val dur = _duration.value
+        val target = if (dur > 0L) {
+            (_position.value + PlayerModule.SEEK_FORWARD_MS).coerceAtMost(dur)
+        } else {
+            _position.value + PlayerModule.SEEK_FORWARD_MS
+        }
+        seekTo(target)
     }
 
     /**
