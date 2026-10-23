@@ -58,7 +58,7 @@ class PlayerControllerPositionUpdatesTest {
     fun setup() {
         realPlayer = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
         fakePlayer = ControllablePositionPlayer(realPlayer)
-        controller = PlayerController(fakePlayer)
+        controller = PlayerController(fakePlayer, RuntimeEnvironment.getApplication())
     }
 
     @After
@@ -253,7 +253,7 @@ class PlayerControllerPositionUpdatesTest {
         // "Session ID must be unique"。
         val session = MediaSession.Builder(RuntimeEnvironment.getApplication(), realPlayer)
             .setId("player-position-updates-test")
-            .setCallback(TingxiaMediaSessionCallback())
+            .setCallback(TingxiaMediaSessionCallback(controller, RuntimeEnvironment.getApplication()))
             .build()
         try {
             assertEquals(

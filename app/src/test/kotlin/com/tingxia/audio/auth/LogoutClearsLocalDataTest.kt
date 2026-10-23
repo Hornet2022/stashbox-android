@@ -75,7 +75,7 @@ class LogoutClearsLocalDataTest {
             .build()
         offline = OfflineDownloadManager(context, db.downloadedAudioDao())
         exoPlayer = ExoPlayer.Builder(context).build()
-        player = PlayerController(exoPlayer)
+        player = PlayerController(exoPlayer, RuntimeEnvironment.getApplication())
         cleaner = LocalUserDataCleaner(db, offline, PrefetchScheduler(context), player)
         tokenManager = FakeTokenManager(context)
     }

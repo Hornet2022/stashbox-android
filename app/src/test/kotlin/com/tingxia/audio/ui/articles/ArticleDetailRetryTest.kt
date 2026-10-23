@@ -70,7 +70,10 @@ class ArticleDetailRetryTest {
     )
 
     private fun fakeController(): PlayerController =
-        PlayerController(ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build())
+        PlayerController(
+            ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build(),
+            RuntimeEnvironment.getApplication(),
+        )
 
     private fun fakeVm(
         article: Article,

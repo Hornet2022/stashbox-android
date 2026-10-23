@@ -124,8 +124,8 @@ android {
         // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
         // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
         // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

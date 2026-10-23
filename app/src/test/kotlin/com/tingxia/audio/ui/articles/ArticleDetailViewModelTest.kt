@@ -52,7 +52,10 @@ class ArticleDetailViewModelTest {
     @Before
     fun setup() {
         Dispatchers.setMain(testDispatcher)
-        playerController = PlayerController(ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build())
+        playerController = PlayerController(
+            ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build(),
+            RuntimeEnvironment.getApplication(),
+        )
     }
 
     @After

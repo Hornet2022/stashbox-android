@@ -61,7 +61,8 @@ class ArticleDetailPollingResilienceTest {
     fun setup() {
         Dispatchers.setMain(testDispatcher)
         playerController = PlayerController(
-            ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+            ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build(),
+            RuntimeEnvironment.getApplication(),
         )
     }
 
