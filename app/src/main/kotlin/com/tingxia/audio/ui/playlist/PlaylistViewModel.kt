@@ -57,7 +57,8 @@ class PlaylistViewModel @Inject constructor(
      * duration，一次请求就能补齐所有缺的条目。
      */
     private suspend fun backfillMissingMetadata(items: List<PlaylistItemEntity>) {
-        val missing = items.filter { it.audioUrl.isNullOrBlank() }
+        // 缺**地址**或缺**时长**都要补：地址缺了播不了，时长缺了列表显示「—」。
+        val missing = items.filter { it.audioUrl.isNullOrBlank() || it.durationSec == null }
         if (missing.isEmpty()) return
         runCatching { articleRepository.getArticles() }
             .onSuccess { articles ->
@@ -65,12 +66,12 @@ class PlaylistViewModel @Inject constructor(
                 for (item in missing) {
                     val article = byId[item.articleId] ?: continue
                     val url = article.audioUrl
-                    if (url.isNullOrBlank()) continue      // 还没好，等下次
+                    // 还没蒸馏好 → 地址仍然空着，等下次（时长可以先补上）
                     repository.refreshUrl(
                         articleId = item.articleId,
-                        audioUrl = url,
+                        audioUrl = url ?: item.audioUrl,
                         title = article.title,
-                        durationSec = article.durationSec,
+                        durationSec = article.durationSec ?: item.durationSec,
                     )
                 }
             }

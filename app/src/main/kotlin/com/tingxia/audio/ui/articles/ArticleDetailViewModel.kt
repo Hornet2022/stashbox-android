@@ -70,7 +70,10 @@ class ArticleDetailViewModel @Inject constructor(
             articleId = id,
             title = state.article?.title,
             audioUrl = state.audioUrl,
-            durationSec = state.audioDurationSec,
+            // 时长优先取**文章自带**的 duration_sec（列表/详情接口都有），
+            // 再退回状态响应的 audioDurationSec ——
+            // 后者要等状态轮询回来才有，首屏加入时往往是 null。
+            durationSec = state.article?.durationSec ?: state.audioDurationSec,
         )
         !already
     }

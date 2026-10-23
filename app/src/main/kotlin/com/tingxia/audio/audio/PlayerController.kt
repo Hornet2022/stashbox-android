@@ -750,7 +750,7 @@ class PlayerController @Inject constructor(
      */
     private fun backfillPlaylistUrls(items: List<PlaylistItemEntity>) {
         val repo = articleRepository ?: return
-        val missing = items.filter { it.audioUrl.isNullOrBlank() }
+        val missing = items.filter { it.audioUrl.isNullOrBlank() || it.durationSec == null }
         if (missing.isEmpty()) return
         progressScope.launch {
             runCatching { repo.getArticles() }
@@ -758,12 +758,12 @@ class PlayerController @Inject constructor(
                     val byId = articles.associateBy { it.id }
                     for (item in missing) {
                         val article = byId[item.articleId] ?: continue
-                        val url = article.audioUrl ?: continue   // 还没好，等下次
                         playlistRepository?.refreshUrl(
                             articleId = item.articleId,
-                            audioUrl = url,
+                            // 还没蒸馏好 → 地址仍然空着，等下次（时长可以先补上）
+                            audioUrl = article.audioUrl ?: item.audioUrl,
                             title = article.title,
-                            durationSec = article.durationSec,
+                            durationSec = article.durationSec ?: item.durationSec,
                         )
                     }
                 }

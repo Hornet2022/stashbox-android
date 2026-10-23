@@ -77,7 +77,7 @@ class PlaylistRepository @Inject constructor(
      * 音频地址接真签名后会过期，这时用 [com.tingxia.audio.data.repository.ArticleRepository.getAudioUrl]
      * 换一个新的回来。**权威永远是 article_id** —— 这一列只是快照。
      */
-    suspend fun refreshUrl(articleId: String, audioUrl: String, title: String? = null, durationSec: Int? = null) {
+    suspend fun refreshUrl(articleId: String, audioUrl: String?, title: String? = null, durationSec: Int? = null) {
         val item = dao.byArticle(articleId) ?: return
         dao.upsert(
             item.copy(
