@@ -6,16 +6,19 @@ import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.QuotaStatus
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.DocumentUploadRepository
 import com.tingxia.audio.data.repository.QuotaRepository
 import com.tingxia.audio.data.sync.PrefetchScheduler
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -31,6 +34,7 @@ class CaptureViewModel @Inject constructor(
     private val repository: ArticleRepository,
     private val quotaRepository: QuotaRepository,
     private val prefetchScheduler: PrefetchScheduler,
+    private val documentUploadRepository: DocumentUploadRepository,
 ) : ViewModel() {
 
     data class UiState(
@@ -181,6 +185,76 @@ class CaptureViewModel @Inject constructor(
 
     fun consumeCaptured() {
         _uiState.value = _uiState.value.copy(capturedArticleId = null)
+    }
+
+    /**
+     * 2026-10-23：**文档剪藏**（上传文件，而不是链接）。
+     *
+     * 与 [capture] 的**语义完全对齐**（这是刻意的）：
+     * · 提交前查配额（用尽 → 跳 Paywall，不浪费一次上传）
+     * · 成功后清空输入、刷新最近列表与配额、开始状态轮询 + 后台盯梢
+     * · **不**二次调 distill（服务端 submit_article 已自动派发，
+     *   客户端再调一次 = 两个独立 Arq job = 单篇耗时翻倍）
+     *
+     * @param uri 文件 content:// URI（系统文件选择器给的）
+     * @param onSuccess 成功回调（带 articleId）
+     */
+    fun captureDocument(
+        uri: android.net.Uri,
+        title: String? = null,
+        onSuccess: (String) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+
+            // 提交前再查一次配额,拦截用尽用户 —— 与链接剪藏同口径。
+            try {
+                val status = quotaRepository.getStatus()
+                if (status == QuotaStatus.Exhausted) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        quotaExhausted = true,
+                    )
+                    refreshQuota()
+                    return@launch
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(
+                    "CaptureViewModel",
+                    "pre-capture quota check failed: ${e.message}",
+                )
+            }
+
+            try {
+                val payload = withContext(Dispatchers.IO) {
+                    documentUploadRepository.readDocument(uri)
+                }
+                val resp = documentUploadRepository.upload(payload, title)
+                val id = resp.id ?: resp.articleId ?: resp.taskId ?: ""
+                android.util.Log.i(
+                    "CaptureViewModel",
+                    "document capture ok: id=$id status=${resp.status} file=${payload.fileName}",
+                )
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    capturedArticleId = id.ifEmpty { null },
+                    url = "",
+                )
+                onSuccess(id)
+                loadRecent()
+                refreshQuota()
+                if (id.isNotEmpty()) {
+                    startStatusPolling(id)
+                    prefetchScheduler.watchDistill(id)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CaptureViewModel", "document capture failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = friendlyError(e, fallback = "文档剪藏失败，请稍后再试"),
+                )
+            }
+        }
     }
 
     /** UI 收到 [quotaExhausted]=true 后调这个,避免重复跳 Paywall */

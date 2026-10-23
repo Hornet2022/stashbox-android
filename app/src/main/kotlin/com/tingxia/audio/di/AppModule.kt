@@ -13,6 +13,7 @@ import com.tingxia.audio.data.remote.QuotaApi
 import com.tingxia.audio.data.remote.SubscriptionApi
 import com.tingxia.audio.data.remote.TagApi
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.DocumentUploadRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.NotificationRepository
@@ -50,6 +51,14 @@ object AppModule {
     @Singleton
     fun provideArticleRepository(api: ArticleApi): ArticleRepository =
         ArticleRepository(api)
+
+    /** 文档剪藏（2026-10-23）：需要 Context 读 content:// URI。 */
+    @Provides
+    @Singleton
+    fun provideDocumentUploadRepository(
+        api: ArticleApi,
+        @ApplicationContext context: Context,
+    ): DocumentUploadRepository = DocumentUploadRepository(api, context)
 
     @Provides
     @Singleton

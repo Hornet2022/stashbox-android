@@ -2,6 +2,9 @@ package com.tingxia.audio.ui.capture
 
 import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +49,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.tingxia.audio.data.repository.DocumentUploadRepository
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.components.QuotaBanner
 import com.tingxia.audio.ui.components.sourceLabelRes
@@ -77,6 +83,26 @@ fun CaptureScreen(
     var inputValue by remember { mutableStateOf(TextFieldValue(uiState.url)) }
     // CP-DELETE：最近剪藏删除确认（与列表页/详情页同一交互语义）
     var deleteTarget by remember { mutableStateOf<Article?>(null) }
+
+    // 2026-10-23：文档选择器。
+    //
+    // 用 `OpenDocument`（SAF）而不是 `GetContent`：
+    // · OpenDocument 让用户在**系统文件浏览器**里选，能拿到**长期可用的**
+    //   content:// 授权（GetContent 的一次性 URI 在跨进程时可能失效）；
+    // · 我们不需要「从别的 App 接收内容」，所以用 OpenDocument 更贴切。
+    val documentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        // ⚠️ 必须**主动持久化权限**吗？不需要 —— 我们在**同一进程内**立刻读字节并上传，
+        // 不需要之后还能读。但如果将来要「先存下引用、稍后再读」，就必须
+        // `takePersistableUriPermission`（且选择器要允许 persistable）。
+        viewModel.captureDocument(uri) { articleId ->
+            Toast.makeText(context, "文档已提交,正在蒸馏", Toast.LENGTH_SHORT).show()
+            viewModel.consumeCaptured()
+            onCaptured(articleId)
+        }
+    }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -204,6 +230,22 @@ fun CaptureScreen(
                     } else {
                         Text("立即剪藏")
                     }
+                }
+
+                // 2026-10-23：**文档剪藏**。
+                //
+                // 为什么是独立入口而不是往上面那个输入框里塞路径：
+                // 手机上「文档」不是一个链接，用户手上是一个文件。
+                // 而且 Android 的文件访问是 content:// URI，
+                // 必须经系统选择器授权才能读 —— 没法凭空拼出来。
+                OutlinedButton(
+                    onClick = { documentPicker.launch(DocumentUploadRepository.SUPPORTED_EXTENSIONS.toTypedArray()) },
+                    enabled = !uiState.isLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.UploadFile, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("选择文档（PDF / Markdown / Word / 文本）")
                 }
             }
 

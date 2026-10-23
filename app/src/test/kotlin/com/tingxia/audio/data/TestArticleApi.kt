@@ -67,6 +67,12 @@ open class FakeArticleApi : ArticleApi {
     override suspend fun createArticle(request: com.tingxia.audio.data.model.CreateArticleRequest): CreateArticleResponse =
         CreateArticleResponse(id = "art_new", status = "pending")
 
+    // 2026-10-23：文档剪藏（multipart）。fake 不需要真的处理文件。
+    override suspend fun createArticleFromDocument(
+        file: okhttp3.MultipartBody.Part?,
+        title: okhttp3.RequestBody?,
+    ): CreateArticleResponse = CreateArticleResponse(id = "art_doc", status = "pending")
+
     override suspend fun distillArticle(id: String): DistillTriggerResponse =
         DistillTriggerResponse(status = "pending", taskId = "dst_new", articleId = id)
 

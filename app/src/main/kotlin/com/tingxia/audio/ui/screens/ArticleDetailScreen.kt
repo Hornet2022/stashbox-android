@@ -74,6 +74,7 @@ import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.ContentParts
 import com.tingxia.audio.data.model.TtsVoiceBrief
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
@@ -639,7 +640,12 @@ fun ArticleDetailScreen(
                         VoiceCreditRow(voice = safeArticle.ttsVoice)
 
                         // CP-DISTILL-TEXT：LLM 听感改写稿（整理后的正文）
-                        DistilledScriptCard(scriptText = safeArticle.scriptText)
+                        // 2026-10-23：带 contentParts → **分区展示**（正文要点 /
+                        // 延伸判断 / 关联思考 / 拓展方向），老数据（无分区）走原样平铺。
+                        DistilledScriptCard(
+                            scriptText = safeArticle.scriptText,
+                            contentParts = safeArticle.contentParts,
+                        )
 
                         if (uiState.status == DistillStatus.DISTILLING ||
                             uiState.status == DistillStatus.PENDING
@@ -1025,10 +1031,22 @@ private fun QualityTagsRow(tags: List<String>, qualityScore: Double?) {
  * 排版取向：印刷感 / 留白。首段（hook）放大作导语，其余按空行分段，
  * 正文用舒适行高 + 段距，整体放进 surfaceVariant 圆角容器。
  * scriptText 为空（未蒸馏 / 旧数据）时不渲染。
+ *
+ * ## 2026-10-23：分区展示
+ *
+ * 服务端把「延伸判断 / 关联思考 / 拓展方向」单独存了一份
+ * （[ContentParts]）—— 因为在 `scriptText` 里它们已经被**合并进正文段落**
+ * （TTS 要连着念整稿），客户端只能把所有段落平铺，**分不清**哪段是什么。
+ *
+ * 这三类内容**一直在生成，用户却从来没看到过**。
+ *
+ * 有分区 → 按「正文要点 / 延伸判断 / 关联思考 / 拓展方向」分节显示；
+ * 无分区（老数据 / 降级稿）→ **原样平铺**，一个字都不变。
  */
 @Composable
 private fun DistilledScriptCard(
     scriptText: String?,
+    contentParts: ContentParts? = null,
     modifier: Modifier = Modifier,
 ) {
     if (scriptText.isNullOrBlank()) return
@@ -1036,6 +1054,9 @@ private fun DistilledScriptCard(
         scriptText.trim().split(Regex("\\n{2,}")).map { it.trim() }.filter { it.isNotEmpty() }
     }
     if (paragraphs.isEmpty()) return
+
+    // 有分区且分区里有内容 → 走分区渲染；否则平铺。
+    val hasParts = contentParts != null && !contentParts.isEmpty
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -1065,24 +1086,119 @@ private fun DistilledScriptCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            paragraphs.forEachIndexed { index, para ->
-                if (index == 0) {
-                    // 导语：开场钩子，稍大、稍强调
-                    Text(
-                        text = para,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        lineHeight = 28.sp,
-                    )
-                } else {
-                    Text(
-                        text = para,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
-                        lineHeight = 26.sp,
-                    )
+            if (hasParts) {
+                ScriptPartsBody(
+                    parts = contentParts!!,
+                    // hook / outro 仍从 scriptText 的首末段取 ——
+                    // 它们不在 content_parts 里（分区只管中间四类）。
+                    hook = paragraphs.firstOrNull(),
+                    outro = paragraphs.lastOrNull().takeIf { paragraphs.size > 1 },
+                )
+            } else {
+                paragraphs.forEachIndexed { index, para ->
+                    if (index == 0) {
+                        // 导语：开场钩子，稍大、稍强调
+                        Text(
+                            text = para,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            lineHeight = 28.sp,
+                        )
+                    } else {
+                        Text(
+                            text = para,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                            lineHeight = 26.sp,
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 分区正文（2026-10-23）。
+ *
+ * 把「正文要点 / 延伸判断 / 关联思考 / 拓展方向」分节显示。
+ *
+ * ## 为什么这三类值得单独分区
+ *
+ * 它们是听感稿里**最值钱、也最容易混掉**的部分：
+ * · 「延伸判断」= 往后看会怎样、什么时候会失效
+ * · 「关联思考」= 和什么相关 / 矛盾 / 互相印证
+ * · 「拓展方向」= 接下来该盯住什么
+ *
+ * 在 `scriptText` 里它们被合并进正文段落（服务端要为 TTS 连着念），
+ * 客户端只能平铺 —— 于是用户看到的是「一堆段落」，**分不清哪段是自己的
+ * 收获、哪段是模型的延伸**。分区之后这三类才真正可见。
+ *
+ * ## 排版
+ *
+ * 沿用卡片既有的印刷感：分区标题用小号 + 次级色 + 左侧竖条，
+ * 正文用舒适行高。空分区**不渲染标题**（不留空标题框）。
+ */
+@Composable
+private fun ScriptPartsBody(
+    parts: ContentParts,
+    hook: String?,
+    outro: String?,
+) {
+    // 导语（开场钩子）—— 放大作导语，与平铺版保持一致
+    if (!hook.isNullOrBlank()) {
+        Text(
+            text = hook,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 28.sp,
+        )
+    }
+
+    ScriptSection(title = "正文要点", items = parts.sections)
+    ScriptSection(title = "延伸判断", items = parts.insights)
+    ScriptSection(title = "关联思考", items = parts.related)
+    ScriptSection(title = "拓展方向", items = parts.followUps)
+
+    // 收束（outro）
+    if (!outro.isNullOrBlank() && outro != hook) {
+        Text(
+            text = outro,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            lineHeight = 26.sp,
+        )
+    }
+}
+
+/** 一个分区（有内容才渲染标题）。 */
+@Composable
+private fun ScriptSection(title: String, items: List<String>) {
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(width = 3.dp, height = 12.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        RoundedCornerShape(2.dp),
+                    ),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        items.forEach { item ->
+            Text(
+                text = item,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                lineHeight = 26.sp,
+            )
         }
     }
 }

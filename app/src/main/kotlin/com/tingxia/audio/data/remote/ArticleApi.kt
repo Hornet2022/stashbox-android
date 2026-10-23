@@ -17,9 +17,13 @@ import com.tingxia.audio.data.model.SkipResponse
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Body
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 
 /**
  * 听匣后端文章级 API（api-gateway，dev 端口 8100）。
@@ -79,6 +83,26 @@ interface ArticleApi {
     // 不再用 Article 当返回类型 — 后端响应字段不全,专门的 [CreateArticleResponse]
     @POST("api/v1/articles")
     suspend fun createArticle(@Body request: CreateArticleRequest): CreateArticleResponse
+
+    /**
+     * 2026-10-23：**文档剪藏**（上传文件，而不是链接）。
+     *
+     * 后端 `POST /api/v1/articles/document` 收 multipart：`file`（文件）
+     * 或 `text`（粘贴文本），二选一。
+     *
+     * ⚠️ 为什么用 multipart 而不是 base64 JSON：
+     * base64 会让请求体膨胀 33%（10MB 文件 → 13MB），而且要读整个文件进内存
+     * 再编码 —— 大文档在低端机上直接 OOM。multipart 让 OkHttp 流式写出。
+     *
+     * ⚠️ 响应用 [CreateArticleResponse]：与链接剪藏**同形**（字段全 nullable），
+     * 后端任一字段缺失都不会炸。
+     */
+    @Multipart
+    @POST("api/v1/articles/document")
+    suspend fun createArticleFromDocument(
+        @Part file: MultipartBody.Part?,
+        @Part("title") title: RequestBody?,
+    ): CreateArticleResponse
 
     // CP10.5: POST /api/v1/articles/{id}/distill → 手动触发蒸馏(后端 add_article 已自动派,这是手动重派)
     // 不复用 [DistillStatusResponse](后者 task_id 是必填),专门的 [DistillTriggerResponse]
