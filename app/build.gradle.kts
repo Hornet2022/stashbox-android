@@ -121,6 +121,10 @@ android {
         // ⚠️ 换签名密钥同样会强制重装（Android 要求签名一致）。
         // 所以密钥**只生成一次**，之后一直用同一个 keystore。
         //
+        // 0.3.7：ICP 备案通过 —— 主地址域名化后的第一次发版
+        // （主地址一直是 api.stashbox.cn，这版是把「IP 兜底」的定位
+        //  从「备案未过期的必需品」改成「冗余保险」写进注释，并验证
+        //  域名路径：APK 下载与音频都走域名，IP 兜底降级为退路）
         // 0.3.6：修全屏播放器的三处交互
         // ① 进度条跳动（动画时长必须 > 轮询间隔）
         // ② 字幕换行时下方整排位移 + 底部操作行被导航栏切掉
@@ -132,8 +136,8 @@ android {
         // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
         // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
         // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
-        versionCode = 9
-        versionName = "0.3.6"
+        versionCode = 10
+        versionName = "0.3.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
