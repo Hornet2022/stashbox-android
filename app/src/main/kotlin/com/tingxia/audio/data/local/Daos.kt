@@ -86,3 +86,45 @@ interface PlaybackProgressDao {
     @Query("DELETE FROM playback_progress")
     suspend fun clearAll()
 }
+
+/**
+ * 播放列表（2026-10-23 新增）。
+ *
+ * 只存 article_id + 顺序 —— 音频 URL 会过期，不能存（见 [PlaylistItemEntity]）。
+ */
+@Dao
+interface PlaylistDao {
+
+    @Query("SELECT * FROM playlist_items ORDER BY position ASC")
+    fun observeAll(): Flow<List<PlaylistItemEntity>>
+
+    @Query("SELECT * FROM playlist_items ORDER BY position ASC")
+    suspend fun all(): List<PlaylistItemEntity>
+
+    @Query("SELECT * FROM playlist_items WHERE article_id = :articleId")
+    suspend fun byArticle(articleId: String): PlaylistItemEntity?
+
+    @Query("SELECT COUNT(*) FROM playlist_items")
+    suspend fun count(): Int
+
+    @Query("SELECT COALESCE(MAX(position), -1) FROM playlist_items")
+    suspend fun maxPosition(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: PlaylistItemEntity)
+
+    @Query("UPDATE playlist_items SET position = :position WHERE article_id = :articleId")
+    suspend fun updatePosition(articleId: String, position: Int)
+
+    @Query("DELETE FROM playlist_items WHERE article_id = :articleId")
+    suspend fun delete(articleId: String)
+
+    /**
+     * 清空整张表 —— 登出时用。
+     *
+     * 播放列表是**上一个用户**攒的「想连着听的一串」，下一个用户登录后
+     * 看到它会莫名其妙（内容跟自己完全无关）。
+     */
+    @Query("DELETE FROM playlist_items")
+    suspend fun clearAll()
+}

@@ -1,6 +1,8 @@
 package com.tingxia.audio.ui.articles
 
 import androidx.media3.exoplayer.ExoPlayer
+import com.tingxia.audio.data.local.FakePlaylistDao
+import com.tingxia.audio.data.repository.PlaylistRepository
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
 import com.tingxia.audio.data.FakeDistillationApi
@@ -83,6 +85,7 @@ class ArticleDetailViewModelTest {
             progressApi = FakeProgressApi(progressGet, true),
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
+            playlistRepository = PlaylistRepository(FakePlaylistDao()),
             context = RuntimeEnvironment.getApplication(),
         )
     }
@@ -130,6 +133,7 @@ class ArticleDetailViewModelTest {
             progressApi = FakeProgressApi(),
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
+            playlistRepository = PlaylistRepository(FakePlaylistDao()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -157,6 +161,7 @@ class ArticleDetailViewModelTest {
             progressApi = FakeProgressApi(),
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
+            playlistRepository = PlaylistRepository(FakePlaylistDao()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -185,6 +190,7 @@ class ArticleDetailViewModelTest {
             progressApi = FakeProgressApi(),
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
+            playlistRepository = PlaylistRepository(FakePlaylistDao()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Notifications
@@ -71,6 +72,11 @@ val skillItems = listOf(
     SkillItem("订阅", Icons.Default.Subscriptions, "subscribe"),
     SkillItem("回听", Icons.Default.Headphones, "review"),
     SkillItem("通勤预加载", Icons.Default.CloudDownload, "offline"),
+    // 2026-10-23：播放列表入口。
+    //
+    // 队列是**用户攒的一串**（见 PlaylistRepository），所以它得有个地方能去 ——
+    // 之前根本没有这个概念，队列是「文章列表页当前可见的那些」这个隐式东西。
+    SkillItem("播放列表", Icons.Default.PlaylistPlay, "playlist"),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +88,8 @@ fun HomeScreen(
     onNavigateToDistill: () -> Unit = {},
     onNavigateToSubscribe: () -> Unit = {},
     onNavigateToReview: () -> Unit = {},
+    /** 播放列表（2026-10-23）—— 队列的用户可见形态。 */
+    onNavigateToPlaylist: () -> Unit = {},
     onNavigateToArticleList: () -> Unit = {},
     onNavigateToDetail: (String) -> Unit = {},
     onNavigateToOfflineDownload: () -> Unit = {},
@@ -141,6 +149,7 @@ fun HomeScreen(
                                 "subscribe" -> onNavigateToSubscribe()
                                 "review" -> onNavigateToReview()
                                 "offline" -> onNavigateToOfflineDownload()
+                                "playlist" -> onNavigateToPlaylist()
                             }
                         }
                     )

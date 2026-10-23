@@ -82,6 +82,8 @@ class LocalUserDataCleaner @Inject constructor(
             database.withTransaction {
                 database.downloadedAudioDao().clearAll()
                 database.playbackProgressDao().clearAll()
+                // 播放列表同样是「上一个用户攒的一串」，下一个用户看到会莫名其妙。
+                database.playlistDao().clearAll()
             }
         }
 

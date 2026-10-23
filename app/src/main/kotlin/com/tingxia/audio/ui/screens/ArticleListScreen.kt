@@ -94,23 +94,17 @@ fun ArticleListScreen(
 ) {
     val articles by viewModel.articles.collectAsStateWithLifecycle()
 
-    // 把「已就绪且有音频」的文章排成播放队列（2026-10-02）。
-    // 播放器的上一首/下一首靠它工作 —— 之前播放器里根本没有队列概念。
-    LaunchedEffect(articles, playerController) {
-        val items = articles
-            .filter { it.status == DistillStatus.READY && !it.audioUrl.isNullOrBlank() }
-            .map {
-                com.tingxia.audio.audio.PlayerController.QueueItem(
-                    articleId = it.id,
-                    audioUrl = it.audioUrl!!,
-                    title = it.title,
-                )
-            }
-        playerController?.setQueue(items)
-
-        // 通勤窗口内自动预加载下一集（闭环 3）。决策逻辑在 CommutePrefetcher，
-        // 这里只负责喂数据 —— 什么时候**不该**下载由它判断。
-        if (commutePrefetcher != null && items.isNotEmpty()) {
+    // 通勤窗口内自动预加载下一集（闭环 3）。决策逻辑在 CommutePrefetcher，
+    // 这里只负责喂数据 —— 什么时候**不该**下载由它判断。
+    //
+    // ⚠️ 这里**不再**把可见文章灌成播放队列（2026-10-23 拆掉）。
+    // 那个「隐式队列」是「上一首/下一首常年是灰的」的根源：队列 = 列表页
+    // 当前可见的 ready 文章，列表一刷新/翻页/换筛选就变，用户看不见也管不了。
+    // 队列现在由**播放列表**驱动 —— 用户显式攒的一串（见 PlaylistRepository），
+    // 看得见、管得了、退出重进还在。
+    LaunchedEffect(articles, commutePrefetcher) {
+        val ready = articles.filter { it.status == DistillStatus.READY && !it.audioUrl.isNullOrBlank() }
+        if (commutePrefetcher != null && ready.isNotEmpty()) {
             commutePrefetcher.maybePrefetch(articles, learnedWindows = null)
         }
     }

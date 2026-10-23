@@ -11,13 +11,21 @@ import androidx.room.RoomDatabase
  * 扩散到两个。
  */
 @Database(
-    entities = [DownloadedAudioEntity::class, PlaybackProgressEntity::class],
-    version = 1,
+    entities = [
+        DownloadedAudioEntity::class,
+        PlaybackProgressEntity::class,
+        PlaylistItemEntity::class,
+    ],
+    // v2：加播放列表表（2026-10-23）。
+    // 不用 destructiveMigration —— 那会在 schema 变化时**直接丢库**，
+    // 而下载台账与播放进度丢了是要用户重新下载/重听的。
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun downloadedAudioDao(): DownloadedAudioDao
     abstract fun playbackProgressDao(): PlaybackProgressDao
+    abstract fun playlistDao(): PlaylistDao
 
     companion object {
         const val NAME = "tingxia.db"

@@ -20,11 +20,46 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
+    /**
+     * v1 → v2：加播放列表表（2026-10-23）。
+     *
+     * 迁移要**显式写**，不能靠 `fallbackToDestructiveMigration` ——
+     * 那会在 schema 变化时把整个库丢掉：下载台账没了（用户要重下）、
+     * 播放进度没了（续播位置丢）。
+     *
+     * 建表语句要与 [PlaylistItemEntity] 完全一致（Room 校验的是列名/类型/主键/索引），
+     * 少一列都会在运行时抛 IllegalStateException。
+     */
+    val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `playlist_items` (
+                    `article_id` TEXT NOT NULL,
+                    `position` INTEGER NOT NULL,
+                    `title` TEXT,
+                    `audio_url` TEXT,
+                    `duration_sec` INTEGER,
+                    `added_at` INTEGER NOT NULL,
+                    PRIMARY KEY(`article_id`)
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE INDEX IF NOT EXISTS `index_playlist_items_position`
+                ON `playlist_items` (`position`)
+                """.trimIndent(),
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, AppDatabase.NAME)
             // 不开 destructiveMigration：静默丢数据比启动失败更难查
+            .addMigrations(MIGRATION_1_2)
             .build()
 
     @Provides
@@ -32,6 +67,9 @@ object DatabaseModule {
 
     @Provides
     fun providePlaybackProgressDao(db: AppDatabase): PlaybackProgressDao = db.playbackProgressDao()
+
+    @Provides
+    fun providePlaylistDao(db: AppDatabase): PlaylistDao = db.playlistDao()
 
     /**
      * 登出清数据用的清理器（2026-10-21）。

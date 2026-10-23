@@ -58,6 +58,7 @@ import com.tingxia.audio.ui.notifications.NotificationCenterScreen
 import com.tingxia.audio.ui.offline.OfflineDownloadScreen
 // 2026-10-21：注销账号页 + 隐私政策同意门
 import com.tingxia.audio.ui.account.AccountDeletionScreen
+import com.tingxia.audio.ui.playlist.PlaylistScreen
 import com.tingxia.audio.ui.privacy.PrivacyConsentGate
 import com.tingxia.audio.ui.settings.SettingsScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
@@ -98,6 +99,7 @@ class MainActivity : ComponentActivity() {
     /** 通勤自动预加载决策层 */
     @Inject
     lateinit var commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher
+
 
     /**
      * 待跳转的路由（2026-10-23 新增）。
@@ -362,6 +364,7 @@ private fun AppNavigation() {
                 onNavigateToDistill = { navController.navigate("distill") },
                 onNavigateToSubscribe = { navController.navigate("tags") },
                 onNavigateToReview = { navController.navigate("later-listens") },
+                onNavigateToPlaylist = { navController.navigate("playlist") },
                 onNavigateToArticleList = { navController.navigate("list") },
                 onNavigateToDetail = { id -> navController.navigate("detail/$id") },
                 onNavigateToOfflineDownload = { navController.navigate("offline_download") },
@@ -450,6 +453,11 @@ private fun AppNavigation() {
                 onNavigateToDetail = { articleId ->
                     navController.navigate("detail/$articleId")
                 },
+            )
+        }
+        composable("playlist") {
+            PlaylistScreen(
+                onBack = { navController.popBackStack() },
             )
         }
         composable("later-listens") {

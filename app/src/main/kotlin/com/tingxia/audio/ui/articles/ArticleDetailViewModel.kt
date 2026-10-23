@@ -10,6 +10,7 @@ import com.tingxia.audio.data.model.MyEvaluationResponse
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
+import com.tingxia.audio.data.repository.PlaylistRepository
 import com.tingxia.audio.data.repository.ProgressRepository
 import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.ui.friendlyError
@@ -44,8 +45,35 @@ class ArticleDetailViewModel @Inject constructor(
     private val progressApi: ProgressApi,
     private val playerController: PlayerController,
     private val evaluationRepository: EvaluationRepository,
+    /** 播放列表（队列的唯一真相源，2026-10-23）。 */
+    private val playlistRepository: PlaylistRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    /**
+     * 把当前文章加入播放列表（2026-10-23）。
+     *
+     * 播放列表是**队列的唯一真相源**：攒好的一串能连着播，
+     * 通知栏/耳机键的「上一首/下一首」也才亮得起来
+     * （之前队列是「文章列表页当前可见的那些」——隐式、看不见、管不了）。
+     *
+     * @return 加入后的结果（给界面弹提示用）
+     */
+    suspend fun addToPlaylist(): Result<Boolean> = runCatching {
+        val state = _uiState.value
+        val id = state.article?.id
+        if (id.isNullOrBlank()) {
+            error("还没有文章")
+        }
+        val already = playlistRepository.contains(id)
+        playlistRepository.add(
+            articleId = id,
+            title = state.article?.title,
+            audioUrl = state.audioUrl,
+            durationSec = state.audioDurationSec,
+        )
+        !already
+    }
 
     /**
      * 播放器的"作者"字段用来源中文标签，而不是原始 source 码。
@@ -144,6 +172,11 @@ class ArticleDetailViewModel @Inject constructor(
 
                 val article = repository.getArticle(id)
                 _taskId.value = article.taskId
+                // 2026-10-23：把听感稿顺手推给播放器（字幕用）。
+                //
+                // 详情页本来就把稿子拉下来了，播放器再取一次是纯浪费 ——
+                // 推过去是零请求，而从迷你条/通知栏起的播由播放器自己兜底取。
+                playerController.setSubtitleScript(article.id, article.scriptText)
                 // 评分闭环读侧：进页面就拉"我评过没"，UI 才能显示"已评分 ★N"
                 article.taskId?.let { taskId ->
                     viewModelScope.launch {

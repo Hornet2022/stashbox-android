@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
@@ -430,6 +431,37 @@ fun ArticleDetailScreen(
                                     onClick = { showOverflow = false; showFeedbackSheet = true },
                                 )
                             }
+                            // 2026-10-23：加入播放列表。
+                            //
+                            // 放在这里而不是列表页的「更多」菜单：那个菜单是**屏级**的
+                            //（没有「针对哪一篇」的目标），而这是一个明确的**单篇**动作。
+                            //
+                            // 播放列表是队列的唯一真相源（见 PlaylistRepository）：
+                            // 攒好的一串能连着播，通知栏/耳机键的上下首也才亮得起来。
+                            DropdownMenuItem(
+                                text = { Text("加入播放列表") },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.PlaylistAdd, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflow = false
+                                    // 数据在 ViewModel 里（标题/地址/时长），
+                                    // 所以加入动作在屏内发起。
+                                    coroutineScope.launch {
+                                        val result = viewModel.addToPlaylist()
+                                        Toast.makeText(
+                                            context,
+                                            result.fold(
+                                                onSuccess = { added ->
+                                                    if (added) "已加入播放列表" else "已经在播放列表里了"
+                                                },
+                                                onFailure = { friendlyError(it, "加入播放列表失败") },
+                                            ),
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                },
+                            )
                             // CP-TTS-VOICE：换音色 + 用新音色重新生成这一篇。
                             //
                             // 放在详情页而不是设置页，因为只有这里有**文章上下文** ——

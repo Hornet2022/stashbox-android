@@ -168,6 +168,8 @@ fun FullScreenPlayerScreen(
     val speed by controller.speed.collectAsStateWithLifecycle()
     // 睡眠定时器剩余分钟数（0 = 未设置）。播放器层持有 —— 它必须活得比界面久。
     val sleepTimerMinutes by controller.sleepTimerMinutes.collectAsStateWithLifecycle()
+    // 字幕（2026-10-23）：当前该显示的那一句。
+    val currentSubtitle by controller.currentSubtitle.collectAsStateWithLifecycle()
     val availableSpeeds by controller.availableSpeeds.collectAsStateWithLifecycle()
     // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
     val currentBitrate by controller.currentBitrate.collectAsStateWithLifecycle()
@@ -259,6 +261,26 @@ fun FullScreenPlayerScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            // 字幕（2026-10-23 新增）
+            //
+            // 位置在标题/作者与进度条之间：这是听的位置，
+            // 放在这里视线自然从标题落到文字再落到进度条。
+            //
+            // 只显示**当前这一句**（不是全文滚动）—— 全文已经在下面的
+            // 「听感整理稿」区块里；字幕的职责是「现在听到哪」，
+            // 两者的分工不能混。
+            currentSubtitle?.let { line ->
+                Text(
+                    text = line,
+                    color = Color(0xFFF5F2EB),
+                    fontSize = 17.sp,
+                    lineHeight = 26.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                )
+            }
 
             // 进度条（可拖拽 seek）
             ProgressSection(

@@ -12,7 +12,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.audio.di.PlayerModule
+import com.tingxia.audio.data.local.PlaylistItemEntity
 import com.tingxia.audio.data.remote.ProgressApi
+import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.PlaylistRepository
 import com.tingxia.audio.data.remote.ProgressUpdateRequest
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.EntryPoint
@@ -70,6 +73,41 @@ class PlayerController @Inject constructor(
 
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 字幕（2026-10-23 新增）
+    //
+    // 服务端没有字幕/时间轴数据，但详情接口有完整的**听感稿**。
+    // 时间轴按「听感稿字数比例」分配到音频时长上（见 [SubtitleTimeline]），
+    // 误差约 ±1~3 秒。
+    //
+    // 脚本的来源有两条，**缓存是同一个**（避免同一篇取两次）：
+    //   ① 详情页已经把稿子拉下来了 → 顺手推给播放器（零请求）；
+    //   ② 从迷你条/通知栏/播放列表起的播 → 播放器自己按 articleId 拉一次。
+    // ─────────────────────────────────────────────────────────────────────
+    private val _currentSubtitle = MutableStateFlow<String?>(null)
+
+    /** 当前该显示的字幕行（null = 没有字幕，或此刻不在任何一句上）。 */
+    val currentSubtitle: StateFlow<String?> = _currentSubtitle.asStateFlow()
+
+    /** articleId → 听感稿全文（缓存，避免同一篇反复取）。 */
+    private val subtitleScripts = HashMap<String, String>()
+
+    /** 正在播的这一篇的听感稿。
+     *
+     * ⚠️ @Volatile：它在 IO 线程（取稿的协程）写、在主线程（位置轮询）读。
+     * 不是 volatile 的话，主线程可能一直读到 null —— 表现为「字幕偶尔不出来」。
+     */
+    @Volatile
+    private var currentScript: String? = null
+
+    /** 算好的时间轴。 */
+    @Volatile
+    private var subtitleTimeline: SubtitleTimeline = SubtitleTimeline.EMPTY
+
+    /** 时间轴是按 duration 算的；duration 变了（换了一篇 / 重新加载）就要重算。 */
+    @Volatile
+    private var subtitleTimelineDurationMs: Long = -1L
 
     /**
      * 播放失败的**用户可读**原因（2026-10-23 新增）。
@@ -237,9 +275,16 @@ class PlayerController @Inject constructor(
         }
     }
 
-    init {
-        player.addListener(playerListener)
-    }
+    /**
+     * 播放列表的内存镜像。
+     *
+     * 为什么要有镜像而不是每次现查库：[play] 是**同步**的（界面直接调），
+     * 而查 Room 是 suspend —— 要么把 play 改成 suspend（牵动 5 个调用点），
+     * 要么这里留一份镜像。镜像更省事，而且队列在内存里本来就是热的。
+     *
+     * 真相仍在 Room 里；镜像只是给同步读取用。
+     */
+    private val _playlistItems = MutableStateFlow<List<PlaylistItemEntity>>(emptyList())
 
     // ─────────────────────────────────────────────────────────────────────
     // 睡眠定时器（2026-10-23 新增）
@@ -275,6 +320,53 @@ class PlayerController @Inject constructor(
         _sleepTimerMinutes.value = minutes.coerceAtLeast(0)
         if (minutes <= 0) return
         positionHandler.postDelayed(sleepTimerRunnable, minutes.toLong() * 60_000L)
+    }
+
+    /**
+     * 刷新当前字幕行。
+     *
+     * 跟位置轮询走同一跳：有人看界面时是 500ms（字幕跟手），
+     * 退到后台是 10s（没人看字幕，慢点无所谓）。
+     */
+    private fun updateSubtitle() {
+        val script = currentScript
+        if (script.isNullOrBlank()) {
+            if (_currentSubtitle.value != null) _currentSubtitle.value = null
+            return
+        }
+        val duration = _duration.value
+        if (duration <= 0L) {
+            if (_currentSubtitle.value != null) _currentSubtitle.value = null
+            return
+        }
+        if (duration != subtitleTimelineDurationMs) {
+            subtitleTimeline = SubtitleTimeline.from(script, duration)
+            subtitleTimelineDurationMs = duration
+        }
+        _currentSubtitle.value = subtitleTimeline.cueAt(_position.value)?.text
+    }
+
+    /**
+     * 后台取一次听感稿（详情页没推过时的兜底）。
+     *
+     * 取不到就算了 —— 字幕是增强项，不该因为它拖慢播放或报错。
+     */
+    private fun fetchSubtitleScript(articleId: String) {
+        val repo = articleRepository ?: return
+        progressScope.launch {
+            runCatching { repo.getArticle(articleId) }
+                .onSuccess { article ->
+                    val script = article.scriptText
+                    if (!script.isNullOrBlank()) {
+                        subtitleScripts[articleId] = script
+                        if (articleId == _currentArticleId.value) {
+                            currentScript = script
+                            subtitleTimelineDurationMs = -1L
+                        }
+                    }
+                }
+                .onFailure { Log.w(TAG, "取听感稿失败（字幕不可用）: ${it.message}") }
+        }
     }
 
     /**
@@ -328,6 +420,7 @@ class PlayerController @Inject constructor(
             // CP3.7.0: 完听判定 —— ExoPlayer STATE_ENDED（已到末尾）
             // 或进度 ≥ 90% 视为完听（手动拖到末尾也算）
             checkListenCompletion()
+            updateSubtitle()
             scheduleNextPositionTick()
         }
     }
@@ -407,6 +500,16 @@ class PlayerController @Inject constructor(
     private var progressApi: ProgressApi? = null
     private var lastReportTimeMs = 0L
     private val progressScope = CoroutineScope(Dispatchers.IO + Job())
+
+    // ⚠️ 这个 init 块**必须**放在 progressScope 声明之后 ——
+    // Kotlin 按声明顺序初始化成员，写在前面会拿到还没初始化的 progressScope
+    // （编译期就报 "Variable 'progressScope' must be initialized"）。
+    /** 播放列表的观察是否已经起了（避免重复 collect）。 */
+    private var playlistObserverStarted = false
+
+    init {
+        player.addListener(playerListener)
+    }
     private var progressJob: Job? = null
 
     /**
@@ -544,13 +647,18 @@ class PlayerController @Inject constructor(
         // 灌的时机是「开始播放这一刻」，而不是列表每次刷新 ——
         // setMediaItems 会重新 prepare 当前项，列表刷新时正在播就会被
         // 打断（声音卡一下）。详见 [setQueue] 的说明。
-        val queue = _queue.value
+        // 队列 = 播放列表 + 当前文章（见 buildQueue 的说明）。
+        //
+        // 用播放列表而不是「列表页当前可见的那些」：后者是**隐式**队列 ——
+        // 列表一刷新/翻页/换筛选就变，用户看不见也管不了，
+        // 通知栏与耳机键的「上一首/下一首」因此常年是灰的。
+        val queue = buildQueue(articleId, audioUrl, title, author)
         val queueIndex = articleId?.let { id -> queue.indexOfFirst { it.articleId == id } } ?: -1
         if (queueIndex >= 0) {
             player.setMediaItems(queue.map { it.toMediaItem() }, queueIndex, 0L)
             _queueIndex.value = queueIndex
         } else {
-            // 不在队列里（比如从推送/分享直接进详情）→ 单曲播放。
+            // 没有 articleId（不隶属于任何文章）或队列里没有它 → 单曲播放。
             player.setMediaItem(mediaItem)
         }
         player.prepare()
@@ -565,6 +673,13 @@ class PlayerController @Inject constructor(
         startProgressReporting()
         // 记下「刚才在听什么」—— 系统媒体面板的「继续播放」要用（见 PlaybackResumption）。
         PlaybackResumption.save(appContext, articleId, audioUrl, title)
+
+        // 字幕：切到这一篇的听感稿（缓存里没有就后台取一次）。
+        currentScript = articleId?.let { subtitleScripts[it] }
+        subtitleTimelineDurationMs = -1L
+        if (articleId != null && currentScript == null) {
+            fetchSubtitleScript(articleId)
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -594,21 +709,110 @@ class PlayerController @Inject constructor(
     val hasPrevious: Boolean get() = _queueIndex.value > 0
 
     /**
-     * 灌入队列。列表页在数据加载完时调。
+     * 把播放列表同步到播放器的播放列表。
+     *
+     * 用 Media3 的**增量**操作（addMediaItem / moveMediaItem / removeMediaItem），
+     * 而不是 `setMediaItems` 整体重设 —— 后者会重新 prepare 当前项，
+     * 表现为「正听着突然卡一下」。增量操作只动播放列表本身，
+     * **正在播的那一项完全不受影响**。
+     *
+     * 这条很重要：用户很可能正在听 A，此时把 B 加进播放列表 ——
+     * 播放不该被打断，但通知栏的「下一首」应该立刻变成 B。
+     */
+    private fun syncPlayerPlaylist(items: List<PlaylistItemEntity>) {
+        if (player.mediaItemCount == 0) return   // 还没开始播，等 play() 时一次性建
+        val target = items.map { it.toQueueItem() }.filter { it.audioUrl.isNotBlank() }
+        val targetIds = target.map { it.articleId }
+
+        // ① 删掉不在目标里的（倒序删，避免索引位移）
+        for (i in (0 until player.mediaItemCount).reversed()) {
+            val id = player.getMediaItemAt(i).mediaId
+            if (id !in targetIds) player.removeMediaItem(i)
+        }
+
+        // ② 按目标顺序补齐 / 移动
+        target.forEachIndexed { want, item ->
+            val current = (0 until player.mediaItemCount)
+                .firstOrNull { player.getMediaItemAt(it).mediaId == item.articleId }
+            when {
+                current == null -> player.addMediaItem(want, item.toMediaItem())
+                current != want -> player.moveMediaItem(current, want)
+            }
+        }
+    }
+
+    /**
+     * 补齐播放列表里**缺地址**的条目。
+     *
+     * 播放列表存的是地址快照；用户在蒸馏完成**之前**加入的话，那份快照是空的
+     * → 那一篇永远进不了队列（队列会跳过空地址的条目）。
+     * 这里用一次「用户文章列表」请求把缺的补上。
+     */
+    private fun backfillPlaylistUrls(items: List<PlaylistItemEntity>) {
+        val repo = articleRepository ?: return
+        val missing = items.filter { it.audioUrl.isNullOrBlank() }
+        if (missing.isEmpty()) return
+        progressScope.launch {
+            runCatching { repo.getArticles() }
+                .onSuccess { articles ->
+                    val byId = articles.associateBy { it.id }
+                    for (item in missing) {
+                        val article = byId[item.articleId] ?: continue
+                        val url = article.audioUrl ?: continue   // 还没好，等下次
+                        playlistRepository?.refreshUrl(
+                            articleId = item.articleId,
+                            audioUrl = url,
+                            title = article.title,
+                            durationSec = article.durationSec,
+                        )
+                    }
+                }
+                .onFailure { Log.w(TAG, "补齐播放列表地址失败: ${it.message}") }
+        }
+    }
+
+    /**
+     * 构建当前播放队列 = **播放列表 + 当前文章**。
+     *
+     * 当前文章不在播放列表里时，把它**追加到末尾** —— 于是：
+     * - 播放列表为空 → 队列只有当前这一篇 → 上一首/下一首正确地灰掉；
+     * - 播放列表有 3 篇、用户从文章列表点了第 4 篇 → 队列 = [1,2,3,4]，
+     *   播完接着播列表里的下一篇 ✓
+     *
+     * 这就是「连着播」的来源：不是「列表页当前可见的那些」，
+     * 而是**用户自己攒的一串** —— 看得见、管得了、退出重进还在。
+     */
+    private fun buildQueue(currentArticleId: String?, audioUrl: String, title: String, author: String?): List<QueueItem> {
+        val fromPlaylist = _playlistItems.value.map { it.toQueueItem() }
+            .filter { it.audioUrl.isNotBlank() }
+        val already = fromPlaylist.any { it.articleId == currentArticleId }
+        val tail = if (currentArticleId != null && !already && audioUrl.isNotBlank()) {
+            listOf(QueueItem(currentArticleId, audioUrl, title, author))
+        } else {
+            emptyList()
+        }
+        return fromPlaylist + tail
+    }
+
+    /** 播放列表条目 → 队列条目。 */
+    private fun PlaylistItemEntity.toQueueItem(): QueueItem = QueueItem(
+        articleId = articleId,
+        audioUrl = audioUrl.orEmpty(),
+        title = title,
+    )
+
+    /**
+     * 灌入队列（**保留给外部显式指定队列的场合**）。
+     *
+     * ⚠️ 列表页**不再**自动调它了 —— 那个「隐式队列」正是本轮要解决的问题：
+     * 队列 = 列表页当前可见的文章，列表一刷新就变，用户看不见也管不了，
+     * 通知栏/耳机键的「上一首/下一首」因此常年是灰的。
+     *
+     * 现在的队列由**播放列表**驱动（见 [buildQueue] / [syncPlayerPlaylist]），
+     * 那是用户显式攒的一串，看得见、管得了、退出重进还在。
      *
      * 已经在播的那一篇会被定位到队列中的对应位置，这样「下一首」才是
      * 用户视线里那篇，而不是从头开始。
-     *
-     * ## 这里**不**动播放器的播放列表（2026-10-23）
-     *
-     * 播放列表在**播放开始的那一刻**才灌进播放器（见 [play]）。
-     * 原因是：`setMediaItems` / `replaceMediaItems` 会重新 prepare 当前项 ——
-     * 列表每次刷新都调本方法，而列表刷新可能发生在**正在播放**时
-     * （用户从别的页面回列表 → 列表重新加载 → 正在播的那一篇被重新 prepare
-     * → 声音卡一下，位置还可能丢）。
-     *
-     * 所以这里只更新 App 侧的队列镜像；播放器的播放列表是
-     * 「开始播放那一刻的快照」，由 [play] 灌一次。
      */
     fun setQueue(items: List<QueueItem>) {
         if (items.isEmpty()) {
@@ -714,6 +918,64 @@ class PlayerController @Inject constructor(
         player.play()
         startPolling()
         startProgressReporting()
+    }
+
+    // ── 依赖注入：走 setter，不走构造参数 ──────────────────────────
+    //
+    // 这个类已经有三个 setter 注入的依赖（setProgressApi / setProgressRepository /
+    // setCurrentArticleId），原因一样：PlayerController 是 @Singleton，
+    // 而 AudioPlayerService（非 @AndroidEntryPoint 组件）也要用它的同一实例 ——
+    // 构造注入会绕不开「谁先建谁」的问题。
+    //
+    // 另一个现实理由：构造参数每加一个，**所有单测的构造点都要跟着改**。
+    // 这次就为了加播放列表与取稿接口，把 9 个测试文件全改了一遍 ——
+    // 依赖一变就全红，测试就变成了「构造函数的守门员」而不是「行为的守门员」。
+    //
+    // 依赖在 [com.tingxia.audio.TingxiaApp] 里一次性接好（那里能拿到 Hilt 的实例）。
+
+    /** 播放列表（用户显式攒的一串）—— 队列的**唯一真相源**。 */
+    private var playlistRepository: PlaylistRepository? = null
+
+    /** 取听感稿（字幕用；详情页没推过来时的兜底）。 */
+    private var articleRepository: ArticleRepository? = null
+
+    /** 注入播放列表仓库（由 [com.tingxia.audio.TingxiaApp] 在启动时接一次）。 */
+    fun setPlaylistRepository(repository: PlaylistRepository) {
+        playlistRepository = repository
+        if (playlistObserverStarted) return
+        playlistObserverStarted = true
+        progressScope.launch {
+            repository.observe().collect { items ->
+                // 镜像本身是 StateFlow（线程安全），这里直接写。
+                _playlistItems.value = items
+                // ⚠️ **播放器只能在主线程动**（ExoPlayer 的硬要求：
+                // "Player is accessed on the wrong thread"）。
+                // Room 的 Flow 回调在 IO 线程上，所以播放列表的改动必须 post 回主线程。
+                positionHandler.post { syncPlayerPlaylist(items) }
+                // 补齐「加入时还没蒸馏好」的条目（地址快照是空的 → 永远播不了）
+                backfillPlaylistUrls(items)
+            }
+        }
+    }
+
+    /** 注入文章仓库（字幕兜底取稿用）。 */
+    fun setArticleRepository(repository: ArticleRepository) {
+        articleRepository = repository
+    }
+
+    /**
+     * 塞入当前文章的听感稿（详情页调用，零网络请求）。
+     *
+     * 详情页本来就把文章详情拉下来了（稿子就在里面），顺手推给播放器，
+     * 免得播放器再取一次。
+     */
+    fun setSubtitleScript(articleId: String?, scriptText: String?) {
+        if (articleId.isNullOrBlank() || scriptText.isNullOrBlank()) return
+        subtitleScripts[articleId] = scriptText
+        if (articleId == _currentArticleId.value) {
+            currentScript = scriptText
+            subtitleTimelineDurationMs = -1L   // 强制重算
+        }
     }
 
     /**
