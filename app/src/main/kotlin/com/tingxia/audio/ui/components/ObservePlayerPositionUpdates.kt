@@ -1,22 +1,14 @@
 package com.tingxia.audio.ui.components
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-// ⚠️ 必须是 androidx.lifecycle.compose 这一支，不能用 androidx.compose.ui.platform
-// 里那个已被废弃的同名 LocalLifecycleOwner（本项目 Compose BOM 2024.10.01 +
-// lifecycle 2.8.7，正处在这个迁移窗口里）。
-//
-// 废弃版是**另一个** CompositionLocal：取不到真实 ViewTreeLifecycleOwner 时它
-// 落到一个兜底 owner，其 lifecycle 只补发 ON_CREATE。于是下面 onStart 注册的
-// 分支永远进不去 —— `positionObserverCount` 恒为 0，
-// `nextPositionPollDelayMs()` 只能落到 BACKGROUND_POLL_INTERVAL_MS(10s)。
-//
-// 症状极有欺骗性：**声音照放、时长照算，只是进度条匀速地每 10 秒跳一下**，
-// 而播放器内部一切正常（完听判定、断点续听读的都是同一份缓存，不受影响）。
-// 看起来像"产品把刷新率调慢了"，真实原因是观察者压根没注册。
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import com.tingxia.audio.audio.PlayerController
 
 /**
@@ -36,6 +28,29 @@ import com.tingxia.audio.audio.PlayerController
  * 通知栏进度是另一条路：Media3 的 `DefaultMediaNotificationProvider` 直接渲染
  * MediaSession 绑定的那个 ExoPlayer，不消费这里的 position StateFlow。
  *
+ * ## 为什么用 **Activity** 的生命周期，而不是 `LocalLifecycleOwner`
+ *
+ * 2026-10-23 真机实测发现的坑：进度条**每 10 秒才跳一下**（而不是 500ms），
+ * 字幕也跟着 10 秒才更新一次 —— 症状极有欺骗性，声音照放、时长照算，
+ * 看起来像"产品把刷新率调慢了"，真实原因是**观察者压根没注册**。
+ *
+ * 根因：`LocalLifecycleOwner` 在 Navigation Compose 里被覆盖成
+ * **NavBackStackEntry**（不是 Activity）。而 `DisposableEffect(lifecycleOwner, ...)`
+ * 的 key 就是它 —— **entry 的身份会漂移**（转场、恢复、跨 entry 重组），
+ * 于是 effect 被拆掉重建。重建时若新的 owner 还没 STARTED，
+ * `addObserver` 不会补发 ON_START → **只有「注销」没有配对的「注册」** →
+ * `positionObserverCount` 被偷走 → 掉回 10s 档。
+ *
+ * 而且旧代码里那句推理是错的：
+ * 「PlayerController 侧的注销对计数 0 是 no-op，所以不会把别人还在用的计数误减」——
+ * 只有当**当前**计数已经是 0 时才是 no-op。别人还持有 1 时，
+ * 这一减就把别人的那份偷走了。
+ *
+ * 改用 Activity 的生命周期，两个问题一起消失：
+ * - Activity 实例在整个 App 生命周期里**唯一且稳定** → effect 不会因为 key 漂移而重建；
+ * - Activity 的 STARTED/STOPPED 恰好就是「App 在前台/在后台」——
+ *   这本来就是降频决策要的语义（而不是「某个界面在不在栈顶」）。
+ *
  * ## 计数而非布尔
  * 全屏播放器与迷你条可能同时可见，所以内部是引用计数。两个都不可见时才降频。
  *
@@ -44,27 +59,63 @@ import com.tingxia.audio.audio.PlayerController
  */
 @Composable
 fun ObservePlayerPositionUpdates(controller: PlayerController) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, controller) {
+    val activity = LocalContext.current.findActivity()
+    if (activity == null) {
+        // 拿不到 Activity（理论上不该发生）→ 退化成「不管可见性」，
+        // 让 PlayerController 按「在不在播」决定刷新率。
+        DisposableEffect(controller) {
+            controller.startPositionUpdates()
+            onDispose { controller.stopPositionUpdates() }
+        }
+        return
+    }
+    DisposableEffect(activity, controller) {
+        // registered 记录**这个观察者自己**有没有加过计数 ——
+        // 只有加过才该减。旧代码在 onDispose 里无条件减，
+        // 会在「从没收到过 ON_START」时偷走别人的计数。
+        var registered = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> controller.startPositionUpdates()
-                Lifecycle.Event.ON_STOP -> controller.stopPositionUpdates()
+                Lifecycle.Event.ON_START -> {
+                    if (!registered) {
+                        registered = true
+                        controller.startPositionUpdates()
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    if (registered) {
+                        registered = false
+                        controller.stopPositionUpdates()
+                    }
+                }
                 else -> Unit
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        val lifecycle = (activity as? LifecycleOwner)?.lifecycle
+        lifecycle?.addObserver(observer)
 
-        // 两个细节：
-        // 1) addObserver 会把当前状态补发一遍 —— 若挂进来时已经 STARTED，
-        //    ON_START 会被补发，计数正好是 1；若还停在 STOPPED，则补发的
-        //    ON_CREATE 不触发任何注册，计数留在 0（正确：界面没显示就不该刷新）。
-        // 2) onDispose 无条件补一次注销：此时上面的补发**不保证**成对
-        //    （例如挂进来时就已 STOPPED，从没收到过 ON_START）。PlayerController
-        //    侧的注销对计数 0 是 no-op，所以不会把别人还在用的计数误减。
+        // addObserver 会把当前状态补发一遍：挂进来时 Activity 已经 STARTED，
+        // ON_START 会被补发 → 计数正好 1；还停在 STOPPED 则不注册（正确：
+        // App 在后台，界面没显示就不该要 500ms）。
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            controller.stopPositionUpdates()
+            lifecycle?.removeObserver(observer)
+            // 只减自己加过的那一次。
+            if (registered) controller.stopPositionUpdates()
         }
     }
+}
+
+/**
+ * 从 [Context] 里剥出 [Activity]。
+ *
+ * Compose 里 `LocalContext.current` 通常就是 Activity，但有时被包成
+ * [ContextWrapper]（主题包装、Dialog 上下文）。逐层剥到 Activity 为止。
+ */
+internal fun Context.findActivity(): Activity? {
+    var ctx: Context? = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return ctx as? Activity
 }

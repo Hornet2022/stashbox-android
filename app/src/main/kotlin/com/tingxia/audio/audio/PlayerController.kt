@@ -526,6 +526,7 @@ class PlayerController @Inject constructor(
      */
     fun startPositionUpdates() {
         positionObserverCount++
+        Log.i(TAG, "startPositionUpdates -> count=$positionObserverCount")
         if (positionObserverCount > 0) scheduleNextPositionTick()
     }
 
@@ -538,6 +539,7 @@ class PlayerController @Inject constructor(
      */
     fun stopPositionUpdates() {
         if (positionObserverCount > 0) positionObserverCount--
+        Log.i(TAG, "stopPositionUpdates -> count=$positionObserverCount")
         if (positionObserverCount == 0) scheduleNextPositionTick()
     }
 
