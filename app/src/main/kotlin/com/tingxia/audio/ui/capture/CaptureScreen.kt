@@ -239,7 +239,17 @@ fun CaptureScreen(
                 // 而且 Android 的文件访问是 content:// URI，
                 // 必须经系统选择器授权才能读 —— 没法凭空拼出来。
                 OutlinedButton(
-                    onClick = { documentPicker.launch(DocumentUploadRepository.SUPPORTED_EXTENSIONS.toTypedArray()) },
+                    // ⚠️ 传的是 **MIME 类型**，不是扩展名。
+                    // 契约的入参会进 `Intent.EXTRA_MIME_TYPES`，DocumentsUI 拿它
+                    // 比对文件的 MIME —— 传扩展名会让**所有文件都被灰掉、点不动**
+                    // （2026-10-24 真机实测：uiautomator dump 里文件卡片全是
+                    // enabled="false"，只有文件夹是 true，整个功能在真机上不可用）。
+                    // 为什么用 `*/*` 而不是 MIME 白名单：白名单会因各设备对
+                    // `.md` / 未知后缀的 MIME 报告不一致而**再坑一次**。
+                    // 「支不支持」交给客户端预检 + 服务端解析器（见 DocumentUploadRepository）。
+                    onClick = {
+                        documentPicker.launch(DocumentUploadRepository.PICKER_MIME_TYPES)
+                    },
                     enabled = !uiState.isLoading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
