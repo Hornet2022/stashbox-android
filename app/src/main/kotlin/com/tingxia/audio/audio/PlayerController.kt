@@ -241,16 +241,7 @@ class PlayerController @Inject constructor(
          * （完听判定 / 评分卡挂到别的文章）。
          */
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            val articleId = mediaItem?.mediaId
-            if (!articleId.isNullOrBlank() && articleId != _currentArticleId.value) {
-                _currentArticleId.value = articleId
-                _currentAudioUrl.value = mediaItem.localConfiguration?.uri?.toString() ?: _currentAudioUrl.value
-                _currentTitle.value = mediaItem.mediaMetadata.title?.toString() ?: _currentTitle.value
-                _currentAuthor.value = mediaItem.mediaMetadata.artist?.toString() ?: _currentAuthor.value
-                resetListenCompletionFlag()
-            }
-            val idx = player.currentMediaItemIndex
-            if (idx != androidx.media3.common.C.INDEX_UNSET) _queueIndex.value = idx
+            handleMediaItemTransition(mediaItem)
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -344,6 +335,59 @@ class PlayerController @Inject constructor(
             subtitleTimelineDurationMs = duration
         }
         _currentSubtitle.value = subtitleTimeline.cueAt(_position.value)?.text
+    }
+
+    /** 当前这篇的听感稿（internal 便于单测断言「换曲后稿子换没换」）。 */
+    internal val currentSubtitleScript: String? get() = currentScript
+
+    /**
+     * 换曲后的状态同步（2026-10-23 从 [Player.Listener] 里抽出来，便于单测）。
+     *
+     * 抽出来的原因：换曲有两条入口 ——
+     * ① [play]（用户点了一篇新的）；
+     * ② [Player.Listener.onMediaItemTransition]（队列自动续播、耳机「下一首」、
+     *    系统媒体面板里直接选曲）。**② 不会走 ①**，所以凡是「换曲时要同步的东西」
+     *    都必须在这里再接一遍，否则就会漏。
+     * 真机踩过的坑：字幕只在 ① 里换 → 队列自动续播后，标题已经是第二篇，
+     * 字幕还在显示第一篇的内容。
+     */
+    internal fun handleMediaItemTransition(mediaItem: MediaItem?) {
+        val articleId = mediaItem?.mediaId
+        if (!articleId.isNullOrBlank() && articleId != _currentArticleId.value) {
+            _currentArticleId.value = articleId
+            _currentAudioUrl.value = mediaItem.localConfiguration?.uri?.toString() ?: _currentAudioUrl.value
+            _currentTitle.value = mediaItem.mediaMetadata.title?.toString() ?: _currentTitle.value
+            _currentAuthor.value = mediaItem.mediaMetadata.artist?.toString() ?: _currentAuthor.value
+            resetListenCompletionFlag()
+            // 字幕必须跟着换曲换 —— 队列自动续播 / 耳机「下一首」都走这里，
+            // 而 play() 根本不会被调用（见 switchSubtitleTo 的说明）。
+            switchSubtitleTo(articleId)
+        }
+        val idx = player.currentMediaItemIndex
+        if (idx != androidx.media3.common.C.INDEX_UNSET) _queueIndex.value = idx
+    }
+
+    /**
+     * 切到某一篇的听感稿（换曲的统一入口）。
+     *
+     * 缓存里有就直接用；没有就先把 [currentScript] 置空（**不能留上一篇的稿子**），
+     * 再后台取一次。
+     *
+     * 为什么必须是「置空」而不是「先留着旧的」：时间轴是按 duration 算的，
+     * 换曲后 duration 变了 → 时间轴会用**新时长 + 旧稿子**重算 →
+     * 屏幕上出现「上一篇的内容、配这一篇的时间」——
+     * 听起来像是这篇在讲那句话，其实完全没有对应关系。
+     * 真机实测（2026-10-23）：播完 QwenGyre 自动切到《通宵折腾》，
+     * 标题已经是《通宵折腾》，字幕却还在显示「QwenGyre 的核心思路是…」。
+     *
+     * @param articleId 目标文章；null = 没有归属（清空字幕）
+     */
+    private fun switchSubtitleTo(articleId: String?) {
+        currentScript = articleId?.let { subtitleScripts[it] }
+        subtitleTimelineDurationMs = -1L   // 强制重算时间轴
+        if (!articleId.isNullOrBlank() && currentScript == null) {
+            fetchSubtitleScript(articleId)
+        }
     }
 
     /**
@@ -675,11 +719,7 @@ class PlayerController @Inject constructor(
         PlaybackResumption.save(appContext, articleId, audioUrl, title)
 
         // 字幕：切到这一篇的听感稿（缓存里没有就后台取一次）。
-        currentScript = articleId?.let { subtitleScripts[it] }
-        subtitleTimelineDurationMs = -1L
-        if (articleId != null && currentScript == null) {
-            fetchSubtitleScript(articleId)
-        }
+        switchSubtitleTo(articleId)
     }
 
     // ─────────────────────────────────────────────────────────────────────
