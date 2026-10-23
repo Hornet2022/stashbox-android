@@ -276,6 +276,16 @@ class ArticleDetailViewModel @Inject constructor(
                     //                              顶掉当前播放是预期行为）
                     val sameArticle = playerController.currentArticleId.value == id
                     val state = playerController.state.value
+                    // 这一行是**诊断信息**，不是调试残留：
+                    // 「为什么这次没自动起播 / 为什么从头播了」只能从这里查 ——
+                    // cur/state/same/finished/savedPos 五个值一摆出来，
+                    // 就能判断是「已经在播同一篇（跳过）」还是「确实该重起播」。
+                    android.util.Log.i(
+                        "ArticleDetailViewModel",
+                        "autoplay decide: id=$id cur=${playerController.currentArticleId.value} " +
+                            "state=$state same=$sameArticle finished=$alreadyFinished " +
+                            "savedPos=$savedPositionMs",
+                    )
                     when {
                         sameArticle && state == PlaybackState.PLAYING -> {
                             android.util.Log.i(
