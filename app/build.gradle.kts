@@ -121,13 +121,15 @@ android {
         // ⚠️ 换签名密钥同样会强制重装（Android 要求签名一致）。
         // 所以密钥**只生成一次**，之后一直用同一个 keystore。
         //
+        // 0.3.5：修「播完一首后换曲，界面冻在上一首」的 bug
+        // （位置泵在播完后自己停摆，换曲又不经过 play()，没人再拉它）。
         // 0.3.4：修「队列自动续播后字幕还停在前一篇」的 bug
         // （换曲有两条入口，只在 play() 里换稿子是不够的）。
         // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
         // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
         // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
-        versionCode = 7
-        versionName = "0.3.4"
+        versionCode = 8
+        versionName = "0.3.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
