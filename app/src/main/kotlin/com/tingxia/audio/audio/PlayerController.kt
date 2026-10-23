@@ -247,6 +247,22 @@ class PlayerController @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.PLAYING
+                // 恢复播放时确保位置泵是开着的。
+                //
+                // 为什么必须在这里兜一道：泵的排程依据是
+                // [nextPositionPollDelayMs] —— 「没人观察 **且** 没在播」时
+                // 返回 null（不排下一跳），于是**播完之后泵会自己停摆**。
+                // 而换曲（上一首/下一首/系统媒体面板选曲）走的是
+                // `seekToNextMediaItem()`，**不经过 [play]** —— 没人再把泵拉起来。
+                // 结果：声音在放，界面上的进度、时长、字幕却全冻在上一首。
+                // 真机实测（2026-10-23）：播完一首后按「上一首」，
+                // 标题切了、时长还显示上一篇的 05:17、字幕空白。
+                startPolling()
+                // 断点续听的上报任务同理：stop() 会把它 cancel 掉，
+                // 而换曲不经过 play() —— 没人再拉起来 → 进度再也不上报，
+                // 表现为「听完一篇，进度条还是 0」。
+                // 只在**真的没在跑**时才重启，免得每次 resume 都重置上报节拍。
+                if (progressJob?.isActive != true) startProgressReporting()
                 return
             }
             // 不在播了 —— 要区分「暂停」和「播完了」和「正在缓冲」：
@@ -337,6 +353,9 @@ class PlayerController @Inject constructor(
         _currentSubtitle.value = subtitleTimeline.cueAt(_position.value)?.text
     }
 
+    /** 位置泵是否开着（internal 便于单测断言「换曲后泵有没有被拉回来」）。 */
+    internal val isPositionPumpRunning: Boolean get() = positionPumpRunning
+
     /** 当前这篇的听感稿（internal 便于单测断言「换曲后稿子换没换」）。 */
     internal val currentSubtitleScript: String? get() = currentScript
 
@@ -363,6 +382,12 @@ class PlayerController @Inject constructor(
             // 而 play() 根本不会被调用（见 switchSubtitleTo 的说明）。
             switchSubtitleTo(articleId)
         }
+        // 位置泵必须重新拉起 —— 上一首播完后泵会自己停摆（见
+        // onIsPlayingChanged 的说明），而换曲不经过 play()，没人再拉它。
+        startPolling()
+        // 立刻刷一次：不等下一个 500ms 的跳，这样换曲后字幕/进度不会
+        // 慢半拍才跟上（用户看到的是「标题变了、内容还没变」）。
+        updateSubtitle()
         val idx = player.currentMediaItemIndex
         if (idx != androidx.media3.common.C.INDEX_UNSET) _queueIndex.value = idx
     }

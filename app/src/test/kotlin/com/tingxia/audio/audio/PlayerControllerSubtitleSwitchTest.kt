@@ -6,7 +6,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -89,6 +91,26 @@ class PlayerControllerSubtitleSwitchTest {
         assertNull(
             "换到没有稿子的文章时不该沿用上一篇的稿子",
             controller.currentSubtitleScript,
+        )
+    }
+
+    @Test
+    fun `换曲时要把位置泵重新拉起来`() {
+        controller.play(audioUrl = "https://example.com/art_a.mp3", title = "A", articleId = "art_a")
+        assertTrue("播放后位置泵应该是开着的", controller.isPositionPumpRunning)
+
+        // 模拟「上一首播完了，泵按 nextPositionPollDelayMs 的规则自己停摆」
+        // （没人观察 + 没在播 → 不排下一跳）。
+        controller.stop()
+        assertFalse("stop 之后泵应该是关着的", controller.isPositionPumpRunning)
+
+        // 换曲走的是 seekToNextMediaItem()，**不经过 play()** ——
+        // 如果没人把泵重新拉起来，声音在放但界面上的进度/时长/字幕全冻住。
+        controller.handleMediaItemTransition(mediaItem("art_b", "B"))
+
+        assertTrue(
+            "换曲后位置泵必须被重新拉起，否则界面会冻在上一首",
+            controller.isPositionPumpRunning,
         )
     }
 }
