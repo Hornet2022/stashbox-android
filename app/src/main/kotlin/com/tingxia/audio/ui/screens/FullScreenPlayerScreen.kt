@@ -2,11 +2,14 @@ package com.tingxia.audio.ui.screens
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
@@ -58,6 +62,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -233,7 +239,12 @@ fun FullScreenPlayerScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.systemBars),
         ) {
-        val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.40f)
+        //
+        // 0.40 → 0.32（2026-10-23）：原来的比例让整列**放不进视口** ——
+        // 底部的「收藏/标签订阅/反馈/分享」整排落在导航栏后面（实测
+        // y=3090~3200，导航栏从 ~3080 开始），用户根本点不到。
+        // 缩小封面 + 收紧间距后，这一屏能完整放下，滚动只作为小屏兜底。
+        val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.32f)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -248,7 +259,7 @@ fun FullScreenPlayerScreen(
                 title = "正在播放",
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 大封面 — 无封面图时用标题首字 + 渐变
             // 传 displayTitle 而不是入参 title：MainActivity 两处都传 title = ""，
@@ -259,7 +270,7 @@ fun FullScreenPlayerScreen(
                 modifier = Modifier.size(coverSize),
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 标题 + 作者 + 当前码率
             Metadata(
@@ -268,7 +279,7 @@ fun FullScreenPlayerScreen(
                 bitrate = currentBitrate,
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 字幕（2026-10-23 新增）
             //
@@ -278,17 +289,18 @@ fun FullScreenPlayerScreen(
             // 只显示**当前这一句**（不是全文滚动）—— 全文已经在下面的
             // 「听感整理稿」区块里；字幕的职责是「现在听到哪」，
             // 两者的分工不能混。
-            currentSubtitle?.let { line ->
-                Text(
-                    text = line,
-                    color = Color(0xFFF5F2EB),
-                    fontSize = 17.sp,
-                    lineHeight = 26.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 20.dp),
-                )
-            }
+            //
+            // ⚠️ 高度必须**固定**（见 [SubtitleArea]）：之前是
+            // `currentSubtitle?.let { Text(...) }`，句子的行数一变
+            // （1 行 ↔ 2 行），整个 Column 的高度就变 →
+            // 进度条、控制键、语速行整体上下位移。
+            // 真机实测：1 行 ↔ 2 行差 91px，字幕每换一句整个下半屏都在跳。
+            SubtitleArea(
+                text = currentSubtitle,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+            )
 
             // 进度条（可拖拽 seek）
             ProgressSection(
@@ -309,7 +321,7 @@ fun FullScreenPlayerScreen(
                 },
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 播放失败提示 + 重试（2026-10-23 新增）
             //
@@ -386,7 +398,7 @@ fun FullScreenPlayerScreen(
                 hasNextItem = hasNextItem,
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 语速：单一 chip 展示当前档位，点开 sheet 选。
             // 原来这里排了 5 个 chip + 一个「更多」键，但算一下宽度：
@@ -413,7 +425,7 @@ fun FullScreenPlayerScreen(
                 },
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 底部 4 个动作 — 收藏 / 标签 / 反馈 / 分享
             // 2026-10-03：这四个键此前全是空实现，MainActivity 一个回调都没传，
@@ -773,6 +785,72 @@ private fun Metadata(
 }
 
 // ─────────────────────────────────────────────────────────
+// 字幕区
+// ─────────────────────────────────────────────────────────
+
+/**
+ * 当前这一句字幕。**高度固定**（两行），文字切换不引起布局回流。
+ *
+ * ## 为什么必须固定高度
+ *
+ * 之前是 `currentSubtitle?.let { Text(...) }` —— 句子的行数会变
+ * （1 行 ↔ 2 行），而它在 Column 里**占位** → 行数一变，下面整列的高度就变
+ * → 进度条、控制键、语速行、底部动作行整体上下位移。
+ *
+ * 真机实测（小米 Mi 11）：1 行 ↔ 2 行相差 91px。字幕每换一句，
+ * 下半个屏幕都在跳 —— 进度条被顶开、按钮被顶开，正在拖的进度条还会
+ * 被「从手指底下挪走」。
+ *
+ * 固定高度之后，字幕怎么换都不会影响别的东西。
+ *
+ * ## 文字底部对齐
+ *
+ * 1 行字幕时贴着进度条（离听觉最近），2 行时向上长 ——
+ * 视觉上字幕始终「坐在」进度条上面，而不是悬在中间。
+ *
+ * ## 超出两行怎么办
+ *
+ * 截断并加省略号。字幕的职责是「现在听到哪」，全文在详情页的
+ * 「听感整理稿」区块里；这里要的是一眼能扫完的一行。
+ */
+@Composable
+private fun SubtitleArea(
+    text: String?,
+    modifier: Modifier = Modifier,
+) {
+    val lineHeightSp = 26.sp
+    val reservedHeight = with(LocalDensity.current) { (lineHeightSp * 2).toDp() }
+    Box(
+        modifier = modifier.height(reservedHeight),
+    ) {
+        AnimatedContent(
+            targetState = text,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(120)) +
+                    slideInVertically(animationSpec = tween(120)) { it / 4 })
+                    .togetherWith(fadeOut(animationSpec = tween(80)))
+            },
+            label = "subtitle",
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) { line ->
+            if (line.isNullOrBlank()) {
+                Spacer(modifier = Modifier.fillMaxWidth())
+            } else {
+                Text(
+                    text = line,
+                    color = Color(0xFFF5F2EB),
+                    fontSize = 17.sp,
+                    lineHeight = lineHeightSp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
 // 进度条 + 时间
 // ─────────────────────────────────────────────────────────
 
@@ -786,19 +864,51 @@ private fun ProgressSection(
     onDragChange: (Float) -> Unit,
     onDragFinish: (Float) -> Unit,
 ) {
-    val animatedProgress by animateFloatAsState(
-        targetValue = if (isDragging) dragValue else if (duration > 0L) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
-        animationSpec = if (isDragging) {
-            tween(durationMillis = 0)
-        } else {
-            tween(durationMillis = 250, easing = LinearEasing)
-        },
-        label = "progress",
-    )
+    //
+    // 目标进度：拖动时用拖动值，否则用真实播放位置。
+    val targetProgress = if (isDragging) {
+        dragValue
+    } else if (duration > 0L) {
+        (position.toFloat() / duration).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    //
+    // 动画时长必须**大于**位置轮询间隔（[com.tingxia.audio.audio.PlayerController]
+    // 的 POLL_INTERVAL_MS = 500ms），否则滑块就是「走一段、停一段」——
+    // 250ms 的 tween 配 500ms 一次的目标准确地产生这个节奏：
+    // 走 250ms → 停 250ms → 再走。真机实测（小米 Mi 11，5:17 的音频，
+    // 轨道宽 1264px）：每次轮询滑块只挪 1.7px，于是肉眼看到的是
+    // 「一格一格地跳」，而不是连续滑动。
+    //
+    // 800ms > 500ms → 动画永远在飞 → 滑块连续。
+    // 稳态滞后约 0.6 次轮询的量（≈1px），看不出来。
+    //
+    // 大幅跳变（seek / 换歌）时改用 120ms 快速跟上 ——
+    // 否则拖完进度条要等 800ms 才到位，手感是「粘的」。
+    //
+    // 用 [Animatable] 而不是 animateFloatAsState：
+    // 判据需要「当前动画值」来区分「正常推进」和「大幅跳变」，
+    // 而 animateFloatAsState 拿不到自己当前的动画值（它就是返回值本身）。
+    // Animatable 的 value 既是当前值也是 State → 读它就会触发重绘。
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(targetProgress, isDragging) {
+        val spec = when {
+            isDragging -> tween<Float>(durationMillis = 0)
+            // 大幅跳变（seek / 换歌 / 换集）→ 120ms 快速跟上，
+            // 否则拖完进度条要等 800ms 才到位，手感是「粘的」。
+            kotlin.math.abs(targetProgress - progress.value) > 0.02f ->
+                tween<Float>(durationMillis = 120, easing = LinearEasing)
+            // 正常推进 → 800ms（> 轮询间隔 500ms），动画永远在飞 → 滑块连续。
+            else -> tween<Float>(durationMillis = 800, easing = LinearEasing)
+        }
+        progress.animateTo(targetProgress, spec)
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Slider(
-            value = animatedProgress,
+            value = progress.value,
             onValueChange = { onDragChange(it) },
             onValueChangeFinished = { onDragFinish(dragValue) },
             colors = SliderDefaults.colors(

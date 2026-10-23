@@ -171,7 +171,13 @@ fun ArticleDetailScreen(
     // 手动入口必须始终可用 —— 已评过的人正需要它改分（☆ 图标此时显示"修改评分"）。
     // 真机回归踩到过：写成 `(shouldShowEvaluation || showManualRatingDialog) && !isRated`
     // 会把手动入口一起堵死，评过分之后按钮点了没反应。
-    val autoPrompt = shouldShowEvaluation && !viewModel.isRated
+    //
+    // 「读回是否出结果」也是门槛之一 —— 「评过没」是异步读回的，
+    // 完听事件可能比读回先到（真机实测：已听完的剪藏再次打开，
+    // 秒进末尾 → 秒判定完听 → 评价弹窗直接糊在脸上）。
+    // 读回没出结果就先不自动弹（手动入口不受影响）。
+    val ratingLookupDone by viewModel.ratingLookupDone.collectAsStateWithLifecycle()
+    val autoPrompt = shouldShowEvaluation && !viewModel.isRated && ratingLookupDone
     val effectiveShowEval = autoPrompt || showManualRatingDialog
     val currentTaskId = taskId  // delegated property → 缓存到 local val 解 smart-cast 限制
     if (effectiveShowEval && currentTaskId != null) {

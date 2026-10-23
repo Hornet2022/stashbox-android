@@ -119,6 +119,22 @@ class ArticleDetailViewModel @Inject constructor(
     val isRated: Boolean get() = _myRating.value?.isRated == true
 
     /**
+     * 「我评过没」这次读回**是否已经出结果**（成功或失败都算完成）。
+     *
+     * 为什么需要它：自动弹评分卡的条件是「刚听完 **且** 没评过」。
+     * 而「评过没」是**异步读回**的 —— 完听事件可能在读回返回之前就来了，
+     * 此时 `isRated` 还是 false → 弹窗照弹 → 用户明明评过分又被索评一次。
+     *
+     * 真机实测（2026-10-23）：已听完的剪藏再次打开 → 秒进末尾 → 秒判定完听
+     * → 评价弹窗直接糊在脸上。
+     *
+     * 所以：**读回没出结果之前，不自动弹**（读回失败也算出结果 ——
+     * 那时按「没评过」处理，让用户自己决定）。
+     */
+    private val _ratingLookupDone = MutableStateFlow(false)
+    val ratingLookupDone: StateFlow<Boolean> = _ratingLookupDone.asStateFlow()
+
+    /**
      * 评分提交成功后由 UI 回调，让详情页立刻显示"已评分 ★N"。
      *
      * 不用重新读回：提交响应里已经有 id / task_id / overall_score，够画这一行，
@@ -190,7 +206,13 @@ class ArticleDetailViewModel @Inject constructor(
                                 _myRating.value = null
                                 android.util.Log.w(TAG, "load my rating failed: ${it.message}")
                             }
+                        // 无论成功失败都算「读回出了结果」——
+                        // 否则自动弹窗会一直等着，白等一个永远不来的读回。
+                        _ratingLookupDone.value = true
                     }
+                } ?: run {
+                    // 没有 taskId → 无从评起，读回视为「已完成」
+                    _ratingLookupDone.value = true
                 }
                 // 文章已就绪（或已听）时，首屏直接取 article.audioUrl，无需轮询
                 val initialAudioUrl =
@@ -212,19 +234,38 @@ class ArticleDetailViewModel @Inject constructor(
                         isLoading = false,
                     )
                 }
+                // 「这篇是不是已经听完了」。
+                //
+                // 判据有两个，任一成立即算听完：
+                // ① 服务端已把状态标成 listened（完听上报过）；
+                // ② 本地/服务端的断点位置已经贴着结尾（≥95% 时长）。
+                //
+                // 真机实测（2026-10-23）：已听完的剪藏再次打开时，
+                // 断点续听把进度恢复到**末尾** → 一打开就播完了 →
+                // 完听判定立刻成立 → **评价弹窗直接糊在脸上**。
+                // 这个交互不合理：用户只是想再打开看看，却被当成
+                // 「又听了一遍」索评，而且进度条一上来就在最右端。
+                //
+                // 现在：**已听完的从头开始播**（再听一遍的合理意图），
+                // 并且不恢复到末尾。
+                val durationMs = (article.durationSec ?: 0) * 1000L
+                val alreadyFinished = article.status == DistillStatus.LISTENED ||
+                    (durationMs > 0L && (savedPositionMs ?: 0L) >= (durationMs * 0.95).toLong())
+
                 // CP4.4：蒸馏已就绪，直接起播
                 initialAudioUrl?.let { url ->
                     playerController.setProgressApi(progressApi)
                     playerController.setProgressRepository(progressRepository)
+                    // 起点直接交给播放器：它会落到那个位置，
+                    // 并把它当作**完听判定的基线**（这一轮是从这儿开始听的）。
                     playerController.play(
                         url,
                         title = article.title ?: "",
                         author = authorLabel(article.source),
                         articleId = id,
+                        // 已听完的 → 从头（0）；没听完的 → 断点续听
+                        resumePositionMs = if (alreadyFinished) 0L else (savedPositionMs ?: 0L),
                     )
-                    savedPositionMs?.let { pos ->
-                        playerController.seekTo(pos)
-                    }
                 }
                 // 状态还没到终态就启动轮询。
                 //

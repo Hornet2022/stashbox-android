@@ -378,6 +378,11 @@ class PlayerController @Inject constructor(
             _currentTitle.value = mediaItem.mediaMetadata.title?.toString() ?: _currentTitle.value
             _currentAuthor.value = mediaItem.mediaMetadata.artist?.toString() ?: _currentAuthor.value
             resetListenCompletionFlag()
+            // 完听基线归零：队列里的下一首是**从 0 开始**播的
+            // （seekToNextMediaItem 不会带断点位置）。
+            // 注意不能在这里覆盖 play() 设的基线 —— 初次 prepare 时的
+            // MediaItem 切换因为 articleId 没变，根本不会走到这个分支。
+            completionBaselineMs = 0L
             // 字幕必须跟着换曲换 —— 队列自动续播 / 耳机「下一首」都走这里，
             // 而 play() 根本不会被调用（见 switchSubtitleTo 的说明）。
             switchSubtitleTo(articleId)
@@ -546,23 +551,89 @@ class PlayerController @Inject constructor(
     /**
      * 判定是否完听：STATE_ENDED 或 position ≥ 90% duration。
      * 一篇只触发一次（用 [listenCompletionFired] 守门）。
+     *
+     * ⚠️ 但光看「当前进度」是不够的 —— 那样会把「**一打开就停在末尾**」
+     * 也算成听完。实测（2026-10-23）：已听完的剪藏再次打开时，
+     * 断点续听把进度恢复到末尾 → 第一跳轮询就满足「≥90%」→
+     * 立刻判定完听 → **评价弹窗直接糊在脸上**。
+     *
+     * 所以还必须要求「**这一轮真的推进了**」：
+     * 本次播放起点（[completionBaselineMs]）到现在至少要走完
+     * [MIN_SESSION_PROGRESS_MS]（或总时长的 5%，取大的那个）。
+     * 于是「恢复到末尾 → 秒完」不算听完，而「从头再听一遍 → 听完」照常算。
      */
     private var listenCompletionFired = false
+
+    /**
+     * 本次播放的起点（毫秒）。-1 = 还没记。
+     *
+     * 取「第一跳轮询时的 position」而不是 play() 里的值 ——
+     * 因为调用方是在 play() **之后**才 seek 到断点位置的，
+     * play() 里记下的是 0，不是真正的起点。
+     */
+    @Volatile
+    private var completionBaselineMs = -1L
+
     private fun checkListenCompletion() {
         if (listenCompletionFired) return
         if (_currentArticleId.value == null) return
         val pos = _position.value
         val dur = _duration.value
+        // 第一次检查时记下起点（此时断点续听的 seek 已经生效）。
+        if (completionBaselineMs < 0L) completionBaselineMs = pos
         val ended = player.playbackState == Player.STATE_ENDED
-        val reached = dur > 0L && pos.toFloat() / dur.toFloat() >= LISTEN_COMPLETE_RATIO
-        if (ended || reached) {
+        if (shouldFireCompletion(pos, dur, ended, completionBaselineMs)) {
             listenCompletionFired = true
             _listenCompleted.value = System.currentTimeMillis()
             Log.i(TAG, "listen completed: article=${_currentArticleId.value}, ratio=${if (dur > 0L) pos.toFloat() / dur else 0f}")
         }
     }
 
-    /** 重置完听标记（切歌时调） */
+    /**
+     * 完听判据（抽成纯函数，便于直接驱动单测）。
+     *
+     * 两个条件**都要**满足：
+     * ① 位置到了 —— 播完了（ENDED）或进度 ≥ [LISTEN_COMPLETE_RATIO]；
+     * ② **这一轮真的推进了** —— 从 [baselineMs] 起至少走了
+     *    [MIN_SESSION_PROGRESS_MS]（或总时长的 [MIN_SESSION_PROGRESS_RATIO]）。
+     *
+     * ② 是为「已听完的剪藏再次打开」加的：断点续听把进度恢复到末尾 →
+     * 第一跳就满足① → 立刻判定完听 → 评价弹窗直接糊在脸上。
+     * ② 让「恢复到末尾 → 秒完」不算听完，而「从头再听一遍 → 听完」照常算。
+     */
+    internal fun shouldFireCompletion(
+        positionMs: Long,
+        durationMs: Long,
+        ended: Boolean,
+        baselineMs: Long,
+    ): Boolean {
+        val reached = durationMs > 0L &&
+            positionMs.toFloat() / durationMs.toFloat() >= LISTEN_COMPLETE_RATIO
+        if (!ended && !reached) return false
+        val advanced = positionMs - baselineMs
+        // 门槛 = 总时长的 5%，但至少 3 秒、至多整个时长。
+        //
+        // 「至多整个时长」是为了短音频：一条 10 秒的音频不可能「推进 15 秒」，
+        // 否则它永远完不成（真机回归里那条 10s 的用例就是这么挂的）。
+        // 「至少 3 秒」是为了滤掉浮点噪声和几乎没动的情况。
+        val required = if (durationMs <= 0L) {
+            MIN_SESSION_PROGRESS_MS
+        } else {
+            minOf(
+                maxOf((durationMs * MIN_SESSION_PROGRESS_RATIO).toLong(), MIN_SESSION_PROGRESS_MS),
+                durationMs,
+            )
+        }
+        return advanced >= required
+    }
+
+    /**
+     * 重置完听标记（切歌时调）。
+     *
+     * 基线**不在这里清** —— 换曲时的新基线由 [play] 设置（那才是新的一轮）。
+     * 这里清成 -1 会让「第一跳轮询」把基线记成当时的 position，
+     * 于是「恢复到末尾」和「从头听」在判据上变得不可区分。
+     */
     private fun resetListenCompletionFlag() {
         listenCompletionFired = false
         _listenCompleted.value = null
@@ -678,6 +749,17 @@ class PlayerController @Inject constructor(
         author: String? = null,
         coverUrl: String? = null,
         articleId: String? = null,
+        /**
+         * 本轮的起点（断点续听的落点），毫秒。0 = 从头开始。
+         *
+         * 它有两个作用，缺一不可：
+         * ① 播放器落到这个位置（省得调用方在 play() 之后再 seek ——
+         *    那个「先播 0 再跳」的动作在真机上是一次可听见的卡顿）；
+         * ② **完听判定的基线** —— 「这一轮到底听没听」是相对于它算的。
+         *    没有它，「恢复到末尾 → 秒完」会被算成听完
+         *    （真机实测：已听完的剪藏再次打开，评价弹窗直接糊在脸上）。
+         */
+        resumePositionMs: Long = 0L,
     ) {
         if (articleId != null) {
             _currentArticleId.value = articleId
@@ -736,6 +818,14 @@ class PlayerController @Inject constructor(
         // 否则界面要等下一次换曲才知道「有没有下一首」。
         refreshQueueBounds()
         player.prepare()
+        // 断点续听：直接落到起点。
+        //
+        // 放在 prepare() 之后、play() 之前 —— 先播 0 再跳会有一声卡顿。
+        // 同时把完听基线钉在这里：本次「听」是从这个位置开始的。
+        completionBaselineMs = resumePositionMs
+        if (resumePositionMs > 0L) {
+            seekTo(resumePositionMs)
+        }
         // CP-TTS-VOICE: setPlaybackSpeed 是 player 级参数，理论上前后换 MediaItem
         // 不会丢。但这里显式重放一次 —— 漏掉的代价是「用户设了 1.5x，点开下一篇
         // 悄悄变回 1.0x」，而这种静默失灵本项目已经吃过很多次（见
@@ -1202,6 +1292,17 @@ class PlayerController @Inject constructor(
 
         /** 完听判定：进度 ≥ 90% 视为完听 */
         private const val LISTEN_COMPLETE_RATIO = 0.9f
+
+        /**
+         * 「这一轮真的听过了」的门槛：本次播放至少要推进这么多毫秒。
+         *
+         * 没有这道门槛，「恢复到末尾 → 秒完」也会被判成听完，
+         * 于是已听完的文章一打开就弹评价卡（真机实测 2026-10-23）。
+         */
+        private const val MIN_SESSION_PROGRESS_MS = 3_000L
+
+        /** 同上，但按总时长的比例算（长音频要听更久才算）。 */
+        private const val MIN_SESSION_PROGRESS_RATIO = 0.05f
 
         // CP-TTS-VOICE: 语速边界与默认档位。
         // 与服务端 common/models/tts_voice.py 的 MIN/MAX_PLAYBACK_SPEED 保持一致 ——
