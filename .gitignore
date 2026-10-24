@@ -55,3 +55,7 @@ proguard/
 *.pro
 *.mapping
 .kotlin/
+
+# graphify(engram) 知识图谱产物 —— 由 tree-sitter AST 从源码生成的可重建派生物，
+# 进版本库只会让 diff 失焦；重建脚本见同级目录 stashbox-graph/build.sh
+.engram/
