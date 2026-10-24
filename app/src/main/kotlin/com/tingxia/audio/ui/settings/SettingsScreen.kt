@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui.settings
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Security
+import androidx.core.net.toUri
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -260,6 +263,39 @@ fun SettingsScreen(
 
             // ── 关于 ──
             SettingsSection("关于") {
+                // 2026-10-24：**ICP 备案公示**。
+                //
+                // 为什么必须在这里写一行：
+                // 《互联网信息服务管理办法》要求备案号在 App 的**启动页或设置页底部**
+                // 显著位置公示，且格式要「完整、可机读、不可遮挡」——
+                // 域名备案号（鄂ICP备2026060816号）与 APP 备案号
+                // （鄂ICP备2026060816号-1，APP 备案通过后启用）是两个号。
+                //
+                // 现状：域名已备案，但**App 里一个字都没公示** ——
+                // 而国产 ROM（MIUI/澎湃）的安装器会查 APP 备案，
+                // 查不到就提示「未查询到此应用的 ICP 备案信息」
+                // （内测用户反馈的正是这个）。公示虽然不是那一条的**根治办法**
+                // （根治是去工信部提交 APP 备案），但缺了它本身就违规。
+                //
+                // ⚠️ 号码要**逐字**照抄工信部查询页，缺「备」字/缺地域前缀/
+                // 缺「-1」后缀都算不合规。
+                SettingsRow(
+                    icon = Icons.Filled.Security,
+                    title = "备案信息",
+                    subtitle = "鄂ICP备2026060816号-1 · 听匣（个人开发者）",
+                    onClick = {
+                        // ⚠️ 用 2 参构造（不指定包名）：让系统自己挑浏览器，
+                        // 免得用户没装 Chrome 时直接崩。
+                        val intent = Intent(
+                            Intent.ACTION_VIEW,
+                            "https://beian.miit.gov.cn".toUri(),
+                        )
+                        runCatching { context.startActivity(intent) }
+                            .onFailure {
+                                Toast.makeText(context, "打开备案查询页失败", Toast.LENGTH_SHORT).show()
+                            }
+                    },
+                )
                 // 2026-10-21：这一行从"只显示版本号"变成"检查更新的入口"。
                 // 之前内测用户要拿新包只能自己去蒲公英重下 —— 现在点一下就知道
                 // 有没有新版本，有的话弹窗里直接下载安装。
