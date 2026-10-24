@@ -16,6 +16,14 @@ class NotificationRepository @Inject constructor(
     suspend fun markRead(id: Int): Boolean = api.markRead(id).ok
 
     /**
+     * 回报「已投递到设备」（本地通知已发出）。
+     *
+     * 只影响服务端的 `status`/`sent_at`，**不动 `read_at`** ——
+     * 投递 ≠ 用户看过，角标不该被清零。
+     */
+    suspend fun markDelivered(id: Int): Boolean = api.markDelivered(id).ok
+
+    /**
      * 未读总数（首页铃铛角标用）。
      *
      * ⚠️ 放在**单例仓库**里而不是某个 ViewModel 里：角标要出现在首页，

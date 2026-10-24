@@ -137,6 +137,49 @@ class PrefetchScheduler @Inject constructor(
         )
     }
 
+    /**
+     * 排「订阅更新」的轮询（周期 15 分钟 —— WorkManager 的最小周期）。
+     *
+     * 没有厂商推送通道时，**这就是「推送投递」的唯一通路**：
+     * App 拉通知中心 → 对没通知过的发本地系统通知 → 回报服务端。
+     * 详见 [SubscriptionNotifyWorker]。
+     */
+    fun scheduleSubscriptionNotify() {
+        val req = PeriodicWorkRequestBuilder<SubscriptionNotifyWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+            .addTag(SubscriptionNotifyWorker.NAME)
+            .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            SubscriptionNotifyWorker.NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            req,
+        )
+    }
+
+    /** 立刻跑一次订阅更新检查（App 冷启动时调，不等 15 分钟）。 */
+    fun notifySubscriptionsNow() {
+        val req = OneTimeWorkRequestBuilder<SubscriptionNotifyWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .addTag(SubscriptionNotifyWorker.NAME)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            "subscription-notify-now",
+            ExistingWorkPolicy.REPLACE,
+            req,
+        )
+    }
+
     fun scheduleProgressSync() {
         val req = PeriodicWorkRequestBuilder<ProgressSyncWorker>(1, TimeUnit.HOURS)
             .setConstraints(

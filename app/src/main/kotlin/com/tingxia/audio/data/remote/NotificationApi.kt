@@ -47,4 +47,16 @@ interface NotificationApi {
 
     @POST("api/v1/notifications/{notification_id}/mark-read")
     suspend fun markRead(@Path("notification_id") notificationId: Int): MarkReadResponse
+
+    /**
+     * 回报「这条通知已经到达设备」（2026-10-24）。
+     *
+     * 没有厂商推送通道时，App 自己拉通知中心 → 发**本地系统通知** →
+     * 通知真的出现在手机通知栏 → 回报本端点。
+     *
+     * 与 [markRead] 是**两件事**：投递 ≠ 用户看过。
+     * 合并的话角标会被提前清零 ⇒ 用户还没看到，「有更新」这件事又没人知道。
+     */
+    @POST("api/v1/notifications/{notification_id}/delivered")
+    suspend fun markDelivered(@Path("notification_id") notificationId: Int): MarkReadResponse
 }

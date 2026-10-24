@@ -127,6 +127,11 @@ class MainActivity : ComponentActivity() {
             playbackPreferenceInitializer.ensureLoaded()
             // 顺手补传断网期间攒下的播放进度 + 校准下载台账
             prefetchScheduler.syncNow()
+            // 2026-10-24：订阅更新的**本地通知**投递。
+            // 没有厂商推送通道时，这是「有更新」能到手机通知栏的唯一通路
+            // （周期 15 分钟 + 冷启动立刻跑一次）。
+            prefetchScheduler.scheduleSubscriptionNotify()
+            prefetchScheduler.notifySubscriptionsNow()
         }
 
         // 让 AudioPlayerService（MediaSessionService）常驻，系统方可接管锁屏 / 通知控制
