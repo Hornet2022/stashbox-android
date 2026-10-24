@@ -1155,9 +1155,12 @@ private fun ScriptPartsBody(
         )
     }
 
+    // ⚠️ 顺序 = 产品定义（核心要点 + 关联思考 + 延伸判断 + 拓展方向），
+    // 与稿子的朗读顺序（backend 的 `extra = related + insights + follow_ups`）一致 ——
+    // 看到的分区顺序必须等于听到的顺序。
     ScriptSection(title = "正文要点", items = parts.sections)
-    ScriptSection(title = "延伸判断", items = parts.insights)
     ScriptSection(title = "关联思考", items = parts.related)
+    ScriptSection(title = "延伸判断", items = parts.insights)
     ScriptSection(title = "拓展方向", items = parts.followUps)
 
     // 收束（outro）
