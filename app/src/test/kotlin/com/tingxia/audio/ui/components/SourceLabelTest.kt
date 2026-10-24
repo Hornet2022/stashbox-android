@@ -2,6 +2,8 @@ package com.tingxia.audio.ui.components
 
 import com.tingxia.audio.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -53,6 +55,37 @@ class SourceLabelTest {
         // 未来新增的码也不能直接把原文打到 UI 上
         assertEquals(R.string.source_generic, sourceLabelRes("some_future_source"))
         assertEquals(R.string.source_generic, sourceLabelRes(""))
+    }
+
+
+    @Test
+    fun `徽章的文案必须走唯一映射出口_不能自己再写一份`() {
+        // 2026-10-24 实测过的漂移：SourceBadge 里自己写了一份 when（只认
+        // wechat / douyin），于是同一篇文章**首页副标题**显示「GitHub」「文档」，
+        // 而**徽章**显示「通用」—— 同一个 App 里同一个东西的两种说法。
+        //
+        // 护栏：徽章的文案必须来自 sourceLabelRes（模块 docstring 写明它是
+        // 「唯一映射出口」）。这里断言它**没有**自己的文案映射。
+        // 单元测试的 CWD 不一定是模块根（可能是 android/ 或 android/app/），
+        // 所以从当前目录**逐级向上**找源文件。
+        val rel = "app/src/main/kotlin/com/tingxia/audio/ui/components/SourceBadge.kt"
+        var dir: java.io.File? = java.io.File(".").absoluteFile
+        var found: java.io.File? = null
+        while (dir != null && found == null) {
+            val f = java.io.File(dir, rel)
+            if (f.exists()) found = f
+            dir = dir.parentFile
+        }
+        val src = found?.readText(Charsets.UTF_8) ?: ""
+        val badgeBody = src.substringAfter("fun SourceBadge(")
+        assertTrue(
+            "SourceBadge 必须用 sourceLabelRes 取文案，不能自己再写一份映射",
+            badgeBody.contains("sourceLabelRes(source)"),
+        )
+        assertFalse(
+            "SourceBadge 里不许再出现文案映射（source_generic / source_wechat 等）",
+            badgeBody.contains("R.string.source_"),
+        )
     }
 
     @Test

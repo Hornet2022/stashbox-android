@@ -51,14 +51,27 @@ fun sourceLabelRes(source: String?): Int = when (source?.lowercase()) {
 }
 
 /**
- * 来源徽章：根据 source 标识展示「公众号 / 抖音 / 通用」。
+ * 来源徽章：根据 source 标识展示「公众号 / 抖音 / GitHub / 文档 / 通用」。
+ *
+ * ## ⚠️ 文案必须走 [sourceLabelRes]（2026-10-24 修）
+ *
+ * 原来这里**自己又写了一份 `when`**（只认 wechat / douyin），
+ * 而本文件的模块 docstring 明写 source → 文案是「**唯一**映射出口」。
+ * 两份判据必然漂移 —— 漂移的后果实测过：
+ * 同一篇 GitHub/文档文章，**首页副标题**（走 sourceLabelRes）显示
+ * 「GitHub」「文档」，而**徽章**（走本地那份 when）显示「通用」。
+ * 用户在同一个 App 里看到同一个东西的两种说法。
+ *
+ * ⇒ 现在文案统一走 [sourceLabelRes]；这里只保留**配色**的分支
+ * （微信绿 / 抖音红是平台识别色，其余走中性色）。
  */
 @Composable
 fun SourceBadge(source: String, modifier: Modifier = Modifier) {
-    val (label, color) = when (source.lowercase()) {
-        "wechat", "wechat_mp" -> stringResource(R.string.source_wechat) to SourceWechat
-        "douyin" -> stringResource(R.string.source_douyin) to SourceDouyin
-        else -> stringResource(R.string.source_generic) to MaterialTheme.colorScheme.outline
+    val label = stringResource(sourceLabelRes(source))
+    val color = when (source.lowercase()) {
+        "wechat", "wechat_mp" -> SourceWechat
+        "douyin" -> SourceDouyin
+        else -> MaterialTheme.colorScheme.outline
     }
     Box(
         modifier = modifier
