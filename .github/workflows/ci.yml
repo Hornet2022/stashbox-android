@@ -38,8 +38,35 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Unit Test (./gradlew :app:test)
-        run: ./gradlew :app:test
+      # 单测跑**两个变体**：debug + minifyDebug。
+      #
+      # ⚠️ 为什么不用 `./gradlew :app:test`（那会跑**所有**变体，含 release）：
+      #
+      # release 变体在 CI 里**没有合法配置** —— app/build.gradle.kts 的 release
+      # 前提守卫要求「显式后端地址 + 4 项签名配置」，缺任何一项都直接失败。
+      # 而 release 的 `BaseUrls.gatewayBaseUrl()` 里有一道**刻意**的检查：
+      #
+      #     check(!isReleaseBuild) { "release 构建没有配置后端地址…" }
+      #
+      # ⇒ release 变体的单测只要碰到网络层（Dagger 组装 NetworkModule 时
+      # 就会调它）就抛 IllegalStateError ⇒ 整批用例连环失败
+      # （实测 2026-10-25：AudioPlayerServiceTest / OfflineDownloadCacheKeyTest
+      #  等一批全挂在 `ExceptionInInitializerError at BaseUrls.kt:136`）。
+      #
+      # ⚠️ 这个洞能藏这么久，是因为**CI 之前从没跑到 test 这一步**：
+      # gradle.properties 里写死了本机 JDK 路径（/opt/homebrew/...），
+      # Linux runner 上配置期就挂 ⇒ 每次 14~19 秒就红 ⇒ 没人看日志。
+      # 也就是说 `:app:test` 这条命令**从来没有真正执行过**。
+      #
+      # 那 release 变体的单测覆盖怎么办 ⇒ **用 minifyDebug 变体代替**：
+      # 它是 `initWith(release)` 出来的（同 R8 规则、同资源裁剪、只是用 debug key
+      # 签名且加了 .minifydebug 后缀），**R8 后的行为与 release 一致**，
+      # 而 `isReleaseBuild` 为 false ⇒ 不会踩上面那道检查。
+      # ⇒ 覆盖面（普通 + R8 后）都保住了，且不削弱 release 的安全守卫。
+      #
+      # 判据：debug（普通）+ minifyDebug（R8 后）两个变体都必须跑。
+      - name: Unit Test (debug + minifyDebug)
+        run: ./gradlew :app:testDebugUnitTest :app:testMinifyDebugUnitTest
 
   build:
     runs-on: ubuntu-latest
