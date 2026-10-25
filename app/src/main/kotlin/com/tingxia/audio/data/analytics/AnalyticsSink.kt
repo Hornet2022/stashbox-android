@@ -47,6 +47,16 @@ object EventNames {
     /** 首屏加载耗时（`app_first_frame`）。属性：`duration_ms`。 */
     const val APP_FIRST_FRAME = "app_first_frame"
 
-    /** 音频启动耗时（`audio_play_start`）。属性：`duration_ms`、（可选）`article_id`。 */
-    const val AUDIO_PLAY_START = "audio_play_start"
+    /**
+     * 音频启动耗时（`audio_play_start_client`）。属性：`duration_ms`、（可选）`article_id`。
+     *
+     * ⚠️ **不能**用 `audio_play_start`：服务端已经在打那个名字了
+     * （用户点播放 → 前端来取音频直链），而且 A/B 报表直接拿它当**播放次数**
+     * 的分母 —— 客户端再用同名打一次，一次播放就变两条，
+     * 完听率掉一半、复听率把「播放 1 次」误判成「复听过」。
+     *
+     * 这条测的是**另一个事实**：播放器真的进入出声状态（isPlaying 由 false
+     * 变 true），也就是「声音出来前等了多久」。
+     */
+    const val AUDIO_PLAY_START_CLIENT = "audio_play_start_client"
 }

@@ -442,7 +442,7 @@ class PlayerController @Inject constructor(
         // article_id 放 properties 而不是顶层字段 —— 顶层那个是 int（后端 schema
         // 的历史遗留），而真实 article id 是 `art_xxx` 字符串，发顶层会被判 422。
         start.articleId?.let { properties["article_id"] = it }
-        analytics.report(EventNames.AUDIO_PLAY_START, properties)
+        analytics.report(EventNames.AUDIO_PLAY_START_CLIENT, properties)
     }
 
     /**

@@ -85,7 +85,7 @@ class PlayerControllerAudioStartTest {
 
         assertEquals("必须上报且只报一条", 1, sink.events.size)
         val (name, props) = sink.events[0]
-        assertEquals(EventNames.AUDIO_PLAY_START, name)
+        assertEquals(EventNames.AUDIO_PLAY_START_CLIENT, name)
         assertEquals("耗时必须是毫秒数", 320L, props["duration_ms"])
         assertEquals("art_1", props["article_id"])
     }
@@ -110,7 +110,7 @@ class PlayerControllerAudioStartTest {
         controller.playerListener.onIsPlayingChanged(true)
 
         assertEquals("监听器必须把启动埋点接上", 1, sink.events.size)
-        assertEquals(EventNames.AUDIO_PLAY_START, sink.events[0].first)
+        assertEquals(EventNames.AUDIO_PLAY_START_CLIENT, sink.events[0].first)
         assertEquals(400L, sink.events[0].second["duration_ms"])
     }
 
