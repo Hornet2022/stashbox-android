@@ -373,6 +373,25 @@ fun SettingsScreen(
                             Toast.makeText(context, "改 BuildConfig 重新编译生效", Toast.LENGTH_LONG).show()
                         },
                     )
+                    // 后端地址：2026-10-25 加。
+                    //
+                    // 为什么必须有这一行：跨端 E2E 之前**没法确认真机上的 App
+                    // 到底连着哪个后端** —— 设备上装的是 release 包（连生产
+                    // api.stashbox.cn）还是指向隔离栈的 debug 包，测试侧只能靠猜。
+                    // 猜错的后果是：跨端用例把「设备上读到的生产数据」和
+                    // 「隔离库里的数据」放在一起比，于是红得毫无道理
+                    // （实测报「App 未在超时内进入前台」，真实原因是包名不对）。
+                    //
+                    // 有了这一行，E2E 可以**读出真实地址**再做前置判断：
+                    // 连着隔离栈就真跑、连着生产就显式 skip 并说清原因。
+                    SettingsRow(
+                        icon = Icons.Filled.Science,
+                        title = "后端地址",
+                        subtitle = "当前：${BuildConfig.API_BASE_URL}",
+                        onClick = {
+                            Toast.makeText(context, "改 BuildConfig 重新编译生效", Toast.LENGTH_LONG).show()
+                        },
+                    )
                 }
             }
 

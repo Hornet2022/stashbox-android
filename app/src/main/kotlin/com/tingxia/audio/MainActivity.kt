@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 // 2026-10-21：`var privacyAgreed by remember { mutableStateOf(false) }` 要用 setValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -100,6 +101,10 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher
 
+    /** 埋点上报口（首屏加载耗时）。 */
+    @Inject
+    lateinit var analyticsSink: com.tingxia.audio.data.analytics.AnalyticsSink
+
 
     /**
      * 待跳转的路由（2026-10-23 新增）。
@@ -142,6 +147,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             TingxiaTheme {
+                // 首屏埋点：必须排在内容**之前**组合 —— 它要等第一帧画出来，
+                // 而第一帧里必须已经包含真正的内容（否则量的是「空屏」的耗时）。
+                FirstFrameReporter(analyticsSink)
                 AuthRoot()
             }
         }
@@ -196,6 +204,43 @@ class MainActivity : ComponentActivity() {
 
         /** 全屏播放器的路由名 —— 与下面 NavHost 里的 `composable("player")` 同一个。 */
         const val ROUTE_PLAYER = "player"
+    }
+}
+
+/**
+ * 首屏加载耗时埋点（2026-10-25）。
+ *
+ * ## 量的到底是什么
+ *
+ * **进程启动 → 第一帧真正画出来**。起点取进程启动而不是 `onCreate`，
+ * 因为冷启动时 Application / ContentProvider / Hilt 图构建都发生在 onCreate 之前，
+ * 那段也是用户等的时间（详见 [FirstFrameTracker] 的说明）。
+ *
+ * ## 为什么用 `withFrameNanos` 而不是 `onCreate` 里直接算
+ *
+ * `withFrameNanos` 挂起到**下一帧绘制完成**那一刻 —— 那才是「用户看到东西了」。
+ * 在 onCreate 里直接取时间只能量到「Activity 创建完了」，用户还在看黑屏/白屏。
+ *
+ * ## 为什么放在 AuthRoot **之前**组合
+ *
+ * 顺序决定了第一帧里有什么：先组合这个占位组件、再组合真正的内容，
+ * 第一帧就包含内容。顺序反了的话，量到的是「只有空组件的那一帧」。
+ *
+ * ## 为什么每个进程只报一次
+ *
+ * 冷启动一次 = 一条记录。重复上报会把 P95 拉成「同一台手机报了好几次」的假象。
+ */
+@Composable
+private fun FirstFrameReporter(sink: com.tingxia.audio.data.analytics.AnalyticsSink) {
+    val tracker = remember { com.tingxia.audio.data.analytics.FirstFrameTracker() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        tracker.consumeFirstFrame()?.let { durationMs ->
+            sink.report(
+                com.tingxia.audio.data.analytics.EventNames.APP_FIRST_FRAME,
+                mapOf("duration_ms" to durationMs),
+            )
+        }
     }
 }
 

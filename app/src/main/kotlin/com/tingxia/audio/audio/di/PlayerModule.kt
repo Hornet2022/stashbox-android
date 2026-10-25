@@ -13,6 +13,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.tingxia.audio.audio.AudioStartTimer
 import com.tingxia.audio.audio.OfflineDownloadManager
 import dagger.Module
 import dagger.Provides
@@ -113,4 +114,17 @@ object PlayerModule {
             .setSeekForwardIncrementMs(SEEK_FORWARD_MS)
             .build()
     }
+
+    /**
+     * 音频启动计时器（2026-10-25）。
+     *
+     * 之所以要 Hilt 提供而不是让 [PlayerController] 自己 new：
+     * 计时器是**有状态**的（记着「上一次点播放的时刻」），必须是**同一个实例**
+     * 被「点播放」与「开始出声」两处共用 —— 两处各 new 一个就永远配不上对。
+     *
+     * 单例：App 内只有一个共享 ExoPlayer（见上面），也就只有一条播放链路。
+     */
+    @Provides
+    @Singleton
+    fun provideAudioStartTimer(): AudioStartTimer = AudioStartTimer()
 }

@@ -5,6 +5,7 @@ import com.tingxia.audio.auth.AuthInterceptor
 import com.tingxia.audio.auth.TokenManager
 import com.tingxia.audio.data.remote.ArticleApi
 import com.tingxia.audio.data.remote.DistillationApi
+import com.tingxia.audio.data.remote.EventApi
 import com.tingxia.audio.data.remote.FavoritesApi
 import com.tingxia.audio.data.remote.FeedbackApi
 import com.tingxia.audio.data.remote.MetricsInterceptor
@@ -148,4 +149,10 @@ object NetworkModule {
     @Singleton
     fun provideTtsApi(retrofit: Retrofit): TtsApi =
         retrofit.create(TtsApi::class.java)
+
+    // 客户端埋点上报（首屏耗时 / 音频启动耗时）
+    @Provides
+    @Singleton
+    fun provideEventApi(retrofit: Retrofit): EventApi =
+        retrofit.create(EventApi::class.java)
 }

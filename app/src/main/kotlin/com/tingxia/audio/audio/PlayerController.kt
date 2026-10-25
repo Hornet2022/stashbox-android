@@ -12,6 +12,9 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.tingxia.audio.audio.di.PlayerModule
+import com.tingxia.audio.data.analytics.AnalyticsSink
+import com.tingxia.audio.data.analytics.EventNames
+import com.tingxia.audio.data.analytics.NoOpAnalyticsSink
 import com.tingxia.audio.data.local.PlaylistItemEntity
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
@@ -69,6 +72,15 @@ class PlayerController @Inject constructor(
     // 「继续播放」的状态要落盘（SharedPreferences），而 SharedPreferences 需要 Context。
     // 注入 ApplicationContext 而不是从 player 里刨 —— ExoPlayer 不对外暴露它。
     @ApplicationContext private val appContext: Context,
+    /**
+     * 埋点上报口（2026-10-25）。
+     *
+     * 默认值是「什么都不做」—— 14 个直接 new 出本类的单测不该被迫连 Retrofit 一起造，
+     * 而真实 App 里由 Hilt 注入真正的 [com.tingxia.audio.data.analytics.EventReporter]。
+     */
+    private val analytics: AnalyticsSink = NoOpAnalyticsSink,
+    /** 音频启动计时器（点播放 → 出声）。默认自己造一个，测试可注入假时钟。 */
+    private val audioStartTimer: AudioStartTimer = AudioStartTimer(),
 ) {
 
     private val _state = MutableStateFlow(PlaybackState.IDLE)
@@ -220,10 +232,18 @@ class PlayerController @Inject constructor(
      *
      * 这里只处理**状态与错误**，不碰进度（进度仍由轮询泵负责，
      * 理由见 [positionHandler] 的说明）。
+     *
+     * ⚠️ `internal` 而不是 `private`：单测要能直接触发 `onIsPlayingChanged(true)`
+     * 来验证「监听器 → 音频启动埋点」这条接线没断 ——
+     * 真机上让 ExoPlayer 真的加载出声音才能走完这条路径，
+     * 那是「跑一次真机才知道对不对」型验证。
      */
-    private val playerListener = object : Player.Listener {
+    internal val playerListener = object : Player.Listener {
 
         override fun onPlayerError(error: PlaybackException) {
+            // 这次启动永远不会「出声」了 → 作废待上报的启动耗时，
+            // 否则下次随便一次 resume 就会报出一个横跨几分钟的假启动耗时。
+            audioStartTimer.onPlaybackError()
             // PlaybackException 只是个壳，真正的原因在 cause 里（通常是 IOException）。
             notifyPlaybackError(error.cause ?: error)
         }
@@ -246,6 +266,8 @@ class PlayerController @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
+                // 音频真的出声了 → 上报「音频启动耗时」（见 [handlePlayingStarted]）。
+                handlePlayingStarted()
                 if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.PLAYING
                 // 恢复播放时确保位置泵是开着的。
                 //
@@ -396,6 +418,31 @@ class PlayerController @Inject constructor(
         // 队列边界（有没有上一首/下一首）跟着换曲变 ——
         // 界面据此把到头/到尾的那颗按钮灰掉（见 hasNextItem 的说明）。
         refreshQueueBounds()
+    }
+
+    /**
+     * 「播放器开始出声了」的处理：上报音频启动耗时（2026-10-25）。
+     *
+     * ## 为什么抽成方法（而不是只写在监听器里）
+     *
+     * 跟 [handleMediaItemTransition] 同一个理由：**要能被单测直接触发**。
+     * 真机上让 ExoPlayer 真的加载出声音才能走完这条路径，
+     * 那是「跑一次真机才知道对不对」型验证 —— 本项目吃过太多这种亏。
+     * 抽出来之后，单测能直接断言「上报了 audio_play_start 且带上了 duration_ms」。
+     *
+     * ## 为什么只在「有点播放」之后才报
+     *
+     * 队列自动续播 / 耳机「下一首」也会让 isPlaying 变 true，但那不是「启动」——
+     * 用户没有等音频（声音本来就在）。混进去会让启动耗时指标失真。
+     * 所以只有 [play] 记过起点的那一次才会被上报（由 [AudioStartTimer] 把关）。
+     */
+    internal fun handlePlayingStarted() {
+        val start = audioStartTimer.consumeOnPlaying() ?: return
+        val properties = mutableMapOf<String, Any?>("duration_ms" to start.durationMs)
+        // article_id 放 properties 而不是顶层字段 —— 顶层那个是 int（后端 schema
+        // 的历史遗留），而真实 article id 是 `art_xxx` 字符串，发顶层会被判 422。
+        start.articleId?.let { properties["article_id"] = it }
+        analytics.report(EventNames.AUDIO_PLAY_START, properties)
     }
 
     /**
@@ -761,6 +808,11 @@ class PlayerController @Inject constructor(
          */
         resumePositionMs: Long = 0L,
     ) {
+        // 音频启动计时的起点（2026-10-25）：从这里到「真的出声」就是启动耗时。
+        //
+        // 必须放在**最前面**：ExoPlayer 的回调是在同一个线程上同步派发的，
+        // 起点晚于任何一次状态变化都会把时长算短。
+        audioStartTimer.onPlayRequested(articleId)
         if (articleId != null) {
             _currentArticleId.value = articleId
         }
@@ -1206,6 +1258,9 @@ class PlayerController @Inject constructor(
     }
 
     fun pause() {
+        // 这次「启动」作废：用户还没听到声音就按了暂停，
+        // 之后按播放是**恢复**不是**启动**，不该算进启动耗时。
+        audioStartTimer.onPausedOrStopped()
         _state.value = PlaybackState.PAUSED
         player.pause()
         // 位置也记一份：恢复时要从这儿接着听。
@@ -1217,6 +1272,7 @@ class PlayerController @Inject constructor(
     }
 
     fun stop() {
+        audioStartTimer.onPausedOrStopped()
         _state.value = PlaybackState.STOPPED
         player.stop()
         stopPolling()
