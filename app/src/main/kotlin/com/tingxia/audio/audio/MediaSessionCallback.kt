@@ -1,3 +1,20 @@
+// Media3 的 `MediaSession.Callback.onPlaybackResumption` 及其返回类型
+// `MediaSession.MediaItemsWithStartPosition` 都标着 `@UnstableApi`。
+//
+// ⚠️ 用的是 **androidx.annotation.OptIn** 而不是 kotlin.OptIn（2026-10-25 修 lint）：
+// Media3 用的是 **androidx.annotation.experimental** 那套 opt-in 机制，
+// Kotlin 编译器那套（`-opt-in=` 编译参数 / kotlin.OptIn）它**不认**。
+// 项目里的既有用法见 DownloadButton.kt / AudioPlayerEntryPoint.kt / PlayerModule.kt。
+//
+// 为什么之前没报：app/build.gradle.kts 里的
+//     freeCompilerArgs += "-opt-in=androidx.media3.common.util.UnstableApi"
+// 只让**编译器**放行；lint 走的是 androidx 的另一套检查 ⇒ 编译过、lint 报
+// UnsafeOptInUsageError（`lintDebug` 5 个 error 里的 4 个）。
+//
+// ⚠️ file 级注解必须在 `package` **之前**（Kotlin 语法要求），
+// 放在 package 之后会直接编译失败。
+@file:androidx.annotation.OptIn(markerClass = [androidx.media3.common.util.UnstableApi::class])
+
 package com.tingxia.audio.audio
 
 import android.annotation.SuppressLint

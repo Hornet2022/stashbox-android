@@ -89,7 +89,18 @@ object PlayerModule {
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.CONTENT_TYPE_SPEECH)
+                    // ⚠️ 用 `AUDIO_CONTENT_TYPE_*` 这一族，不是 `CONTENT_TYPE_*`（2026-10-25 修 lint）。
+                    //
+                    // media3 的 `AudioAttributes.Builder.setContentType()` 的参数注解指向
+                    // platform 的 `android.media.AudioAttributes` 常量族 ⇒ 传 `C.CONTENT_TYPE_SPEECH`
+                    // 会被 lint 判成 WrongConstant（`lintDebug` 5 个 error 里的第 1 个）。
+                    //
+                    // 两族的**运行时值完全相同**（javap 实测 media3 1.4.1）：
+                    //     AUDIO_CONTENT_TYPE_SPEECH = 1  ==  CONTENT_TYPE_SPEECH = 1
+                    //     AUDIO_CONTENT_TYPE_MUSIC  = 2  ==  CONTENT_TYPE_MUSIC  = 2
+                    // ⇒ 这是**常量来源**不对，不是行为错误（已发布的 0.4.1 行为不受影响）。
+                    // 换成 lint 期望的那一族，值不变，错误消失。
+                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                     .build(),
                 /* handleAudioFocus = */ true,
             )
