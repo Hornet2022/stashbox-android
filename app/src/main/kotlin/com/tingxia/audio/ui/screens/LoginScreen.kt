@@ -1,7 +1,6 @@
 package com.tingxia.audio.ui.screens
 
 import android.content.Context
-import android.provider.Settings
 import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,7 +30,8 @@ import com.tingxia.audio.BuildConfig
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.imePadding
-import java.security.MessageDigest
+import com.tingxia.audio.util.DEVICE_ID_SUFFIX_LENGTH
+import com.tingxia.audio.util.androidIdSuffix
 import java.util.UUID
 
 /**
@@ -205,6 +205,13 @@ fun LoginScreen(
  * 现生成的 code 每次冷启动都变 → 同一个测试员在地铁里退出重进 App 就变成
  * 另一个账号，之前下的音频、记的进度全对不上。所以 code 必须落盘。
  *
+ * ## 设备指纹住在哪
+ *
+ * `androidIdSuffix()` / `KNOWN_BAD_ANDROID_ID` 现在住在
+ * `com.tingxia.audio.util.DeviceId` —— 埋点要用同一份设备指纹
+ * （两处各写一份的话，改了一处忘了另一处 ⇒ dev code 与埋点 device_id
+ * 对不上，后台按设备聚合时两边对不上号）。
+ *
  * ## 为什么是 SharedPreferences 而不是 DataStore
  *
  * 只需要一个字符串，而且要在**组合期同步**拿到（输入框的默认值），
@@ -271,51 +278,19 @@ internal class SharedPreferencesDevLoginCodeStore(context: Context) : DevLoginCo
     }
 }
 
-/** dev code 前缀：一眼看出是占位串，不是真 OAuth code。 */
+/**
+ * dev code 前缀：一眼看出是占位串，不是真 OAuth code。 */
 internal const val DEV_LOGIN_CODE_PREFIX = "dev_wechat_"
 
-/** code 后缀长度（十六进制字符）。 */
-internal const val DEV_LOGIN_CODE_RANDOM_LENGTH = 12
-
 /**
- * ANDROID_ID 的**已知坏值**：部分定制 ROM 对所有设备返回同一个常量
- * （值就是这段字符串的十六进制形态的定长串）。
+ * code 后缀长度（十六进制字符）。
  *
- * 拿到它就等于"没拿到设备标识" —— 这时必须退回随机，
- * 否则**所有这类设备会共用同一个账号**（数据串台 + 配额共享，
- * 就是 2026-10-21 那个 bug 的翻版）。
+ * 直接引用设备指纹后缀的长度常量 —— 因为 dev code 的后缀长度**必须与来源无关**：
+ * 用设备指纹时是 12 位，退回随机兜底时也得是 12 位。
+ * 否则同一个账号可能先后出现两种长度的 code，看起来像「换设备了」。
  */
-internal const val KNOWN_BAD_ANDROID_ID = "9774d56d682e549c"
+internal const val DEV_LOGIN_CODE_RANDOM_LENGTH = DEVICE_ID_SUFFIX_LENGTH
 
 /** 默认随机源：UUID 去掉分隔符取前 N 位。 */
 internal fun newDevLoginCodeSuffix(): String =
     UUID.randomUUID().toString().replace("-", "").take(DEV_LOGIN_CODE_RANDOM_LENGTH)
-
-/**
- * 设备指纹后缀：`ANDROID_ID` 的 SHA-256 前 12 位。
- *
- * ## 为什么是 ANDROID_ID
- * Android 8+ 的 `Settings.Secure.ANDROID_ID` 是**按 App 签名 + 按用户**隔离的：
- * 同一台设备、同一个签名、同一个手机用户，**卸载重装 / 清数据都不变**。
- * → 同一台手机始终是同一个 uid → 后台用户列表不会因为「重装一次」而膨胀。
- *
- * ## 为什么哈希而不是直接用
- * ANDROID_ID 是**设备标识**（属于个人信息）。内测期也不该把它明文上送自己的
- * 服务端 —— 哈希后不可逆，12 位十六进制对内测规模足够区分。
- *
- * ## 为什么不用 SharedPreferences 里的 UUID
- * 那东西**卸载就没了**（D9Receiver 的 device_id 就是它）→ 重装一次照样换号。
- *
- * @return null 表示取不到可靠设备指纹（调用方应退回随机）。
- */
-internal fun androidIdSuffix(context: Context): String? {
-    val id = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-    if (id.isNullOrBlank() || id == KNOWN_BAD_ANDROID_ID) return null
-    return sha256Hex(id).take(DEV_LOGIN_CODE_RANDOM_LENGTH)
-}
-
-/** SHA-256 的小写十六进制。不引新依赖：MessageDigest 是 JDK 自带的。 */
-private fun sha256Hex(input: String): String {
-    val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
-    return digest.joinToString("") { "%02x".format(it) }
-}

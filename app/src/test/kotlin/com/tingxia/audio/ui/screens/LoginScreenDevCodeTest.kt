@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import com.tingxia.audio.BuildConfig
+import com.tingxia.audio.util.KNOWN_BAD_ANDROID_ID
+import com.tingxia.audio.util.androidIdSuffix
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
