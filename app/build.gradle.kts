@@ -139,9 +139,17 @@ android {
         // 0.3.1：后端切到 https://api.stashbox.cn/（域名），
         // 并加**运行期 IP 兜底**（主地址在连接层失败时自动切 IP 入口）。
         // 换 base URL 必须升 versionCode —— 否则已装的测试者装不上这一版。
+        // 0.4.2：加两个客户端性能指标（2026-10-25）
+        // · 首屏加载 app_first_frame（进程启动 → 第一帧画出来）
+        // · 音频启动 audio_play_start.duration_ms（点播放 → 真的出声）
+        // 之前这两个指标**没有任何数据来源** —— 客户端没埋，后台看板就没有这两个数。
+        // ⚠️ 升 versionCode 是硬要求：Android 只允许 versionCode 更大的包覆盖安装，
+        // 停在 14 的话内测用户装不上这一版。
+        // 签名保持不变（同一个 keystore，证书 SHA-256 db744b9a…9c7a，已与线上 0.4.1 核对）
+        // ⇒ 覆盖安装不丢本地库 / 登录态 / 下载进度。
         // 0.4.1：设置页补 ICP 备案公示（法规要求，也是安装提示的配套）
-        versionCode = 14
-        versionName = "0.4.1"
+        versionCode = 15
+        versionName = "0.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
