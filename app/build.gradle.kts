@@ -194,8 +194,13 @@ android {
         //   与标签选择器。共享标签与 LLM 分类并存（不覆盖）。
         // ⚠️ 升 versionCode 是硬要求：0.4.5(18) 已上线 ⇒ 停在 18 的话，
         //   已装 0.4.5 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
-        versionCode = 19
-        versionName = "0.4.6"
+        // 0.4.7(20)：修复「已听完的文章在列表/详情页消失」——把 listened 当作
+        //   has-audio 处理，让听过的文章保持播放器与 UI；订阅页显示标签的订阅
+        //   可得计数（读服务端 list_tags 的 subscribable_count）。
+        // ⚠️ 升 versionCode 是硬要求：0.4.6(19) 已上线 ⇒ 停在 19 的话，
+        //   已装 0.4.6 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
+        versionCode = 20
+        versionName = "0.4.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
