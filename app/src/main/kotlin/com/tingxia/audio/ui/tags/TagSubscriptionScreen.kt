@@ -328,6 +328,18 @@ private fun TagItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 2026-10-26：把「订阅可得」单独拎出来，与「自己蒸馏」并排显示。
+                // 两个数字口径不同（后端 list_tags 已拆开）：
+                //  · 你已蒸馏 N 篇 —— 自己蒸馏过的（不看就绪，running 也算）；
+                //  · 订阅可得 M 篇 —— 订阅这个标签后能看到的**已就绪**文章数
+                //    （全站 da.tags ∪ shared_tags 命中，与订阅 feed 的 total 一致）。
+                // 这样用户一眼能分清「我产出了多少」和「订阅能带来多少」。
+                // 订阅可得为 0 时也显示，避免用户误以为「订阅了也是空的」。
+                Text(
+                    text = "订阅可得 ${tag.subscribable_count} 篇",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             // 订阅动作：带文字、带状态色的 Chip，替代原来的无名 Switch。
             FilterChip(

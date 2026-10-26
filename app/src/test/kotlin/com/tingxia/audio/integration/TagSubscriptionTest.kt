@@ -74,6 +74,23 @@ class TagSubscriptionTest {
     }
 
     @Test
+    fun listTags_parsesArticleAndSubscribableCounts() = testScope.runTest {
+        // 2026-10-26：后端 list_tags 拆成两个口径 —— article_count（自己蒸馏）
+        // 与 subscribable_count（订阅可得，全站已就绪）。客户端要能正确解析这两个字段。
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"tags":[{"id":"tech","name":"科技","category":"system","article_count":3,"subscribable_count":12}]}""")
+        )
+        val api = makeApi()
+        val response = api.listTags()
+        assertEquals(1, response.tags.size)
+        assertEquals(3, response.tags[0].article_count)
+        assertEquals(12, response.tags[0].subscribable_count)
+    }
+
+    @Test
     fun subscribeTag_returnsOkTrue() = testScope.runTest {
         server.enqueue(
             MockResponse()

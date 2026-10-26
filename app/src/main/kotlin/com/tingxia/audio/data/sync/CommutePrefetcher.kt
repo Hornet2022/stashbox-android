@@ -14,7 +14,7 @@ import com.tingxia.audio.audio.OfflineDownloadManager
 import com.tingxia.audio.audio.VariantSelectionUseCase
 import com.tingxia.audio.data.local.DownloadedAudioDao
 import com.tingxia.audio.data.model.Article
-import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.hasAudio
 import com.tingxia.audio.data.repository.VariantRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -165,7 +165,7 @@ open class CommutePrefetcher @Inject constructor(
             val existing = offlineDownloadManager.reconcileWithCache().toSet()
 
             val candidates = articles
-                .filter { it.status == DistillStatus.READY && !it.audioUrl.isNullOrBlank() }
+                .filter { it.status.hasAudio && !it.audioUrl.isNullOrBlank() }
                 // 正在播的那篇不预加载（它正在下）
                 .filterNot { existing.contains(it.id) }
 

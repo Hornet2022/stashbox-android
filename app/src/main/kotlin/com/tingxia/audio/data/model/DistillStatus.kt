@@ -26,6 +26,17 @@ enum class DistillStatus {
 }
 
 /**
+ * 该状态是否已有可播放音频。
+ *
+ * READY 与 LISTENED 都代表蒸馏产出已就绪：LISTENED 只是「用户已听完」的附加标记，
+ * 音频文件仍存在、仍可重播（详情页重新打开会再次自动播放）。所有「有音频才有意义」的
+ * UI 闸门（播放条、下载、评分等）都必须用这个判断，而不是 `== READY` ——
+ * 否则已听过的文章会「音频在播却没有播放条 / 下载按钮」（回归：ArticleDetailScreen 底部条）。
+ */
+val DistillStatus.hasAudio: Boolean
+    get() = this == DistillStatus.READY || this == DistillStatus.LISTENED
+
+/**
  * CP-TTS-VOICE: `POST /api/v1/distill/start` 的请求体。
  *
  * 只传 `article_id` 就够 —— `url` / `title` 后端一律取库里的值。

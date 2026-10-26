@@ -27,6 +27,10 @@ data class Tag(
     // CP-TAG-FILTER：该 user 在此标签下已蒸馏的文章数（用于订阅页跳文章流用）。
     // 默认 0 兼容旧服务端（无此字段）。
     val article_count: Int = 0,
+    // 2026-10-26：订阅这个标签后能看到多少篇 —— 全站 da.tags ∪ shared_tags 命中、
+    // 且已就绪（有音频、未删除）的文章数。与订阅 feed 的 total 语义一致。
+    // 默认 0 兼容旧服务端（无此字段）。
+    val subscribable_count: Int = 0,
     // CP-TAG-CATEGORY：服务端 list_tags 返回的可读分组名（单源定义在后端）。
     // 默认 null 兼容旧服务端（无此字段）→ UI 用 KNOWN_TAG_CATEGORIES 兜底。
     val category_label: String? = null,

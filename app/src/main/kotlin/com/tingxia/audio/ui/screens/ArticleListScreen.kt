@@ -38,7 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.hasAudio
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -107,7 +107,7 @@ fun ArticleListScreen(
     // 队列现在由**播放列表**驱动 —— 用户显式攒的一串（见 PlaylistRepository），
     // 看得见、管得了、退出重进还在。
     LaunchedEffect(articles, commutePrefetcher) {
-        val ready = articles.filter { it.status == DistillStatus.READY && !it.audioUrl.isNullOrBlank() }
+        val ready = articles.filter { it.status.hasAudio && !it.audioUrl.isNullOrBlank() }
         if (commutePrefetcher != null && ready.isNotEmpty()) {
             commutePrefetcher.maybePrefetch(articles, learnedWindows = null)
         }

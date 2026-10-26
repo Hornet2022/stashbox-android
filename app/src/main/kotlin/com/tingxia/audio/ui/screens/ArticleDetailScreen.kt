@@ -75,6 +75,7 @@ import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.hasAudio
 import com.tingxia.audio.data.model.ContentParts
 import com.tingxia.audio.data.model.TtsVoiceBrief
 import com.tingxia.audio.data.model.resolveScriptView
@@ -487,14 +488,14 @@ fun ArticleDetailScreen(
                                     onClick = { showOverflow = false; showLaterListenSheet = true },
                                 )
                             }
-                            if (uiState.status == DistillStatus.READY && uiState.audioUrl != null && taskId != null) {
+                            if (uiState.status.hasAudio && uiState.audioUrl != null && taskId != null) {
                                 DropdownMenuItem(
                                     text = { Text(if (myRating?.isRated == true) "修改评分" else "评分") },
                                     leadingIcon = { Icon(Icons.Filled.Star, contentDescription = null) },
                                     onClick = { showOverflow = false; showManualRatingDialog = true },
                                 )
                             }
-                            if (uiState.status == DistillStatus.READY && taskId != null) {
+                            if (uiState.status.hasAudio && taskId != null) {
                                 DropdownMenuItem(
                                     text = { Text("音质") },
                                     leadingIcon = { Icon(Icons.Filled.Speed, contentDescription = null) },
@@ -545,7 +546,7 @@ fun ArticleDetailScreen(
                             // 「重新生成」重跑的是这一篇，设置页给不出 article_id。
                             // 自测时发现这个入口原先只在设置页可达（且参数没传），
                             // 导致整条回溯重跑链路在 App 里是死的。
-                            if (uiState.status == DistillStatus.READY) {
+                            if (uiState.status.hasAudio) {
                                 DropdownMenuItem(
                                     text = { Text("换音色并重新生成") },
                                     leadingIcon = { Icon(Icons.Filled.RecordVoiceOver, contentDescription = null) },
@@ -566,7 +567,7 @@ fun ArticleDetailScreen(
                         }
                     }
                     // 离线下载：点一下真下载，已下载时点一下删除（2026-10-02 从装饰品改成可用）
-                    if (uiState.status == DistillStatus.READY && uiState.audioUrl != null) {
+                    if (uiState.status.hasAudio && uiState.audioUrl != null) {
                         DownloadButton(
                             articleId = articleId,
                             audioUrl = uiState.audioUrl,
@@ -588,7 +589,9 @@ fun ArticleDetailScreen(
             )
         },
         bottomBar = {
-            if (uiState.status == DistillStatus.READY && article != null) {
+            // 有音频（READY 或 LISTENED）才显示播放条。LISTENED 是「已听完」标记，
+            // 音频仍在、详情页重开会自动播放，没有播放条＝已听过的文章音频在播却无控件（回归）。
+            if (uiState.status.hasAudio && article != null) {
                 AudioPlayerBar(
                     title = article.title ?: "",
                     audioUrl = uiState.audioUrl,
@@ -660,7 +663,7 @@ fun ArticleDetailScreen(
                         }
 
                         // CP3.7.0: 蒸馏质量分 + 标签（§1.3 新字段，详情页头部加一行摘要）
-                        if (uiState.status == DistillStatus.READY) {
+                        if (uiState.status.hasAudio) {
                             QualityTagsRow(
                                 tags = uiState.tagsIfReady,
                                 qualityScore = uiState.qualityScoreIfReady,
@@ -677,7 +680,7 @@ fun ArticleDetailScreen(
                             )
                         }
                         val distilledRel = formatRelativeTime(safeArticle.distilledAt)
-                        if (distilledRel.isNotBlank() && uiState.status == DistillStatus.READY) {
+                        if (distilledRel.isNotBlank() && uiState.status.hasAudio) {
                             Text(
                                 text = "蒸馏完成于 $distilledRel",
                                 style = MaterialTheme.typography.bodySmall,
