@@ -182,8 +182,13 @@ android {
         //   0.4.3(16) 已在 2026-10-26 上线 ⇒ 停在 16 的话，
         //   已装 0.4.3 的内测用户**收不到更新提示**（App 认为已是最新）。
         //   签名保持不变 ⇒ 覆盖安装不丢本地库 / 登录态 / 下载进度。
-        versionCode = 17
-        versionName = "0.4.4"
+        // 0.4.5(18)：订阅页标签分组标题本地化 —— 读服务端 list_tags 的
+        //   category_label（可读中文分组名），旧服务端没有该字段时用
+        //   KNOWN_TAG_CATEGORIES 兜底，最后回退到原文。
+        // ⚠️ 升 versionCode 是硬要求：0.4.4(17) 已上线 ⇒ 停在 17 的话，
+        //   已装 0.4.4 的内测用户收不到更新提示。
+        versionCode = 18
+        versionName = "0.4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
