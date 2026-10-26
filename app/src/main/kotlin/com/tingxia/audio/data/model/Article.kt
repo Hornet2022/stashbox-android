@@ -79,6 +79,19 @@ data class Article(
  * · [followUps] 拓展方向 —— 「接下来该盯住什么」
  *
  * 四个列表都可能为空（模型判断不成立时就不写），不是「必须有内容」。
+ *
+ * ## CP-TITLE-ANNOUNCE（2026-10-26）：hook / outro / intro
+ *
+ * 服务端给音频开头加了一句**标题播报**（"本期分享的标题是：…"），
+ * 而播报句为了跟音频对齐**也进了 `script_text`** ——
+ * 于是「script_text 第一段 = 开场钩子」这个旧约定**不再成立**。
+ *
+ * 所以服务端把三样东西**明确**交出来，客户端不必去猜：
+ * · [hook]  真正的开场钩子（详情页放大作导语的就是它）
+ * · [outro] 收束段
+ * · [intro] 标题播报句（是口播，不是正文 —— 不作为正文展示）
+ *
+ * ⚠️ 老数据没有这三个字段（null）⇒ 客户端必须回退到「首段/末段」的旧取法。
  */
 @Serializable
 data class ContentParts(
@@ -86,8 +99,70 @@ data class ContentParts(
     @SerialName("insights") val insights: List<String> = emptyList(),
     @SerialName("related") val related: List<String> = emptyList(),
     @SerialName("follow_ups") val followUps: List<String> = emptyList(),
+    @SerialName("hook") val hook: String? = null,
+    @SerialName("outro") val outro: String? = null,
+    @SerialName("intro") val intro: String? = null,
 ) {
     /** 有没有任何分区内容（老数据 / 降级稿 → false）。 */
     val isEmpty: Boolean
         get() = sections.isEmpty() && insights.isEmpty() && related.isEmpty() && followUps.isEmpty()
+}
+
+/**
+ * 稿子的**展示视图**（CP-TITLE-ANNOUNCE，2026-10-26）。
+ *
+ * 为什么要单独抽一个纯函数：详情页那套「哪段是导语 / 哪段是正文 / 播报句要不要
+ * 摘掉」的判断一旦写在 Composable 里，就**没法用单测钉住** ——
+ * 而它恰恰是最容易悄悄错的一处（服务端加字段、客户端改展示顺序，
+ * 两边一错位，导语就变成了「本期分享的标题是：…」，而 App 不报任何错）。
+ *
+ * @param hook           导语（放大显示的那段）
+ * @param outro          收束段
+ * @param bodyParagraphs 正文段落（**不含**播报句）
+ * @param hasParts       走分区渲染还是平铺渲染
+ */
+data class ScriptView(
+    val hook: String?,
+    val outro: String?,
+    val bodyParagraphs: List<String>,
+    val hasParts: Boolean,
+)
+
+/**
+ * 把 `script_text` + `content_parts` 解析成展示视图。
+ *
+ * ## 规则（与服务端一一对应）
+ *
+ * 1. **播报句不当正文**：服务端给音频开头加了一句标题播报
+ *    （"本期分享的标题是：…"），它为了跟音频对齐也进了 script_text ——
+ *    但它是**口播**，不是内容，详情页不该把它当正文/导语显示。
+ *    服务端用 `content_parts.intro` 明确指出它是谁 ⇒ 客户端按它摘，不靠猜。
+ * 2. **导语用服务端给的 hook**：`content_parts.hook` 才是真正的开场钩子。
+ *    没有（老数据）才回退「正文第一段」。
+ * 3. **平铺 vs 分区**：`hasParts` 只看四个分区列表有没有内容 ——
+ *    分区渲染只画「四类 + hook + outro」，若分区列表全空却走分区渲染，
+ *    中间的正文段落会整段消失。
+ */
+fun resolveScriptView(scriptText: String?, contentParts: ContentParts?): ScriptView? {
+    if (scriptText.isNullOrBlank()) return null
+    val paragraphs = scriptText.trim()
+        .split(Regex("\\n{2,}"))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    if (paragraphs.isEmpty()) return null
+
+    val intro = contentParts?.intro?.takeIf { it.isNotBlank() }
+    val body = if (intro != null) paragraphs.filter { it != intro } else paragraphs
+    if (body.isEmpty()) return null
+
+    val hook = contentParts?.hook?.takeIf { it.isNotBlank() } ?: body.firstOrNull()
+    val outro = contentParts?.outro?.takeIf { it.isNotBlank() }
+        ?: body.lastOrNull().takeIf { body.size > 1 }
+
+    return ScriptView(
+        hook = hook,
+        outro = outro,
+        bodyParagraphs = body,
+        hasParts = contentParts != null && !contentParts.isEmpty,
+    )
 }

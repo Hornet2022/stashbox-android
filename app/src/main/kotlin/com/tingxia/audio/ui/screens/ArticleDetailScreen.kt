@@ -76,6 +76,7 @@ import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.ContentParts
 import com.tingxia.audio.data.model.TtsVoiceBrief
+import com.tingxia.audio.data.model.resolveScriptView
 import com.tingxia.audio.data.remote.FolderCount
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
@@ -1050,13 +1051,15 @@ private fun DistilledScriptCard(
     modifier: Modifier = Modifier,
 ) {
     if (scriptText.isNullOrBlank()) return
-    val paragraphs = remember(scriptText) {
-        scriptText.trim().split(Regex("\\n{2,}")).map { it.trim() }.filter { it.isNotEmpty() }
-    }
-    if (paragraphs.isEmpty()) return
 
-    // 有分区且分区里有内容 → 走分区渲染；否则平铺。
-    val hasParts = contentParts != null && !contentParts.isEmpty
+    // CP-TITLE-ANNOUNCE（2026-10-26）：判定逻辑抽在 `resolveScriptView`（纯函数，
+    // 有单测钉住）—— 导语是谁、播报句摘不摘、平铺还是分区，都不在 Composable 里猜。
+    val view = remember(scriptText, contentParts) { resolveScriptView(scriptText, contentParts) }
+        ?: return
+    val bodyParagraphs = view.bodyParagraphs
+    val hook = view.hook
+    val outro = view.outro
+    val hasParts = view.hasParts
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -1089,13 +1092,11 @@ private fun DistilledScriptCard(
             if (hasParts) {
                 ScriptPartsBody(
                     parts = contentParts!!,
-                    // hook / outro 仍从 scriptText 的首末段取 ——
-                    // 它们不在 content_parts 里（分区只管中间四类）。
-                    hook = paragraphs.firstOrNull(),
-                    outro = paragraphs.lastOrNull().takeIf { paragraphs.size > 1 },
+                    hook = hook,
+                    outro = outro,
                 )
             } else {
-                paragraphs.forEachIndexed { index, para ->
+                bodyParagraphs.forEachIndexed { index, para ->
                     if (index == 0) {
                         // 导语：开场钩子，稍大、稍强调
                         Text(
