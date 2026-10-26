@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.tingxia.audio.data.model.KNOWN_TAG_CATEGORIES
 import com.tingxia.audio.data.model.Tag
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -152,9 +153,14 @@ private fun LazyListScope.tagItems(
     groupedTags.forEach { entry ->
         val category = entry.key
         val categoryTags = entry.value
+        // CP-TAG-CATEGORY：优先用服务端吐的可读分组名 category_label，
+        // 旧服务端没有该字段时用 KNOWN_TAG_CATEGORIES 兜底，最后才回退到原文。
+        val headerText = categoryTags.firstOrNull()?.category_label
+            ?: KNOWN_TAG_CATEGORIES[category]
+            ?: category
         item(key = "header_$category") {
             Text(
-                text = category,
+                text = headerText,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
             )
