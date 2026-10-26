@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.AlertDialog
@@ -53,6 +55,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleListViewModel
+import com.tingxia.audio.ui.articles.ShareState
+import com.tingxia.audio.ui.components.ShareArticleDialog
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
@@ -113,6 +117,10 @@ fun ArticleListScreen(
     val activeTag by viewModel.activeTag.collectAsStateWithLifecycle()
     val deletingId by viewModel.deletingId.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // 0041 共享：列表页共享对话框的状态（列表页没有 ArticleDetailViewModel，独立一份）
+    val shareState by viewModel.shareState.collectAsStateWithLifecycle()
+    val availableTags by viewModel.availableTags.collectAsStateWithLifecycle()
+    val selectedTags by viewModel.selectedTags.collectAsStateWithLifecycle()
 
     var showFeedbackSheet by remember { mutableStateOf(false) }
     // 原名 showSettingsMenu：菜单里没有一项是「设置」，55a07c0 把它改成 ⋮ 之后
@@ -120,6 +128,8 @@ fun ArticleListScreen(
     var showMoreMenu by remember { mutableStateOf(false) }
     // CP-DELETE: 长按卡片 → 删除确认
     var deleteTarget by remember { mutableStateOf<Article?>(null) }
+    // 0041 共享：点卡片共享图标 → 记下目标文章 → 弹共享对话框
+    var shareTarget by remember { mutableStateOf<Article?>(null) }
 
     // CP-TAG-FILTER：初始 tag 来自 TagSubscriptionScreen 跳转（仅消费一次）
     val initialConsumed = rememberSaveable { mutableStateOf(false) }
@@ -165,6 +175,62 @@ fun ArticleListScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
+    }
+
+    // 0041 共享：成功 → 关对话框 + Toast（共享 / 取消共享）
+    LaunchedEffect(shareState) {
+        val s = shareState
+        if (shareTarget != null && s is ShareState.Success) {
+            shareTarget = null
+            Toast.makeText(
+                context,
+                if (s.shared) "已共享" else "已取消共享",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    // 0041 共享：打开对话框时预勾选当前 sharedTags（中文名 → id）。
+    // 依赖 availableTags 就绪（异步懒加载），所以放在 LaunchedEffect(shareTarget, availableTags)。
+    LaunchedEffect(shareTarget, availableTags) {
+        val target = shareTarget
+        if (target != null && availableTags.isNotEmpty()) {
+            val sharedNames = target.sharedTags.orEmpty()
+            val ids = availableTags.filter { it.name in sharedNames }.map { it.id }.toSet()
+            viewModel.presetSelectedTags(ids)
+        }
+    }
+
+    // 0041 共享：列表页共享对话框（复用详情页那套标签选择逻辑）
+    shareTarget?.let { target ->
+        ShareArticleDialog(
+            articleTitle = target.title,
+            alreadyShared = target.shared,
+            sharedTagsCount = target.sharedTags?.size ?: 0,
+            availableTags = availableTags,
+            selectedTagIds = selectedTags,
+            isLoading = shareState is ShareState.Loading,
+            errorMessage = (shareState as? ShareState.Error)?.message,
+            onToggleTag = viewModel::toggleTag,
+            onSave = { selectedIds ->
+                // 后端 shared_tags 存的是标签**中文名**，先把 id 映射回名字再提交。
+                val names = selectedIds.mapNotNull { id ->
+                    availableTags.find { it.id == id }?.name
+                }
+                if (names.isEmpty()) {
+                    viewModel.unshareArticle(target.id)
+                } else {
+                    viewModel.shareArticle(target.id, names)
+                }
+            },
+            onDismiss = {
+                if (shareState !is ShareState.Loading) {
+                    shareTarget = null
+                    viewModel.clearSelectedTags()
+                    viewModel.dismissShareError()
+                }
             },
         )
     }
@@ -349,6 +415,11 @@ fun ArticleListScreen(
                                 isDeleting = deletingId == article.id,
                                 onClick = { onNavigateToDetail(article.id) },
                                 onLongClick = { deleteTarget = article },
+                                onShare = {
+                                    // 打开共享对话框：懒加载可用标签 + 记下目标文章
+                                    viewModel.loadAvailableTags()
+                                    shareTarget = article
+                                },
                             )
                         }
                     }
@@ -366,6 +437,7 @@ private fun ArticleCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     isDeleting: Boolean = false,
+    onShare: () -> Unit = {},
 ) {
     ElevatedCard(
         modifier = Modifier
@@ -409,6 +481,33 @@ private fun ArticleCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+            // 0041 共享：底部一行 —— 左侧「已共享」徽标，右侧共享快捷入口。
+            // 共享 IconButton 自带 clickable，会消费点击，不会误触发卡片的 onClick（进详情）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (article.shared == true) {
+                    Text(
+                        text = "已共享",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                IconButton(
+                    onClick = onShare,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "共享",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

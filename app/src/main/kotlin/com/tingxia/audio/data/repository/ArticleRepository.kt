@@ -12,6 +12,8 @@ import com.tingxia.audio.data.model.ListenCompleteResponse
 import com.tingxia.audio.data.model.RatingRequest
 import com.tingxia.audio.data.model.RatingResponse
 import com.tingxia.audio.data.model.RetryResponse
+import com.tingxia.audio.data.model.ShareRequest
+import com.tingxia.audio.data.model.ShareResponse
 import com.tingxia.audio.data.model.SkipRequest
 import com.tingxia.audio.data.model.SkipResponse
 import com.tingxia.audio.data.remote.ArticleApi
@@ -82,5 +84,17 @@ class ArticleRepository @Inject constructor(private val api: ArticleApi) {
     // ─────────────── §2.3 跳过上报 ───────────────
     suspend fun skipArticle(id: String, reason: String): SkipResponse =
         api.skipArticle(id, SkipRequest(reason = reason))
+
+    // ─────────────── 0041 共享（2026-10-26 产品拍板） ───────────────
+    //
+    // 用户把自己剪藏的内容按标签共享给订阅了这些标签的其他用户。
+    // - `shareArticle(id, tags)`：tags 为空 ⇒ 取消共享（等价 unshare）。
+    // - `unshareArticle(id)`：取消共享的快捷路径。
+    // - 只属主可调；订阅者调共享接口一律 403（后端 `_get_owned` 统一 404）。
+    suspend fun shareArticle(id: String, sharedTags: List<String>): ShareResponse =
+        api.shareArticle(id, ShareRequest(sharedTags = sharedTags))
+
+    suspend fun unshareArticle(id: String): ShareResponse =
+        api.unshareArticle(id)
 }
 

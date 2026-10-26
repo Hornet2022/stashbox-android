@@ -65,6 +65,20 @@ data class Article(
     //
     // 阶段值直接取自服务端的 agent current_step，不另造一套枚举。
     @SerialName("stage") val stage: String? = null,
+    // 0041：用户剪藏内容共享（2026-10-26 产品拍板）。
+    //
+    // `shared` = 这篇是否已共享给订阅者（true 表示订阅了 `shared_tags` 里
+    // 任一标签的其他用户能通过订阅流看到它）。**属主永远能看自己的内容**，
+    // 这个字段只描述「对别人是否可见」。
+    //
+    // `sharedTags` = 用户共享时手动选的公开标签（中文标签名数组）。
+    // 与 `tags`（LLM 分类）**并存**：共享是「额外公开」，不覆盖 LLM 的分类。
+    //
+    // ⚠️ 这两个字段**只对属主**有意义，订阅者视角恒为 `shared=false` /
+    // `sharedTags=null`（不泄露属主的共享意愿）。所以只有属主自己的文章
+    // 详情/列表才会带它们。
+    @SerialName("shared") val shared: Boolean = false,
+    @SerialName("shared_tags") val sharedTags: List<String>? = null,
 )
 
 /**

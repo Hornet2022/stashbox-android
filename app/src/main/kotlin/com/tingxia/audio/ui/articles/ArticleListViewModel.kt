@@ -4,11 +4,15 @@ import androidx.lifecycle.ViewModel
 import com.tingxia.audio.ui.friendlyError
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.ShareResponse
+import com.tingxia.audio.data.model.Tag
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.TagRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -18,6 +22,8 @@ import javax.inject.Inject
 @HiltViewModel
 class ArticleListViewModel @Inject constructor(
     private val repository: ArticleRepository,
+    /** 标签仓库（0041 共享：标签选择器要拉可用标签）。 */
+    private val tagRepository: TagRepository,
 ) : ViewModel() {
 
     private val _articles = MutableStateFlow<List<Article>>(emptyList())
@@ -116,6 +122,114 @@ class ArticleListViewModel @Inject constructor(
                 _error.value = friendlyError(e, fallback = "删除失败，请稍后重试")
             } finally {
                 _deletingId.value = null
+            }
+        }
+    }
+
+    // ─────────────── 0041 共享（2026-10-26 产品拍板，列表页独立一份） ───────────────
+    //
+    // 列表页没有 ArticleDetailViewModel，所以共享对话框的状态在这里单独维护一份。
+    // 逻辑与 ArticleDetailViewModel 的共享实现保持一致（标签选择器 + share/unshare），
+    // 但不改动详情页那份。共享成功后把响应写回列表里那篇文章，徽标立刻消失/出现。
+
+    private val _shareState = MutableStateFlow<ShareState>(ShareState.Idle)
+    val shareState: StateFlow<ShareState> = _shareState.asStateFlow()
+
+    /** 共享标签选择器要展示的可用标签（懒加载，只拉一次）。 */
+    private val _availableTags = MutableStateFlow<List<Tag>>(emptyList())
+    val availableTags: StateFlow<List<Tag>> = _availableTags.asStateFlow()
+
+    private var _availableTagsLoaded = false
+
+    /**
+     * 拉取可用标签供共享选择器使用（懒加载，只拉一次）。
+     * 共享标签是**手动选**的公开标签，从 tag 列表取，不用文章自带的 LLM 分类。
+     */
+    fun loadAvailableTags(force: Boolean = false) {
+        if (_availableTagsLoaded && !force) return
+        viewModelScope.launch {
+            runCatching { tagRepository.listTags() }
+                .onSuccess { tags ->
+                    _availableTags.value = tags
+                    _availableTagsLoaded = true
+                }
+                .onFailure {
+                    android.util.Log.w("ArticleListViewModel", "load available tags failed: ${it.message}")
+                    // 拉取失败不阻断：选择器给空列表。
+                    _availableTagsLoaded = true
+                }
+        }
+    }
+
+    /** 共享标签选择器当前已勾选的标签 **id** 集合（UI 勾选状态）。 */
+    private val _selectedTags = MutableStateFlow<Set<String>>(emptySet())
+    val selectedTags: StateFlow<Set<String>> = _selectedTags.asStateFlow()
+
+    /** 勾选 / 取消勾选一个标签（对话框内）。 */
+    fun toggleTag(tagId: String) {
+        _selectedTags.update { current ->
+            if (tagId in current) current - tagId else current + tagId
+        }
+    }
+
+    /** 打开共享对话框时：预勾选当前已共享的标签。 */
+    fun presetSelectedTags(tagIds: Set<String>) {
+        _selectedTags.value = tagIds
+    }
+
+    /** 清空勾选（关对话框时调用）。 */
+    fun clearSelectedTags() {
+        _selectedTags.value = emptySet()
+    }
+
+    /** 关掉错误提示（对话框 Error 分支点关闭后调用）。 */
+    fun dismissShareError() {
+        if (_shareState.value is ShareState.Error) {
+            _shareState.value = ShareState.Idle
+        }
+    }
+
+    /**
+     * 共享某篇文章：把 [sharedTags]（标签**中文名**）作为公开标签推给订阅者。
+     * 空列表等价「取消共享」。成功后把响应写回列表里那篇，徽标立刻反映。
+     */
+    fun shareArticle(articleId: String, sharedTags: List<String>) {
+        if (_shareState.value is ShareState.Loading) return
+        _shareState.value = ShareState.Loading
+        viewModelScope.launch {
+            runCatching { repository.shareArticle(articleId, sharedTags) }
+                .onSuccess { resp ->
+                    applyShareResponse(resp)
+                    _shareState.value = ShareState.Success(shared = resp.shared)
+                }
+                .onFailure {
+                    _shareState.value = ShareState.Error(friendlyError(it, fallback = "共享失败"))
+                }
+        }
+    }
+
+    /** 取消共享当前文章。 */
+    fun unshareArticle(articleId: String) {
+        if (_shareState.value is ShareState.Loading) return
+        _shareState.value = ShareState.Loading
+        viewModelScope.launch {
+            runCatching { repository.unshareArticle(articleId) }
+                .onSuccess { resp ->
+                    applyShareResponse(resp)
+                    _shareState.value = ShareState.Success(shared = resp.shared)
+                }
+                .onFailure {
+                    _shareState.value = ShareState.Error(friendlyError(it, fallback = "取消共享失败"))
+                }
+        }
+    }
+
+    /** 把共享响应写回列表里那篇文章，列表徽标立刻反映（不用等重新拉取）。 */
+    private fun applyShareResponse(resp: ShareResponse) {
+        val id = resp.id ?: return
+        _articles.update { list ->
+            list.map {
+                if (it.id == id) it.copy(shared = resp.shared, sharedTags = resp.sharedTags) else it
             }
         }
     }

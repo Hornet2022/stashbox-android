@@ -9,16 +9,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -34,6 +35,7 @@ import com.tingxia.audio.data.model.Tag
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -277,6 +279,18 @@ private fun SubscriptionFeedSection(
 }
 
 
+/**
+ * 「订阅」开关（2026-10-26 修复）。
+ *
+ * 原来这里是一个**没有任何文字说明的裸 Switch** —— 内测用户（uid=23）反馈
+ * 「看不到这篇文章」，查下来根因是**没订阅标签**：订阅按钮是个无名开关，
+ * 用户看不出那是订阅入口，于是从没拨过它 → 订阅 feed 永远是空的。
+ *
+ * 改成带文字的订阅控件：
+ * - 未订阅：outlined「订阅」，一眼看出这是可点的动作；
+ * - 已订阅：filled + ✓「已订阅」，状态直白可辨。
+ * 用户不必猜这个开关是干嘛的。
+ */
 @Composable
 private fun TagItem(
     tag: Tag,
@@ -292,7 +306,7 @@ private fun TagItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -315,9 +329,27 @@ private fun TagItem(
                     )
                 }
             }
-            Switch(
-                checked = isSubscribed,
-                onCheckedChange = { onToggle() },
+            // 订阅动作：带文字、带状态色的 Chip，替代原来的无名 Switch。
+            FilterChip(
+                selected = isSubscribed,
+                onClick = onToggle,
+                label = {
+                    Text(
+                        text = if (isSubscribed) "已订阅" else "订阅",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                },
+                leadingIcon = if (isSubscribed) {
+                    {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                } else {
+                    null
+                },
             )
         }
     }

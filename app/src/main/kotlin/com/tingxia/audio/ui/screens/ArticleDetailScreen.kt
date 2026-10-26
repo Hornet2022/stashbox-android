@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
@@ -83,9 +84,11 @@ import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.DeleteState
 import com.tingxia.audio.ui.articles.RetryState
+import com.tingxia.audio.ui.articles.ShareState
 import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.BitrateSelectorSheet
 import com.tingxia.audio.ui.components.DownloadButton
+import com.tingxia.audio.ui.components.ShareArticleDialog
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
 import com.tingxia.audio.ui.components.stageLabelRes
@@ -126,6 +129,10 @@ fun ArticleDetailScreen(
     val shouldShowEvaluation by viewModel.shouldShowEvaluationDialog.collectAsStateWithLifecycle()
     val myRating by viewModel.myRating.collectAsStateWithLifecycle()
     val taskId by viewModel.taskId.collectAsStateWithLifecycle()
+    // 0041 共享：观察共享状态 / 可用标签 / 已勾选标签
+    val shareState by viewModel.shareState.collectAsStateWithLifecycle()
+    val availableTags by viewModel.availableTags.collectAsStateWithLifecycle()
+    val selectedTags by viewModel.selectedTags.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val article = uiState.article
@@ -144,6 +151,8 @@ fun ArticleDetailScreen(
     var showRegenerateConfirm by remember { mutableStateOf(false) }
     var regenerateTargetId by remember { mutableStateOf<String?>(null) }
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
+    // 0041 共享：共享对话框开关（低频动作，只进溢出菜单，不进顶栏）
+    var showShareDialog by remember { mutableStateOf(false) }
 
     // §3 多码率弹窗需要 PlayerController（用于切档不重启）
     val bitratePlayerController = remember {
@@ -164,6 +173,33 @@ fun ArticleDetailScreen(
         if (deleteState is DeleteState.Success) {
             showDeleteConfirm = false
             onBack()
+        }
+    }
+
+    // 0041 共享：成功 → 关对话框 + Toast（共享 / 取消共享）
+    LaunchedEffect(shareState) {
+        val s = shareState
+        if (showShareDialog && s is ShareState.Success) {
+            showShareDialog = false
+            Toast.makeText(
+                context,
+                if (s.shared) "已共享" else "已取消共享",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    // 0041 共享：打开对话框时预勾选当前 sharedTags（中文名 → id）。
+    // 依赖 availableTags 就绪（异步懒加载），所以放在 LaunchedEffect(showShareDialog, availableTags)。
+    // availableTags 只懒加载一次，不会在用户勾选过程中变化，不会覆盖用户的选择。
+    LaunchedEffect(showShareDialog, availableTags) {
+        if (showShareDialog) {
+            val art = article
+            if (art != null && availableTags.isNotEmpty()) {
+                val sharedNames = art.sharedTags.orEmpty()
+                val ids = availableTags.filter { it.name in sharedNames }.map { it.id }.toSet()
+                viewModel.presetSelectedTags(ids)
+            }
         }
     }
 
@@ -349,6 +385,39 @@ fun ArticleDetailScreen(
         )
     }
 
+    // 0041 共享：共享对话框（低频动作，从溢出菜单打开）
+    if (showShareDialog) {
+        val art = article
+        ShareArticleDialog(
+            articleTitle = art?.title,
+            alreadyShared = art?.shared == true,
+            sharedTagsCount = art?.sharedTags?.size ?: 0,
+            availableTags = availableTags,
+            selectedTagIds = selectedTags,
+            isLoading = shareState is ShareState.Loading,
+            errorMessage = (shareState as? ShareState.Error)?.message,
+            onToggleTag = viewModel::toggleTag,
+            onSave = { selectedIds ->
+                // 后端 shared_tags 存的是标签**中文名**，先把 id 映射回名字再提交。
+                val names = selectedIds.mapNotNull { id ->
+                    availableTags.find { it.id == id }?.name
+                }
+                if (names.isEmpty()) {
+                    viewModel.unshareArticle(articleId)
+                } else {
+                    viewModel.shareArticle(articleId, names)
+                }
+            },
+            onDismiss = {
+                if (shareState !is ShareState.Loading) {
+                    showShareDialog = false
+                    viewModel.clearSelectedTags()
+                    viewModel.dismissShareError()
+                }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -483,6 +552,17 @@ fun ArticleDetailScreen(
                                     onClick = { showOverflow = false; showVoiceSheet = true },
                                 )
                             }
+                            // 0041 共享：低频动作，只进溢出菜单（顶栏已满，见 2026-10-03 注释）。
+                            // 打开对话框时懒加载可用标签（只拉一次）。
+                            DropdownMenuItem(
+                                text = { Text(if (article?.shared == true) "共享设置" else "共享") },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                onClick = {
+                                    showOverflow = false
+                                    viewModel.loadAvailableTags()
+                                    showShareDialog = true
+                                },
+                            )
                         }
                     }
                     // 离线下载：点一下真下载，已下载时点一下删除（2026-10-02 从装饰品改成可用）

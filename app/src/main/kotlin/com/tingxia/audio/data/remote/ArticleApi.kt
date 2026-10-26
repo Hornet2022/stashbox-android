@@ -12,6 +12,8 @@ import com.tingxia.audio.data.model.ListenCompleteResponse
 import com.tingxia.audio.data.model.RatingRequest
 import com.tingxia.audio.data.model.RatingResponse
 import com.tingxia.audio.data.model.RetryResponse
+import com.tingxia.audio.data.model.ShareRequest
+import com.tingxia.audio.data.model.ShareResponse
 import com.tingxia.audio.data.model.SkipRequest
 import com.tingxia.audio.data.model.SkipResponse
 import retrofit2.http.DELETE
@@ -134,4 +136,21 @@ interface ArticleApi {
         @Path("article_id") id: String,
         @Body body: SkipRequest,
     ): SkipResponse
+
+    // ─────────────── 0041 共享（2026-10-26 产品拍板） ───────────────
+    //
+    // 用户把自己剪藏的内容按标签共享给订阅了这些标签的其他用户。
+    //
+    // - `POST .../share`：body 传 `{"shared_tags": [...]}`；空数组 ⇒ 取消共享。
+    //   返回**完整 ArticleResponse**（含 shared / shared_tags）。
+    // - `POST .../unshare`：取消共享的快捷路径，返回精简体。
+    // - 只接受**属主**；订阅者调共享接口一律 403。
+    @POST("api/v1/articles/{article_id}/share")
+    suspend fun shareArticle(
+        @Path("article_id") id: String,
+        @Body body: ShareRequest,
+    ): ShareResponse
+
+    @POST("api/v1/articles/{article_id}/unshare")
+    suspend fun unshareArticle(@Path("article_id") id: String): ShareResponse
 }

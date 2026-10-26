@@ -187,8 +187,15 @@ android {
         //   KNOWN_TAG_CATEGORIES 兜底，最后回退到原文。
         // ⚠️ 升 versionCode 是硬要求：0.4.4(17) 已上线 ⇒ 停在 17 的话，
         //   已装 0.4.4 的内测用户收不到更新提示。
-        versionCode = 18
-        versionName = "0.4.5"
+        // 0.4.6(19)：用户剪藏内容共享（2026-10-26 产品拍板）
+        // · 剪藏的内容默认只有自己可见；共享后可让订阅了对应标签的
+        //   其他用户通过订阅流看到、读、听；取消共享恢复只有自己可见。
+        // · 列表页卡片加「已共享」徽标 + 共享入口；详情页加共享/取消共享
+        //   与标签选择器。共享标签与 LLM 分类并存（不覆盖）。
+        // ⚠️ 升 versionCode 是硬要求：0.4.5(18) 已上线 ⇒ 停在 18 的话，
+        //   已装 0.4.5 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
+        versionCode = 19
+        versionName = "0.4.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

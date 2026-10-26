@@ -8,11 +8,14 @@ import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.MyEvaluationResponse
+import com.tingxia.audio.data.model.ShareResponse
+import com.tingxia.audio.data.model.Tag
 import com.tingxia.audio.data.remote.ProgressApi
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.repository.PlaylistRepository
 import com.tingxia.audio.data.repository.ProgressRepository
+import com.tingxia.audio.data.repository.TagRepository
 import com.tingxia.audio.ui.components.sourceLabelRes
 import com.tingxia.audio.ui.friendlyError
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -48,6 +51,8 @@ class ArticleDetailViewModel @Inject constructor(
     private val evaluationRepository: EvaluationRepository,
     /** 播放列表（队列的唯一真相源，2026-10-23）。 */
     private val playlistRepository: PlaylistRepository,
+    /** 标签仓库（0041 共享：标签选择器要拉可用标签）。 */
+    private val tagRepository: TagRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -564,7 +569,114 @@ class ArticleDetailViewModel @Inject constructor(
         }
     }
 
-    // CP-DELETE: 删除当前文章（硬删除，后端级联清理蒸馏结果 + 音频文件）。
+    // ─────────────── 0041 共享（2026-10-26 产品拍板） ───────────────
+    private val _shareState = MutableStateFlow<ShareState>(ShareState.Idle)
+    val shareState: StateFlow<ShareState> = _shareState.asStateFlow()
+
+    /** 共享标签选择器要展示的可用标签（懒加载，只拉一次）。 */
+    private val _availableTags = MutableStateFlow<List<Tag>>(emptyList())
+    val availableTags: StateFlow<List<Tag>> = _availableTags.asStateFlow()
+
+    private val _availableTagsLoaded = MutableStateFlow(false)
+
+    /**
+     * 拉取可用标签供共享选择器使用（懒加载，只拉一次）。
+     *
+     * 共享标签是**手动选**的公开标签（区别于 LLM 分类的 `article.tags`），
+     * 所以必须从 tag 列表取，而不是用文章自带的 tags —— 那只是 LLM 的分类，
+     * 用户未必想让那套标签公开出去。
+     */
+    fun loadAvailableTags(force: Boolean = false) {
+        if (_availableTagsLoaded.value && !force) return
+        viewModelScope.launch {
+            runCatching { tagRepository.listTags() }
+                .onSuccess { tags ->
+                    _availableTags.value = tags
+                    _availableTagsLoaded.value = true
+                }
+                .onFailure {
+                    android.util.Log.w(TAG, "load available tags failed: ${it.message}")
+                    // 拉取失败不阻断：选择器给空列表，用户仍可手动输入标签。
+                    _availableTagsLoaded.value = true
+                }
+        }
+    }
+
+    /**
+     * 共享当前文章：把 [sharedTags] 作为公开标签推给订阅者。
+     *
+     * 空列表等价「取消共享」（后端语义：空 → 清空 shared_tags）。
+     * 成功后把响应写回 article.shared/sharedTags，让详情页立刻反映新状态。
+     */
+    fun shareArticle(articleId: String, sharedTags: List<String>) {
+        if (_shareState.value is ShareState.Loading) return
+        _shareState.value = ShareState.Loading
+        viewModelScope.launch {
+            runCatching { repository.shareArticle(articleId, sharedTags) }
+                .onSuccess { resp ->
+                    applyShareResponse(resp)
+                    _shareState.value = ShareState.Success(shared = resp.shared)
+                }
+                .onFailure {
+                    _shareState.value = ShareState.Error(friendlyError(it, fallback = "共享失败"))
+                }
+        }
+    }
+
+    /** 取消共享当前文章。 */
+    fun unshareArticle(articleId: String) {
+        if (_shareState.value is ShareState.Loading) return
+        _shareState.value = ShareState.Loading
+        viewModelScope.launch {
+            runCatching { repository.unshareArticle(articleId) }
+                .onSuccess { resp ->
+                    applyShareResponse(resp)
+                    _shareState.value = ShareState.Success(shared = resp.shared)
+                }
+                .onFailure {
+                    _shareState.value = ShareState.Error(friendlyError(it, fallback = "取消共享失败"))
+                }
+        }
+    }
+
+    /** 把共享响应写回 UI 状态，详情页立刻反映（不用等重新拉取）。 */
+    private fun applyShareResponse(resp: ShareResponse) {
+        _uiState.update {
+            it.copy(article = it.article?.copy(shared = resp.shared, sharedTags = resp.sharedTags))
+        }
+    }
+
+    // ── 共享对话框 UI 辅助（selectedTags / toggle / dismiss） ──
+
+    /** 当前已勾选的共享标签 id 集合（对话框内多选状态）。 */
+    private val _selectedTags = MutableStateFlow<Set<String>>(emptySet())
+    val selectedTags: StateFlow<Set<String>> = _selectedTags.asStateFlow()
+
+    /** 勾选 / 取消勾选一个标签（对话框内）。 */
+    fun toggleTag(tagId: String) {
+        _selectedTags.update { current ->
+            if (tagId in current) current - tagId else current + tagId
+        }
+    }
+
+    /** 打开共享对话框时：预勾选当前已共享的标签。 */
+    fun presetSelectedTags(tagIds: Set<String>) {
+        _selectedTags.value = tagIds
+    }
+
+    /** 清空勾选（关对话框时调用）。 */
+    fun clearSelectedTags() {
+        _selectedTags.value = emptySet()
+    }
+
+    /** 关掉错误提示（对话框 Error 分支点关闭后调用）。 */
+    fun dismissShareError() {
+        if (_shareState.value is ShareState.Error) {
+            _shareState.value = ShareState.Idle
+        }
+    }
+
+    // CP-DELETE: 删除当前文章（硬删除，下游数据级联清理蒸馏结果 + 音频文件）。
     fun deleteArticle(articleId: String) {
         if (_deleteState.value is DeleteState.Loading) return
         _deleteState.value = DeleteState.Loading
@@ -616,4 +728,12 @@ sealed class DeleteState {
     data object Loading : DeleteState()
     data object Success : DeleteState()
     data class Error(val message: String) : DeleteState()
+}
+
+// 0041 共享：共享/取消共享 UI 状态
+sealed class ShareState {
+    data object Idle : ShareState()
+    data object Loading : ShareState()
+    data class Success(val shared: Boolean) : ShareState()
+    data class Error(val message: String) : ShareState()
 }

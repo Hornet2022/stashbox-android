@@ -158,3 +158,31 @@ data class SkipResponse(
     @SerialName("feedback_id") val feedbackId: Int,
     val reason: String,
 )
+
+// ─────────────── 0041 共享（2026-10-26 产品拍板） ───────────────
+//
+// 用户把自己剪藏的内容按标签共享给订阅了这些标签的其他用户。
+// - `shared_tags`：中文标签名数组，去重后落 `articles.shared_tags`（JSONB）。
+//   空数组 ⇒ **取消共享**（置 NULL，等价于「不再对订阅者公开」）。
+// - 只接受**属主**调用；订阅者调共享接口一律 403。
+// - 标签是**顺序无关**的集合语义：服务端去重、不保证顺序。
+
+@Serializable
+data class ShareRequest(
+    @SerialName("shared_tags") val sharedTags: List<String>,
+)
+
+/**
+ * 共享/取消共享响应。
+ *
+ * `POST .../share` 返回**完整 ArticleResponse**（含 shared / shared_tags），
+ * 客户端用它刷新当前这篇的共享态，不必重新拉详情。
+ * `POST .../unshare` 返回精简体 `{"id", "shared": false, "shared_tags": null}`，
+ * 两个字段都收进这个壳里。
+ */
+@Serializable
+data class ShareResponse(
+    val id: String? = null,
+    val shared: Boolean = false,
+    @SerialName("shared_tags") val sharedTags: List<String>? = null,
+)
