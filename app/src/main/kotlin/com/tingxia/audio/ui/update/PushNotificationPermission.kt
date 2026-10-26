@@ -123,11 +123,10 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 /**
  * 通知权限状态（可执行动作）。
  *
- * ## 与 [rememberPushPermissionState] 的关系
+ * ## 为什么是**全 App 唯一**的通知权限入口
  *
- * [rememberPushPermissionState] 是老接口（只管「推送通知」那一行）。
- * 本函数是**全 App 唯一**的通知权限入口 —— 推送通知与播放通知（通知栏控制条）
- * 用的是**同一个权限**，两边必须给出一致的状态与一致的动作，
+ * 推送通知与播放通知（通知栏控制条）用的是**同一个** Android 权限，
+ * 两边必须给出一致的状态与一致的动作，
  * 否则就会出现「推送那行说已开启、播放那行说没开」这种自相矛盾。
  */
 @Composable
