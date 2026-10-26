@@ -1,11 +1,5 @@
 package com.tingxia.audio.audio
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -13,12 +7,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import dagger.hilt.android.EntryPointAccessors
+import com.tingxia.audio.ui.update.NotificationPermissionAction
+import com.tingxia.audio.ui.update.rememberNotificationPermissionState
 
 /**
- * 播放通知的权限申请（2026-10-23 新增）。
+ * 播放通知的权限申请（2026-10-23 新增；2026-10-26 改用统一判据）。
  *
  * ## 为什么必须有这一步
  *
@@ -43,45 +36,38 @@ import dagger.hilt.android.EntryPointAccessors
  * 用户拒绝过一次之后再弹系统框，系统本身就不再显示了（要到系统设置里手动开）。
  * 但我们自己不该反复触发 —— 万一用户后来在系统设置里开了，
  * 反复触发会造成无意义的弹窗。这里用进程内的一次性标记。
+ *
+ * ## 2026-10-26：为什么这里不再自己判断「能不能弹」
+ *
+ * 原来这里是 `if (isPlaybackNotificationPermissionGranted(context)) return`，
+ * 也就是「只要没权限就去弹系统框」。真机实测（MIUI 14 / Android 14）证明这条路会死：
+ * 用户永久拒绝之后，系统框**根本不会再弹**
+ * （`GrantPermissionsActivity ... result=2` = `RESULT_PERMISSION_FIXED`），
+ * 于是这里每播一次就发起一次注定失败的弹框 —— 而用户看到的是
+ * 「通知栏没有控制条，App 里也没有任何说法」。
+ *
+ * ⇒ 现在统一走 [rememberNotificationPermissionState] 的判据：
+ * 只有「还能弹系统框」这一档才弹；永久拒绝 / 系统里关了通知 ⇒ **不弹**
+ * （弹了也是没反应），而是交给设置页与播放器提示条引导去系统设置。
  */
 @Composable
 fun RequestPlaybackNotificationPermission(
     playerController: PlayerController,
 ) {
-    val context = LocalContext.current
     val state by playerController.state.collectAsState()
     var requested by remember { mutableStateOf(false) }
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* 结果不影响播放；拒绝的话只是通知栏没有控制条 */ }
+    // 判据只有一份（见 ui/update/NotificationPermissionPolicy.kt）。
+    val notificationPermission = rememberNotificationPermissionState()
 
     LaunchedEffect(state) {
         if (requested) return@LaunchedEffect
         if (state != PlaybackState.PLAYING) return@LaunchedEffect
-        if (isPlaybackNotificationPermissionGranted(context)) return@LaunchedEffect
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
+        // 只有「还能弹系统框」才弹。别的档位弹了也是没反应（真机实测 result=2）。
+        if (notificationPermission.action != NotificationPermissionAction.REQUEST_SYSTEM_DIALOG) {
+            return@LaunchedEffect
+        }
         requested = true
-        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        notificationPermission.perform()
     }
-}
-
-/**
- * 播放通知的权限是否已获得。
- *
- * 判据与 [com.tingxia.audio.ui.update.isNotificationPermissionGranted] 一致，
- * 但**不能直接复用**那个函数：它是 `ui.update` 包的（推送那一侧），
- * 而这里是播放那一侧 —— 同一个 Android 权限，两处各判一次就会漂移
- * （一处改了另一处没改）。所以规则一致但各自留一份，
- * 共同点是都用「API 33 以下按系统设置判断，以上看运行时权限」。
- */
-fun isPlaybackNotificationPermissionGranted(context: Context): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-        return androidx.core.app.NotificationManagerCompat.from(context)
-            .areNotificationsEnabled()
-    }
-    return ContextCompat.checkSelfPermission(
-        context,
-        Manifest.permission.POST_NOTIFICATIONS,
-    ) == PackageManager.PERMISSION_GRANTED
 }

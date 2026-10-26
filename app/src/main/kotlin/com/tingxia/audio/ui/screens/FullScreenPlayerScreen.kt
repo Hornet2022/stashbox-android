@@ -63,6 +63,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.tingxia.audio.ui.update.NotificationPermissionAction
+import com.tingxia.audio.ui.update.rememberNotificationPermissionState
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -150,6 +152,9 @@ fun FullScreenPlayerScreen(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 通知权限状态（2026-10-26）：后台播放时通知栏那条控制条能不能用，
+    // 全 App 只有这一份判据（见 ui/update/NotificationPermissionPolicy.kt）。
+    val notificationPermission = rememberNotificationPermissionState()
     val controller = playerController ?: remember {
         EntryPointAccessors
             .fromApplication(context.applicationContext, PlayerControllerEntryPoint::class.java)
@@ -337,6 +342,28 @@ fun FullScreenPlayerScreen(
                     onRetry = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.retry()
+                    },
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 通知栏控制条不可用时的提示（2026-10-26 新增）。
+            //
+            // 为什么必须有：后台播放时，**通知栏那条控制条就是用户唯一的控制入口**
+            // （锁屏、音量面板、耳机键都走它）。它不出现时，用户看到的是
+            // 「App 正常、声音正常、但通知栏空着」—— **没有任何线索指向原因**。
+            // 内测反馈原话就是「更新后通知栏没有了」，而实测证明 0.4.1/0.4.2
+            // 的通知代码逐字节一致、四个场景复测都正常 ⇒ 真正卡住用户的是
+            // 「权限被永久拒绝 / 在系统里关了通知」，而这两件事 App 之前
+            // **既不显示状态、也给不出任何可执行的动作**。
+            //
+            // 这里把「为什么没有」和「现在能做什么」直接摆在播放页上。
+            if (notificationPermission.action != NotificationPermissionAction.ALREADY_ON) {
+                NotificationControlHintBanner(
+                    text = notificationControlHintText(notificationPermission.action),
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        notificationPermission.perform()
                     },
                 )
                 Spacer(modifier = Modifier.height(16.dp))

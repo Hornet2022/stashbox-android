@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Speed
@@ -53,7 +54,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,7 +69,8 @@ import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.ui.tts.formatSpeedLabel
 import com.tingxia.audio.ui.update.AppUpdateDialog
 import com.tingxia.audio.ui.update.AppUpdateViewModel
-import com.tingxia.audio.ui.update.rememberPushPermissionState
+import com.tingxia.audio.ui.update.NotificationPermissionAction
+import com.tingxia.audio.ui.update.rememberNotificationPermissionState
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -124,11 +125,24 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
-    // 推送通知权限：Android 13+ 需要运行时授权，放在用户点「推送通知」时才申请
-    // （启动就弹会让人莫名其妙地拒绝，之后再也收不到提醒）。
-    val pushPermission = rememberPushPermissionState()
+    // 通知权限（2026-10-26 改为统一入口）：
+    // 推送通知与播放通知（通知栏控制条）用的是**同一个** Android 权限，
+    // 两边必须给出一致的状态与一致的动作 —— 否则会出现
+    // 「推送那行说已开启、播放那行说没开」这种自相矛盾。
+    //
+    // 动作由统一判据给出（见 ui/update/NotificationPermissionPolicy.kt）：
+    // 已开启 / 还能弹系统框 / 只能去系统设置，三选一，
+    // **没有第四种「点了没反应」**。
+    val notificationPermission = rememberNotificationPermissionState()
     val context = LocalContext.current
-    val notificationsEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    // 已开启时这一行点了不该毫无反馈（这个文件里已经因为死按钮吃过亏，见 SettingsRow 的注释）。
+    val onNotificationRowClick = {
+        if (notificationPermission.action == NotificationPermissionAction.ALREADY_ON) {
+            Toast.makeText(context, "通知已开启，无需再设置", Toast.LENGTH_SHORT).show()
+        } else {
+            notificationPermission.perform()
+        }
+    }
     // CP-TTS-VOICE: 音色 + 语速
     var showVoicePicker by remember { mutableStateOf(false) }
     // 2026-10-02: 「意见反馈」不再是死按钮，直接复用已存在的通用反馈 sheet
@@ -322,12 +336,28 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Filled.Notifications,
                     title = "推送通知",
-                    subtitle = when {
-                        notificationsEnabled -> "已开启：新文章与蒸馏完成会提醒你"
-                        pushPermission.needsRequest -> "点击开启：接收新文章与蒸馏完成提醒"
-                        else -> "通知已关闭，可在系统设置里重新开启"
-                    },
-                    onClick = { pushPermission.request() },
+                    subtitle = notificationRowSubtitle(
+                        action = notificationPermission.action,
+                        purpose = NotificationRowPurpose.PUSH,
+                    ),
+                    onClick = onNotificationRowClick,
+                )
+                // 播放通知（2026-10-26 新增）：**通知栏里那条播放控制条**。
+                //
+                // 为什么要单独一行：它和「推送通知」是**两件事、但共用一个权限**。
+                // 之前设置页只有「推送通知」那一行 ⇒ 内测用户反馈「后台播放的通知栏
+                // 没有了」时，**在 App 里根本找不到对应的入口**，只能来问人。
+                // （真机实测：0.4.1 与 0.4.2 的通知代码逐字节一致，四个场景复测都正常；
+                // 真正卡住用户的是「权限被永久拒绝 / 在系统里关了通知」之后，
+                // App 既不显示状态、也给不出任何可执行的动作。）
+                SettingsRow(
+                    icon = Icons.Filled.PlaylistPlay,
+                    title = "播放通知",
+                    subtitle = notificationRowSubtitle(
+                        action = notificationPermission.action,
+                        purpose = NotificationRowPurpose.PLAYBACK,
+                    ),
+                    onClick = onNotificationRowClick,
                 )
                 // 2026-10-02：原来是死按钮。这里接上**已经存在**的
                 // FeedbackBottomSheet（articleId 传 null = 不针对具体文章的
