@@ -45,8 +45,18 @@ import javax.inject.Singleton
  * 而播放状态是 [play] 里乐观设成 `PLAYING` 的 —— 于是播放失败（网络断 /
  * 音频 404 / 解码错）时界面毫无反应：进度条不动、按钮还是「暂停」、
  * 什么提示都没有。`ERROR` 让失败成为**可观察的状态**而不是沉默。
+ *
+ * [RECOVERING] 是 2026-10-26 加的：**正在自动重连**，不是失败。
+ *
+ * 为什么要有它（这是「后台播放几分钟就停」那次的直接产物）：
+ * 瞬时网络抖动本来是「一秒后自己好了」的事，而此前的处理是把它当成
+ * [ERROR] —— 状态变错误、弹一句文案、**等用户手动点重试**。
+ * 而后台播放时没人点 ⇒ 一条抖动 = 永久停止。
+ *
+ * ⇒ 恢复期必须是**独立的状态**：界面上它该显示「正在重连」并允许暂停，
+ * 而不是显示成失败（用户看到失败就会以为音频没了，直接走人）。
  */
-enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED, ERROR }
+enum class PlaybackState { IDLE, PLAYING, PAUSED, STOPPED, ERROR, RECOVERING }
 
 /**
  * ExoPlayer 封装 + 真实播放状态（CP4.4）。
@@ -245,7 +255,25 @@ class PlayerController @Inject constructor(
             // 否则下次随便一次 resume 就会报出一个横跨几分钟的假启动耗时。
             audioStartTimer.onPlaybackError()
             // PlaybackException 只是个壳，真正的原因在 cause 里（通常是 IOException）。
-            notifyPlaybackError(error.cause ?: error)
+            val cause = error.cause ?: error
+            // ① **用户已经不打算听了** ⇒ 这次失败与用户无关：只记日志，
+            //    不改状态、不弹错误、不自动重连。
+            //
+            //    典型场景：用户按了暂停（或停止），**上一次 prepare 的加载
+            //    失败回调随后才到** —— 那一刻声音本来就不该再响，
+            //    而「播放失败」的红色提示会让用户以为是自己操作出了问题。
+            //
+            //    ⚠️ media3 出错时不会重置 playWhenReady，所以它准���反映
+            //    「用户此刻是不是还想听」。
+            if (!player.playWhenReady) {
+                Log.i(TAG, "playback error ignored (not playing anymore): cause=$cause")
+                return
+            }
+            // ② 瞬时网络类 → **自动重连**（2026-10-26）。
+            //    这是「放后台播放，几分钟后就没声了」的直接修复点 ——
+            //    机制与判据见 [scheduleAutoRecovery] 的说明。
+            if (scheduleAutoRecovery(cause)) return
+            notifyPlaybackError(cause)
         }
 
         /**
@@ -268,6 +296,11 @@ class PlayerController @Inject constructor(
             if (isPlaying) {
                 // 音频真的出声了 → 上报「音频启动耗时」（见 [handlePlayingStarted]）。
                 handlePlayingStarted()
+                // 自动重连成功（2026-10-26）：状态从 RECOVERING 回到 PLAYING，
+                // 并把「正在重连」的提示撤掉 —— 声音都回来了还挂着提示就是撒谎。
+                if (recovering) {
+                    onAutoRecoverySucceeded()
+                }
                 if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.PLAYING
                 // 恢复播放时确保位置泵是开着的。
                 //
@@ -291,10 +324,17 @@ class PlayerController @Inject constructor(
             // 只有 READY（就绪但不播）才是暂停；ENDED 是播完；BUFFERING/IDLE
             // 期间状态**保持不变**（否则缓冲一下就闪成「暂停」）。
             when (player.playbackState) {
-                Player.STATE_READY -> if (_state.value != PlaybackState.ERROR) {
+                Player.STATE_READY -> if (_state.value != PlaybackState.ERROR &&
+                    _state.value != PlaybackState.RECOVERING
+                ) {
+                    // ⚠️ RECOVERING 不许被改成 PAUSED：恢复期里播放器可能短暂
+                    // 处于「就绪但没在播」，那会把恢复流程的状态覆盖掉，
+                    // 导致恢复体以为「已经不在恢复中」而放弃接上。
                     _state.value = PlaybackState.PAUSED
                 }
                 Player.STATE_ENDED -> {
+                    // 播完了 ⇒ 没什么可恢复的（恢复的对象是「中途断掉的流」）。
+                    cancelAutoRecovery()
                     if (_state.value != PlaybackState.ERROR) _state.value = PlaybackState.IDLE
                     // 完听判定交给轮询泵里的 checkListenCompletion（它会读
                     // STATE_ENDED），这里不重复触发，免得同一篇报两次。
@@ -816,6 +856,8 @@ class PlayerController @Inject constructor(
         if (articleId != null) {
             _currentArticleId.value = articleId
         }
+        // 重新开始播 ⇒ 之前挂着的自动重连作废（这次是用户主动来的，不是恢复）。
+        cancelAutoRecovery()
         _state.value = PlaybackState.PLAYING
         _playbackError.value = null
         _currentTitle.value = title
@@ -1207,6 +1249,207 @@ class PlayerController @Inject constructor(
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // 播放中断的自动重连（2026-10-26）
+    //
+    // ## 这段代码要修的是哪个故障
+    //
+    // 内测反馈：「**放后台播放时，播放几分钟后就没声了**」。
+    //
+    // ## 机制（查证过，不是推测）
+    //
+    // 1. **音频是一条贯穿整篇的长连接。**
+    //    播放走 `CacheDataSource`（边播边下、边下边写缓存），但上游那条
+    //    HTTP 连接要**开满整篇的时长**：`DefaultLoadControl` 只让加载器
+    //    维持在播放位置前方约 50s 的缓冲，于是网络是**全程在用**的，
+    //    不是「开头下完就没事了」。
+    // 2. **后台时这条连接随时会被掐断**：息屏后的省电策略、厂商的��台
+    //    管控（MIUI 等）、wifi↔移动网络切换 —— 都会让这条长连接断掉。
+    // 3. **一断就死。** ExoPlayer 进 `STATE_IDLE` 并抛错；此前 App 的处理
+    //    只是把状态置成 ERROR、弹一句文案，**没有任何自动恢复**，
+    //    唯一的恢复入口是用户手动点「重试」—— **后台没人点**。
+    // 4. **而且当场失去前台服务保护。**
+    //    Media3 判「要不要待在前台」只看 `READY / BUFFERING`
+    //    （`MediaNotificationManager.shouldRunInForeground`，1.4.1 源码），
+    //    出错那一刻状态不是这两者 ⇒ 服务**当场退出前台**
+    //    ⇒ 后台进程随时会被杀 ⇒ 连「打开 App 点重试」都可能来不及。
+    //
+    // ⇒ 一条瞬时的网络抖动 = 后台播放**永久停止**。
+    //
+    // ## 修法
+    //
+    // 失败先分类（[PlaybackFailure]）：
+    // · **瞬时网络类** → 自动重连：重开数据源、**从断点续上**、带退避与上限；
+    //   恢复期间状态是 [PlaybackState.RECOVERING]，不是死的 ERROR。
+    // · **内容类**（404 / 解码失败）→ 重连无用，保持原来的报错 + 手动重试。
+    //
+    // ## 为什么 `player.prepare()` 就够（依据是 media3 1.4.1 源码，不是印象）
+    //
+    // `ExoPlayerImplInternal.prepareInternal()` 明确是
+    // `resetPosition=false, releaseMediaSourceList=false, resetError=true`
+    // ⇒ **位置保留、媒体源保留**，只是把数据源重新打开一次；
+    // 而 `CacheDataSource` 会先命中本地缓存、只对缺的那一段发 Range 请求
+    // ⇒ 「从断点续播」是白送的。
+    //
+    // 顺带把 [FallbackHttpDataSource] 早就写好、却从没被用上的那条路接上了：
+    // 它在**中途断流**时会 `markPrimaryFailed()`，注释写着
+    // 「下一次 open 就会走备用地址」—— 而此前**没有任何代码路径会再次
+    // open**，除非用户手动点重试。自动重连正好就是那个「下一次 open」。
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** 连续自动重连已尝试的次数（成功即清零）。 */
+    private var recoveryAttempts = 0
+
+    /**
+     * 是否正在自动重连。
+     *
+     * 为什么不用 `_state == RECOVERING` 判：**状态会被播放器的回调改写**
+     * （恢复期里播放器可能短暂「就绪但没在播」，把状态改成 PAUSED）。
+     * 内部逻辑必须有一个**不受回调干扰**的真相源，
+     * 否则恢复体会以为「已经不在恢复中」而放弃接上。
+     */
+    private var recovering = false
+
+    /** 自动重连的执行体（挂在主线程 Handler 上，见 [performRecovery]）。 */
+    private val recoveryRunnable = Runnable { performRecovery() }
+
+    /**
+     * 自动重连已尝试的次数（internal 便于单测断言）。
+     *
+     * 0 = 没重连过（正常播放中）。
+     */
+    internal val autoRecoveryAttempts: Int get() = recoveryAttempts
+
+    /**
+     * 安排一次自动重连。
+     *
+     * @return true = 已接管这个错误（**不要**再走 [notifyPlaybackError]）；
+     *   false = 不该自动重连（内容类失败 / 没有可重连的内容 / 次数用尽），
+     *   调用方照旧报错。
+     */
+    internal fun scheduleAutoRecovery(cause: Throwable): Boolean {
+        // ① 只有**瞬时网络类**才值得自动重连。内容类重试一万次也是同一个结果。
+        if (PlaybackFailure.classify(cause) != PlaybackFailureKind.TRANSIENT_NETWORK) return false
+        // ② 没有媒体项就没得重连（不是「播放中被打断」）。
+        if (player.mediaItemCount == 0) return false
+        // ③ **本来就不在播**的别自动接上。
+        //
+        // 这一条不是防御性编程，是真实会踩的：
+        // 用户按了暂停 → `pause()` 取消了恢复 → 但**上一次 prepare 的加载
+        // 失败回调随后才到** → 若不判这一条，自动恢复照样启动
+        // ⇒ 用户明明按了暂停，音频却又自己放了起来。
+        //
+        // media3 出错时不会重置 `playWhenReady`，所以它准���反映
+        // 「用户此刻是不是想听」。
+        if (!player.playWhenReady) return false
+        // ④ 次数上限：一直失败时不能无限重试（那会变成一个耗电的循环）。
+        if (recoveryAttempts >= MAX_AUTO_RECOVERY_ATTEMPTS) return false
+
+        val attempt = recoveryAttempts
+        recoveryAttempts++
+        val delayMs = autoRecoveryDelayMs(attempt)
+        Log.w(
+            TAG,
+            "playback interrupted (transient), auto-recovering: attempt=$attempt " +
+                "delayMs=$delayMs pos=${_position.value}ms cause=$cause",
+        )
+        _state.value = PlaybackState.RECOVERING
+        recovering = true
+        _playbackError.value = RECOVERING_MESSAGE
+        positionHandler.removeCallbacks(recoveryRunnable)
+        positionHandler.postDelayed(recoveryRunnable, delayMs)
+        reportPlaybackEvent(
+            EventNames.PLAYBACK_ERROR,
+            mapOf(
+                "kind" to "transient_network",
+                "attempt" to attempt,
+                "position_ms" to _position.value,
+                "duration_ms" to _duration.value,
+                "cause" to cause.javaClass.simpleName,
+            ),
+        )
+        return true
+    }
+
+    /**
+     * 执行一次自动重连：把数据源重新打开，**从断点续上**。
+     *
+     * 挂在主线程 Handler 上而不是协程：`Handler` 在 Robolectric 里能被
+     * 确定性推进时间（`ShadowLooper.idleFor`），协程的 delay 做不到 ——
+     * 「断了会自己接上」这件事就没法写单测，只能靠真机等一次断网。
+     *
+     * 为什么 `prepare()` 而不是重新 `play()`：
+     * `play()` 会重建 MediaItem 并**从头开始**（用户听了 3 分钟就白听），
+     * 而 `prepare()` 保留位置与媒体源（见上面那段机制说明）。
+     */
+    private fun performRecovery() {
+        // 期间用户可能已经暂停/停止/换了内容 —— 那就不再自动接了。
+        if (!recovering) return
+        val resumeAtMs = _position.value
+        Log.i(TAG, "auto recovery: re-open source at position=${resumeAtMs}ms")
+        // media3: prepareInternal(resetPosition=false, releaseMediaSourceList=false)
+        // → 位置保留、媒体源保留，只是重新打开数据源；缓存命中就续传。
+        player.prepare()
+        // playWhenReady 在出错时是保留的，但显式 play() 更保险（幂等）。
+        player.play()
+    }
+
+    /**
+     * 自动重连成功（声音真的又出来了）。
+     *
+     * 只有 `isPlaying` 变 true 才算成功 —— 「重新打开数据源」不等于
+     * 「真的接上了」，中途再断会再次进 [scheduleAutoRecovery]。
+     */
+    private fun onAutoRecoverySucceeded() {
+        val attempts = recoveryAttempts
+        recoveryAttempts = 0
+        recovering = false
+        positionHandler.removeCallbacks(recoveryRunnable)
+        _playbackError.value = null
+        Log.i(TAG, "auto recovery succeeded after $attempts attempt(s)")
+        reportPlaybackEvent(
+            EventNames.PLAYBACK_RECOVERED,
+            // article_id 由 [reportPlaybackEvent] 统一补（没有 id 时**不放这个键**，
+            // 免得后台按 article_id 聚合时混进 null）。
+            mapOf("attempts" to attempts),
+        )
+    }
+
+    /**
+     * 取消挂着的自动重连，并清零计数。
+     *
+     * 谁会调用：用户主动暂停 / 停止 / 重新播 / 释放，
+     * 以及真正失败（[notifyPlaybackError]）时 ——
+     * 这些情况下「自动接上」都不该再发生。
+     */
+    private fun cancelAutoRecovery() {
+        positionHandler.removeCallbacks(recoveryRunnable)
+        recoveryAttempts = 0
+        recovering = false
+    }
+
+    /**
+     * 自动重连的退避间隔（毫秒）。
+     *
+     * 第 1 次**不延迟**：断流多半是瞬时的，立刻重开最省事，也把
+     * 「掉出前台服务」的窗口压到最短（Media3 只在 READY/BUFFERING 时
+     * 才待在前台，见上面的机制说明）。
+     * 之后 2s / 4s / 8s / 15s —— 失败越多次等得越久，别把网络打死。
+     */
+    internal fun autoRecoveryDelayMs(attempt: Int): Long = when {
+        attempt <= 0 -> 0L
+        else -> (AUTO_RECOVERY_BACKOFF_BASE_MS shl (attempt - 1)).coerceAtMost(AUTO_RECOVERY_BACKOFF_MAX_MS)
+    }
+
+    /** 上报一个播放相关事件（article_id 放 properties，见 [handlePlayingStarted] 的说明）。 */
+    private fun reportPlaybackEvent(eventName: String, properties: Map<String, Any?>) {
+        val props = properties.toMutableMap()
+        if (_currentArticleId.value != null) {
+            props["article_id"] = _currentArticleId.value
+        }
+        analytics.report(eventName, props)
+    }
+
     /**
      * 播放失败的处理入口（2026-10-23 新增，internal 便于单测）。
      *
@@ -1218,6 +1461,9 @@ class PlayerController @Inject constructor(
      * 文案统一走 [friendlyError] —— 仓内唯一的错误文案定义处。
      */
     internal fun notifyPlaybackError(cause: Throwable) {
+        // 真失败（不是被自动重连接管）→ 取消还挂着的重连，别让它事后又跳出来。
+        positionHandler.removeCallbacks(recoveryRunnable)
+        recoveryAttempts = 0
         val message = friendlyError(cause, fallback = "播放失败，请点重试")
         Log.w(TAG, "playback error: article=${_currentArticleId.value}, cause=$cause")
         _playbackError.value = message
@@ -1238,6 +1484,15 @@ class PlayerController @Inject constructor(
      * 音频地址失效（服务器换了 OSS 签名），重播时应当**重新取一次地址** ——
      * 而 [play] 的入参来自调用方，重试正好能把最新的地址带进来。
      * 当前这一路（自己持有的 URL）则原样重来。
+     *
+     * ## 位置必须保留（2026-10-26 修）
+     *
+     * 此前 `retry()` **不带位置** ⇒ `play()` 的 `resumePositionMs` 取默认值 0
+     * ⇒ 播放器从头开始。而这个按钮最常出现的场合恰恰是「听了 3 分钟断了」
+     * —— 用户点一下重试，**前 3 分钟白听**。
+     *
+     * ⚠️ 完听判定也跟着这个位置走（[play] 用它设基线），
+     * 所以保位置不只是体验问题，也是口径问题。
      */
     fun retry() {
         val url = _currentAudioUrl.value
@@ -1248,12 +1503,15 @@ class PlayerController @Inject constructor(
             _playbackError.value = null
             return
         }
+        // 位置要在调用 play() **之前**取 —— play() 会 seek 到新位置。
+        val resumeAtMs = _position.value
         play(
             audioUrl = url,
             title = _currentTitle.value,
             author = _currentAuthor.value.ifBlank { null },
             coverUrl = _currentCoverUrl.value,
             articleId = _currentArticleId.value,
+            resumePositionMs = resumeAtMs,
         )
     }
 
@@ -1261,6 +1519,8 @@ class PlayerController @Inject constructor(
         // 这次「启动」作废：用户还没听到声音就按了暂停，
         // 之后按播放是**恢复**不是**启动**，不该算进启动耗时。
         audioStartTimer.onPausedOrStopped()
+        // 用户主动暂停 ⇒ 别再自动接上了（用户说停就停）。
+        cancelAutoRecovery()
         _state.value = PlaybackState.PAUSED
         player.pause()
         // 位置也记一份：恢复时要从这儿接着听。
@@ -1273,6 +1533,7 @@ class PlayerController @Inject constructor(
 
     fun stop() {
         audioStartTimer.onPausedOrStopped()
+        cancelAutoRecovery()
         _state.value = PlaybackState.STOPPED
         player.stop()
         stopPolling()
@@ -1321,6 +1582,7 @@ class PlayerController @Inject constructor(
     fun release() {
         stopPolling()
         stopProgressReporting()
+        cancelAutoRecovery()
         _state.value = PlaybackState.IDLE
         _position.value = 0L
         _duration.value = 0L
@@ -1355,6 +1617,31 @@ class PlayerController @Inject constructor(
     companion object {
         private const val TAG = "PlayerController"
         private const val POLL_INTERVAL_MS = 500L
+
+        /**
+         * 自动重连的最大次数（2026-10-26）。
+         *
+         * 为什么要上限：网络长时间不可用时，无限重试会变成一个**耗电的
+         * 后台循环**（每次都要重开连接），而后台正是最不该耗电的场景。
+         * 5 次退避下来约 30 秒，覆盖了绝大多数瞬时抖动；
+         * 还不行就老实报错，让用户知道「这次是真断 了」。
+         */
+        internal const val MAX_AUTO_RECOVERY_ATTEMPTS = 5
+
+        /** 自动重连的退避基数（毫秒）：第 2 次起 2s，然后翻倍。 */
+        internal const val AUTO_RECOVERY_BACKOFF_BASE_MS = 2_000L
+
+        /** 自动重连的退避上限（毫秒）：最多等 15 秒。 */
+        internal const val AUTO_RECOVERY_BACKOFF_MAX_MS = 15_000L
+
+        /**
+         * 恢复期的提示文案。
+         *
+         * 为什么单独一句而不是复用 [com.tingxia.audio.ui.ErrorMessages.friendlyError]：
+         * friendlyError 映射的是「**失败**原因」，而这里是「**正在自己
+         * 修**」的进度提示 —— 语义相反，混用会让用户以为音频没了。
+         */
+        private const val RECOVERING_MESSAGE = "网络不稳，正在重连…"
 
         /**
          * 后台慢跳间隔 —— **不是**拍脑袋的数，取的是

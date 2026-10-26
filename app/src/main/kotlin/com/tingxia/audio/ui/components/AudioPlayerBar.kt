@@ -95,7 +95,11 @@ fun AudioPlayerBar(
     // 不可见（滚走 / App 退后台）时把轮询降频，声音照放不误。
     ObservePlayerPositionUpdates(controller)
 
-    val isPlaying = playbackState == PlaybackState.PLAYING
+    // RECOVERING 也算「在播」（2026-10-26）：它只是暂时断了流，
+    // 按钮该显示暂停、点了也该能暂停 —— 而不是跳去「重新起播」，
+    // 那会把已经听过的部分从头再来一遍。
+    val isPlaying = playbackState == PlaybackState.PLAYING ||
+        playbackState == PlaybackState.RECOVERING
     val isBuffering = playbackState == PlaybackState.IDLE && audioUrl != null && position == 0L
 
     // 拖动进度：seeking 时用本地 fraction，松手才 seekTo，避免与轮询打架

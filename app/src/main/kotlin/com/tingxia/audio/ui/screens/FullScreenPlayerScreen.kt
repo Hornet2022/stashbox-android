@@ -371,13 +371,18 @@ fun FullScreenPlayerScreen(
 
             // 5 个控制按钮 — 上一首 / 后退 15s / 播放 / 前进 30s / 下一首
             ControlButtons(
-                isPlaying = playbackState == PlaybackState.PLAYING,
+                // RECOVERING 也算「在播」（2026-10-26）：断流恢复中，
+                // 按钮该显示暂停、点了也该能暂停。
+                isPlaying = playbackState == PlaybackState.PLAYING ||
+                    playbackState == PlaybackState.RECOVERING,
                 onPlayPause = {
                     // 触感：播放/暂停是「耳朵和手同时确认」的动作，没有触感时
                     // 用户会怀疑自己没点到（图标只有 180ms 淡入淡出）。
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     when (playbackState) {
-                        PlaybackState.PLAYING -> controller.pause()
+                        // RECOVERING 与 PLAYING 同义：暂停会顺带取消自动重连
+                        // （见 PlayerController.pause）。
+                        PlaybackState.PLAYING, PlaybackState.RECOVERING -> controller.pause()
                         // P1-2：暂停态 → resume（沿用已加载的 MediaItem，不从头播放）
                         PlaybackState.PAUSED -> controller.resume()
                         // 失败态 → 重试。走 play() 重来一遍，音频地址可能已失效，

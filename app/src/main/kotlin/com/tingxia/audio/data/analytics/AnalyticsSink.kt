@@ -59,4 +59,27 @@ object EventNames {
      * 变 true），也就是「声音出来前等了多久」。
      */
     const val AUDIO_PLAY_START_CLIENT = "audio_play_start_client"
+
+    /**
+     * 播放中断（`playback_error`）。属性：
+     * `kind`（`transient_network` = 瞬时网络类、会被自动重连）、`attempt`
+     * （这是第几次重连尝试）、`position_ms`（中断时的播放位置）、
+     * `duration_ms`（音频总长）、`cause`（异常类名）、`article_id`。
+     *
+     * **为什么必须有这条**：2026-10-26 之前的播放失败**只写进 logcat**
+     * （`Log.w(TAG, "playback error: ...")`），服务端没有任何记录 ⇒
+     * 内测用户说「播几分钟就停了」，我们只能靠猜是哪一类断流。
+     * 有这条之后，下一次同样的反馈能直接查：断在第几分钟、
+     * 是什么异常、后台还是前台、有没有自动接上。
+     */
+    const val PLAYBACK_ERROR = "playback_error"
+
+    /**
+     * 自动重连成功（`playback_recovered`）。属性：`attempts`（试了几次才成）、
+     * `article_id`。
+     *
+     * 它与 [PLAYBACK_ERROR] 是一对：**只有失败没有恢复，就知道是「彻底断
+     * 了」；成对出现，就知道是「抖了一下、自己接上了」**。
+     */
+    const val PLAYBACK_RECOVERED = "playback_recovered"
 }

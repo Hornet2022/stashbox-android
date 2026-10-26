@@ -287,7 +287,11 @@ class ArticleDetailViewModel @Inject constructor(
                             "savedPos=$savedPositionMs",
                     )
                     when {
-                        sameArticle && state == PlaybackState.PLAYING -> {
+                        // RECOVERING 与 PLAYING 同义（2026-10-26）：断流恢复中，
+                        // 此时重新起播会把已经听过的部分从头再来一遍，
+                        // 还会打断正在进行的自动重连。
+                        sameArticle && (state == PlaybackState.PLAYING ||
+                            state == PlaybackState.RECOVERING) -> {
                             android.util.Log.i(
                                 "ArticleDetailViewModel",
                                 "已在播放该文章，跳过自动起播（避免重备播放器打断声音）",
