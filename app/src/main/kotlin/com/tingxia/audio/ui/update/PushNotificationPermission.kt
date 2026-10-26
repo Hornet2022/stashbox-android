@@ -12,12 +12,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.core.content.ContextCompat
 
 /**
@@ -182,6 +186,34 @@ fun rememberNotificationPermissionState(): NotificationPermissionState {
     }
 
     val sdkInt = remember { Build.VERSION.SDK_INT }
+
+    // ⚠️ 回到前台时**必须重新读一遍事实**（2026-10-26 修，真机实测发现的）。
+    //
+    // 用户路径就是这样的：点「播放通知」→ 跳到系统通知设置页 → 打开开关 →
+    // 回到 App。**如果不刷新，App 仍然写着「通知已关闭」** ——
+    // 用户明明刚打开，App 却在说它没开（实测截图确认过）。
+    // 那等于「App 不说实话」，正是这次要消灭的那类问题。
+    //
+    // 为什么用 **Activity** 的生命周期而不是 `LocalLifecycleOwner`：
+    // 后者在 Navigation Compose 里被覆盖成 NavBackStackEntry，
+    // **entry 的身份会漂移** ⇒ effect 被拆掉重建 ⇒ 观察者可能只注册不触发
+    // （同一个坑在 `ui/components/ObservePlayerPositionUpdates.kt` 里已经踩过一次，
+    // 那里有完整的说明）。Activity 实例在整个 App 生命周期里唯一且稳定。
+    val activity = context.findActivity()
+    DisposableEffect(activity) {
+        val lifecycle = (activity as? LifecycleOwner)?.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                granted = context.isNotificationPermissionGranted()
+                notificationsEnabled =
+                    NotificationManagerCompat.from(context).areNotificationsEnabled()
+                askedBefore = NotificationPermissionAskedStore.wasAsked(context)
+                shouldShowRationale = readShouldShowRationale(context)
+            }
+        }
+        lifecycle?.addObserver(observer)
+        onDispose { lifecycle?.removeObserver(observer) }
+    }
 
     val action = notificationPermissionAction(
         NotificationPermissionFacts(
