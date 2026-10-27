@@ -63,8 +63,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.remote.Notification
+import com.tingxia.audio.ui.theme.NotificationBodyDark
 import com.tingxia.audio.ui.theme.NotificationReadBackground
+import com.tingxia.audio.ui.theme.NotificationReadBackgroundDark
 import com.tingxia.audio.ui.theme.NotificationUnreadBackground
+import com.tingxia.audio.ui.theme.NotificationUnreadBackgroundDark
 import com.tingxia.audio.ui.theme.NotificationUnreadDot
 import com.tingxia.audio.ui.theme.TagDefault
 import com.tingxia.audio.ui.theme.TagEntertainment
@@ -73,6 +76,7 @@ import com.tingxia.audio.ui.theme.TagHistory
 import com.tingxia.audio.ui.theme.TagScience
 import com.tingxia.audio.ui.theme.TagSports
 import com.tingxia.audio.ui.theme.TagTech
+import com.tingxia.audio.ui.theme.isDarkTheme
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -266,10 +270,44 @@ private fun NotificationItem(
     notification: Notification,
     onClick: () -> Unit,
 ) {
+    // 2026-10-27（P0）：卡片底色原来**只用浅色那套常量**
+    // （NotificationUnreadBackground #F0EBE1 / NotificationReadBackground Cream），
+    // 而卡片里的文字取的是 `colorScheme.onSurface`(#E8E4DD) / `onSurfaceVariant`(#8C8680)
+    // —— 深色模式下那是**近白**色。
+    //
+    // 结果：深色模式的通知屏 = 一块块**亮奶油色**卡片浮在暗底上，文字近白压亮底，
+    // 实测对比度 1.07:1 / 1.13:1 ⇒ **整屏通知在深色模式下等于消失**。
+    //
+    // ⚠️ 这里必须用 `isDarkTheme()`（App **实际**的深浅，跟随手动主题开关），
+    // 不能用 `isSystemInDarkTheme()`：用户手动选浅色而系统是深色时，
+    // 问系统会取错的一套（QuotaBanner 在 2026-10-27 就踩过同一个坑）。
+    val isDark = isDarkTheme()
     val backgroundColor = if (!notification.read) {
-        NotificationUnreadBackground
+        if (isDark) NotificationUnreadBackgroundDark else NotificationUnreadBackground
     } else {
-        NotificationReadBackground
+        if (isDark) NotificationReadBackgroundDark else NotificationReadBackground
+    }
+
+    // 正文与时间戳的文字色。
+    //
+    // ## 浅色 / 深色用的是**两套**值（2026-10-27 修）
+    //
+    // 浅色：正文用 `onSurfaceVariant`(#4A4642) 压米白卡底 = 7.87:1 ✓，
+    //       且浅色下「标题比正文重」靠明度差维持（标题占 onSurface）。
+    //
+    // 深色：正文用 `NotificationBodyDark`(#948F88)，标题用 `onSurface`(#E8E4DD)。
+    //
+    //   之前深色下正文**直接用 onSurface** ⇒ 标题与正文同色，层级全丢。
+    //   换成 onSurfaceVariant 也不行 —— 它压**未读**卡底(#2E2823) 只有 4.04:1
+    //   （正文需 ≥4.5:1；未读卡底比已读卡底亮一档，是这条最紧）。
+    //   ⇒ 取中间档 #948F88：压未读底 4.53:1 ✓ / 压已读底 5.05:1 ✓，
+    //     与标题的明度差 2.53:1 ⇒ 层级回来且两行都达标。
+    //
+    // 数值被 ThemeContrastTest 钉住。
+    val bodyTextColor = if (isDark) {
+        NotificationBodyDark
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Card(
@@ -314,12 +352,17 @@ private fun NotificationItem(
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        // 标题色**显式**写出，不靠继承 LocalContentColor ——
+                        // Card 的 contentColor 没被指定时，继承链会取到外层的
+                        // onSurface；深色下标题与正文必须拉开一档（见 bodyTextColor
+                        // 那段注释），靠继承就分不出层级了。
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
                         text = formatTime(notification.created_at),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = bodyTextColor,
                     )
                 }
                 Text(
@@ -327,7 +370,7 @@ private fun NotificationItem(
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = bodyTextColor,
                 )
             }
         }

@@ -1,7 +1,6 @@
 package com.tingxia.audio.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +24,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tingxia.audio.R
+import com.tingxia.audio.ui.theme.isDarkTheme
 import com.tingxia.audio.ui.theme.OnWarningContainerDark
 import com.tingxia.audio.ui.theme.OnWarningContainerLight
 import com.tingxia.audio.ui.theme.WarningContainerDark
@@ -55,6 +55,8 @@ fun QuotaBanner(
     if (used == null || total == null || remaining == null) return
     // -1 = 不限（pro）：没有"用完"这回事，不提示。
     if (total < 0) return
+    // 当前**实际**深浅（跟随手动主题开关，不是问系统）—— 见 isDarkTheme 的说明。
+    val isDark = isDarkTheme()
     // 0 = 停用：直接走 Exhausted 分支，别去算 pct（会除零）
     if (total == 0) {
         BannerBlock(
@@ -86,8 +88,14 @@ fun QuotaBanner(
                 // Material 200/900，一对只适配浅色的常量。深色模式下底色是一块
                 // 亮橙、文字继承近白的 onSurface，对比度约 1.1:1，提示条等于消失。
                 // 警告是纯语义色，和品牌色系无关，所以走独立的浅深两套常量。
-                color = if (isSystemInDarkTheme()) WarningContainerDark else WarningContainerLight,
-                contentColor = if (isSystemInDarkTheme()) OnWarningContainerDark else OnWarningContainerLight,
+                //
+                // ⚠️ 2026-10-27：这里原来直接调 `isSystemInDarkTheme()`。
+                // 那在加了「跟随系统/浅色/深色」手动开关之后就是**错**的：
+                // 用户手动选了浅色，系统是深色 → 这里仍取深色的一套，
+                // 于是一条橙底警告条浮在浅色页面上（且文字对比度约 1.1:1，
+                // 等于看不见）。⇒ 必须读**同一份**主题状态，而不是问系统。
+                color = if (isDark) WarningContainerDark else WarningContainerLight,
+                contentColor = if (isDark) OnWarningContainerDark else OnWarningContainerLight,
                 icon = Icons.Filled.Warning,
                 title = stringResource(R.string.quota_low_title),
                 subtitle = stringResource(R.string.quota_low_subtitle, remaining, total),

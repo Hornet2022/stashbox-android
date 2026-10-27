@@ -187,6 +187,15 @@ android {
         //   KNOWN_TAG_CATEGORIES 兜底，最后回退到原文。
         // ⚠️ 升 versionCode 是硬要求：0.4.4(17) 已上线 ⇒ 停在 17 的话，
         //   已装 0.4.4 的内测用户收不到更新提示。
+        // 0.5.0(23)：通知徽标 + 响应式宽屏布局 + 主题控制器。
+        // · 通知徽标（NotificationBadgeIcon）：各入口显示未读数，几何对齐
+        //   用 BadgeGeometryProbeTest 钉坐标（红过），语义用 NotificationBadgeIconTest。
+        // · 响应式宽屏（Responsive.kt）：限宽 + 居中，避免宽屏下内容被拉满；
+        //     ResponsiveContentTest 断言渲染后宽度（先限后填，写反会当场红）。
+        // · 主题控制器（ThemeController.kt）：浅色/深色切换，ThemeContrastTest
+        //     锁对比度，避免在深色下文字/背景对比不足。
+        // ⚠️ 升 versionCode 是硬要求：0.4.9(22) 已上线 ⇒ 停在 22 的话，
+        //   已装 0.4.9 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
         // 0.4.6(19)：用户剪藏内容共享（2026-10-26 产品拍板）
         // · 剪藏的内容默认只有自己可见；共享后可让订阅了对应标签的
         //   其他用户通过订阅流看到、读、听；取消共享恢复只有自己可见。
@@ -217,8 +226,8 @@ android {
         //   并随本版一起发布标签订阅相关修复。
         // ⚠️ 升 versionCode 是硬要求：0.4.7(20) 已上线 ⇒ 停在 20 的话，
         //   已装 0.4.7 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
-        versionCode = 22
-        versionName = "0.4.9"
+        versionCode = 23
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -455,6 +464,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    // 2026-10-27：响应式布局（Material 3 指南 R3.1 / R3.4）。
+    // 之前全仓没有任何窗口尺寸判断 —— 平板/折叠屏上内容满宽铺开，
+    // 单行文字能拉到 1000+dp，行长失控（WCAG 建议正文行长 ≤ 80 字符）。
+    implementation(libs.androidx.compose.material3.window.size)
     // CP8.5 — FullScreenPlayer 用到 SkipNext / Forward30 / Bookmark / Tag 等扩展图标
     //
     // 2026-10-03 实测：全项目只用 24 个图标，且命名空间全是 Filled/Outlined、

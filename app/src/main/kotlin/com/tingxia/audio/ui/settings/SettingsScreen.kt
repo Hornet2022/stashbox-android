@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Security
 import androidx.core.net.toUri
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -67,6 +71,8 @@ import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.ui.tts.TtsPreferenceViewModel
 import com.tingxia.audio.ui.tts.VoicePickerSheet
 import com.tingxia.audio.ui.tts.formatSpeedLabel
+import com.tingxia.audio.ui.theme.ThemeMode
+import com.tingxia.audio.ui.theme.rememberThemeController
 import com.tingxia.audio.ui.update.AppUpdateDialog
 import com.tingxia.audio.ui.update.AppUpdateViewModel
 import com.tingxia.audio.ui.update.NotificationPermissionAction
@@ -160,6 +166,14 @@ fun SettingsScreen(
     }
     val speed by playerController.speed.collectAsStateWithLifecycle()
     var showSpeedSheet by remember { mutableStateOf(false) }
+
+    // 主题模式（2026-10-27，Material 3 指南 R1.9）。
+    //
+    // 状态放在 [ThemeController]（Application 作用域的单例）而不是这里 ——
+    // 根主题 TingxiaTheme 也要读它，两边必须是同一份，否则切换后根主题不跟着变。
+    val themeController = rememberThemeController()
+    val themeMode by themeController.mode.collectAsStateWithLifecycle()
+    var showThemePicker by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     if (showFeedbackSheet && feedbackRepository != null) {
@@ -275,7 +289,23 @@ fun SettingsScreen(
                 )
             }
 
-            // ── 关于 ──
+            // ── 外观 ──
+    // 2026-10-27：主题模式（Material 3 指南 R1.9 —— 必须提供「跟随系统/浅色/深色」
+    // 的手动覆盖）。之前只有「跟随系统」，用户想看浅色就只能去改整个手机的系统设置。
+    //
+    // 为什么用 AlertDialog 而不是 ModalBottomSheet：
+    // 这是**三选一**且当前值即答案，用 radio 更直白；而且改主题会立刻重绘整棵树，
+    // 对话框关掉时用户已经看到新主题了，不需要额外的"应用"按钮。
+    SettingsSection("外观") {
+        SettingsRow(
+            icon = Icons.Filled.Palette,
+            title = "主题",
+            subtitle = themeMode.displayName,
+            onClick = { showThemePicker = true },
+        )
+    }
+
+    // ── 关于 ──
             SettingsSection("关于") {
                 // 2026-10-24：**ICP 备案公示**。
                 //
@@ -477,6 +507,45 @@ fun SettingsScreen(
     // CP-TTS-VOICE: 音色选择 + 播放速度两个 sheet。
     // 设置页没有文章上下文 → currentArticleId 传 null，
     // 于是「用新音色重新生成这一篇」那行不显示（重生成入口在文章详情页）。
+    if (showThemePicker) {
+        // 主题三选一。选中即生效（ThemeController 改 StateFlow → 根主题重绘），
+        // 所以不需要"确定"按钮；点了 radio 就地切，对话框留着让用户看清结果。
+        AlertDialog(
+            onDismissRequest = { showThemePicker = false },
+            title = { Text("主题") },
+            text = {
+                Column {
+                    ThemeMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = mode == themeMode,
+                                    onClick = { themeController.setMode(mode) },
+                                    role = Role.RadioButton,
+                                )
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = mode == themeMode,
+                                // 点 radio 本身不要重复触发（外层 Row 已经处理了）
+                                onClick = null,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                mode.displayName,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemePicker = false }) { Text("完成") }
+            },
+        )
+    }
     if (showVoicePicker) {
         VoicePickerSheet(
             onDismiss = { showVoicePicker = false },

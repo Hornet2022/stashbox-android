@@ -4,7 +4,10 @@ import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.tingxia.audio.data.remote.DeviceInfo
 import com.tingxia.audio.data.remote.FeedbackCategory
@@ -42,7 +48,7 @@ import com.tingxia.audio.data.repository.FeedbackRepository
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.imePadding
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FeedbackBottomSheet(
     articleId: String? = null,
@@ -119,25 +125,56 @@ fun FeedbackBottomSheet(
 
             // Star rating
             Text("评分（可选）", style = MaterialTheme.typography.titleSmall)
-            Row(
+            // 2026-10-27 可点区：原来 clickable 直接挂在 Text("●") 上，
+            // 可点区只有一个字形（≈20dp），低于 48dp 触控目标（R6.5/R6.6）——
+            // 手指头点不准，评分经常点不中。
+            // 现在触控容器提到 48dp（Box 负责，字形原样放中间）。
+            // 这一行同时改成 FlowRow：48dp × 5 + 间距 + 「N / 5」已经接近
+            // 360dp 机型扣掉 padding 后的正文宽，窄屏或 200% 字号下必须允许折行，
+            // 否则右边的评分数字会被切掉。
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 (1..5).forEach { star ->
-                    Text(
-                        text = if (star <= rating) "●" else "○",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (star <= rating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.clickable { rating = star },
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clickable { rating = star }
+                            // 2026-10-27 语义：星形是纯图形，不给语义就等于
+                            // 读屏用户完全不知道这里能打分（R6.1）。
+                            // 描述说「打几分」这个动作，不说「这是个圆点」这种外观（R6.2）。
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = "评分 $star 星，满分 5 星"
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = if (star <= rating) "●" else "○",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = if (star <= rating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            // clearAndSetSemantics：字形本身不再单独播报，
+                            // 免得读屏把「●」当文本念出来、和上面的评分描述重复。
+                            modifier = Modifier.clearAndSetSemantics { },
+                        )
+                    }
                 }
                 if (rating > 0) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "$rating / 5",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    // 2026-10-27：Compose foundation 1.7.5 的 FlowRow 同一行内
+                    // 子项默认顶部对齐（没有 itemVerticalAlignment 参数），
+                    // 「N / 5」不管就会贴在 48dp 星形行的顶端。
+                    // fillMaxRowHeight 把这一项撑到本行最高，再居中。
+                    Box(
+                        modifier = Modifier.fillMaxRowHeight(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "$rating / 5",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
 
@@ -197,7 +234,16 @@ fun FeedbackBottomSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    // 2026-10-27：原来没写 color，CircularProgressIndicator 默认取
+                    // colorScheme.primary，而它就放在同为 primary 底的 Button 里 ——
+                    // 同色 1:1，转圈时按钮看上去"毫无动静"，
+                    // 用户以为没点上，于是连点好几遍、重复提交。
+                    // 改成 onPrimary（同 CaptureScreen.kt:227 的写法）。
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                 }
                 Text("提交反馈")

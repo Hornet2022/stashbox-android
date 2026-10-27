@@ -57,19 +57,24 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.tingxia.audio.ui.update.NotificationPermissionAction
 import com.tingxia.audio.ui.update.rememberNotificationPermissionState
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,6 +106,17 @@ import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
 import com.tingxia.audio.ui.components.ObservePlayerPositionUpdates
 import com.tingxia.audio.ui.theme.WarmOchre
+import com.tingxia.audio.ui.theme.Cream
+import com.tingxia.audio.ui.theme.Neutral100
+import com.tingxia.audio.ui.theme.Neutral200
+import com.tingxia.audio.ui.theme.PlayerBgMid
+import com.tingxia.audio.ui.theme.PlayerBgTop
+import com.tingxia.audio.ui.theme.PlayerErrorBg
+import com.tingxia.audio.ui.theme.PlayerErrorBorder
+import com.tingxia.audio.ui.theme.PlayerErrorText
+import com.tingxia.audio.ui.theme.PlayerHighlight
+import com.tingxia.audio.ui.theme.PlayerMuted
+import com.tingxia.audio.ui.theme.PlayerSheetBg
 import androidx.hilt.navigation.compose.hiltViewModel
 import android.widget.Toast
 import com.tingxia.audio.ui.friendlyError
@@ -218,7 +234,26 @@ fun FullScreenPlayerScreen(
     // 收藏是乐观更新：先翻图标，失败再翻回来并提示。播放器的收藏不该
     // 阻塞在一次网络往返上。
     var favoriteOverride by remember { mutableStateOf<Boolean?>(null) }
-    val shownFavorite = favoriteOverride ?: isFavorite
+    // 收藏态的真实来源（2026-10-27）。
+    //
+    // 此前 `isFavorite` 入参在 MainActivity 里**从来没传过**（默认值 false），
+    // 屏内也没有任何回填 ⇒ 收藏图标永远显示"未收藏"，
+    // 即便这一篇早就被收藏了。用户点一下才发现"原来早就收藏了"，
+    // 于是再点一次 —— 反而把它取消收藏了。图标在**说谎**。
+    //
+    // 现在进屏时从仓库读一次真实状态；读失败保持"未收藏"（不猜），
+    // 但绝不因为读失败就把状态锁死。
+    var favoriteFromRepo by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(currentArticleId, favoritesRepository) {
+        val repo = favoritesRepository
+        val id = currentArticleId
+        favoriteFromRepo = null
+        if (repo == null || id.isNullOrBlank()) return@LaunchedEffect
+        favoriteFromRepo = runCatching {
+            repo.listFavorites().any { it.article_id == id }
+        }.getOrNull()
+    }
+    val shownFavorite = favoriteOverride ?: favoriteFromRepo ?: isFavorite
     val speedSheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
     )
@@ -229,9 +264,9 @@ fun FullScreenPlayerScreen(
     val backgroundBrush = remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF3A2F26),  // 上：深暖棕
-                Color(0xFF5C4A3A),  // 中：主品牌色
-                Color(0xFF7A6650),  // 下：略亮
+                PlayerBgTop,  // 上：深暖棕
+                PlayerBgMid,  // 中：主品牌色
+                PlayerMuted,  // 下：略亮
             ),
         )
     }
@@ -281,12 +316,13 @@ fun FullScreenPlayerScreen(
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             showPlaylistSheet = true
                         },
-                        sizeDp = 44,
+                        // 48dp：R6.5 最小触控区。原先 44dp 比 Material 规范小 4dp。
+                        sizeDp = 48,
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = "播放列表",
-                            tint = Color(0xFFF5F2EB),
+                            tint = Cream,
                             iconSizeDp = 24,
                         )
                     }
@@ -559,7 +595,14 @@ fun FullScreenPlayerScreen(
         ModalBottomSheet(
             onDismissRequest = { showSpeedSheet = false },
             sheetState = speedSheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
+            // 2026-10-27：原来用 `MaterialTheme.colorScheme.surface` ——
+            // 浅色主题下那是**米白**，于是浅色模式下会有一块白 sheet 盖在
+            // 深色播放器上（另外两个 sheet 用的是播放器本地深色，不一致）。
+            // 播放器是独立的深色界面，它的所有 sheet 都该用同一套本地底色。
+            containerColor = PlayerSheetBg,
+            contentColor = Cream,
+            // 拖拽把手：让用户知道这块可以往下拖走（R5.9）
+            dragHandle = { BottomSheetDefaults.DragHandle(color = PlayerMuted) },
         ) {
             // CP-TTS-VOICE: 接真播放器 + 服务端下发的档位。
             // 此前这里是 onSpeedSelected = { hide sheet } —— 点了什么都不发生,
@@ -600,7 +643,10 @@ fun FullScreenPlayerScreen(
         ModalBottomSheet(
             onDismissRequest = { showSleepTimerSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color(0xFF3A2F26),
+            containerColor = PlayerBgTop,
+            contentColor = Cream,
+            // 拖拽把手：让用户知道这块可以往下拖走（R5.9）
+            dragHandle = { BottomSheetDefaults.DragHandle(color = PlayerMuted) },
         ) {
             Column(
                 modifier = Modifier
@@ -610,15 +656,14 @@ fun FullScreenPlayerScreen(
             ) {
                 Text(
                     text = "睡眠定时器",
-                    color = Color(0xFFF5F2EB),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    color = Cream,
+                    style = MaterialTheme.typography.titleLarge,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "到点自动暂停，播放位置会保留，醒来还能接着听。",
-                    color = Color(0xFFD4CFC6),
-                    fontSize = 13.sp,
+                    color = Neutral200,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 SLEEP_TIMER_OPTIONS.forEach { minutes ->
@@ -629,7 +674,7 @@ fun FullScreenPlayerScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (active) Color(0xFFFFFFFF).copy(alpha = 0.16f)
+                                if (active) PlayerHighlight.copy(alpha = 0.16f)
                                 else Color.Transparent
                             )
                             .clickable {
@@ -643,14 +688,14 @@ fun FullScreenPlayerScreen(
                     ) {
                         Text(
                             text = label,
-                            color = Color(0xFFF5F2EB),
-                            fontSize = 15.sp,
+                            color = Cream,
+                            style = MaterialTheme.typography.bodyLarge,
                         )
                         if (active) {
                             Text(
                                 text = "当前",
-                                color = Color(0xFFD4CFC6),
-                                fontSize = 13.sp,
+                                color = Neutral200,
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                         }
                     }
@@ -666,7 +711,10 @@ fun FullScreenPlayerScreen(
         ModalBottomSheet(
             onDismissRequest = { showPlaylistSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color(0xFF2E251E),
+            containerColor = PlayerSheetBg,
+            contentColor = Cream,
+            // 拖拽把手：让用户知道这块可以往下拖走（R5.9）
+            dragHandle = { BottomSheetDefaults.DragHandle(color = PlayerMuted) },
         ) {
             PlaylistSheetContent(
                 items = queueItems,
@@ -715,21 +763,21 @@ private fun TopBar(
     ) {
         PressableIconButton(
             onClick = onDismiss,
-            sizeDp = 44,
+            // 48dp：R6.5 最小触控区（原先 44dp）。
+            sizeDp = 48,
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
                 contentDescription = "收起",
-                tint = Color(0xFFF5F2EB),
+                tint = Cream,
                 iconSizeDp = 28,
             )
         }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = title,
-            color = Color(0xFFE8E4DD),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
+            color = Neutral100,
+            style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.Center,
         )
@@ -737,7 +785,7 @@ private fun TopBar(
         if (trailingAction != null) {
             trailingAction()
         } else {
-            Spacer(modifier = Modifier.width(44.dp))
+            Spacer(modifier = Modifier.width(48.dp))
         }
     }
 }
@@ -766,8 +814,8 @@ private fun LargeCover(
     val coverBrush = remember {
         Brush.linearGradient(
             colors = listOf(
-                Color(0xFF7A6650),
-                Color(0xFFA67B5B),  // WarmOchre
+                PlayerMuted,
+                WarmOchre,  // WarmOchre
             ),
         )
     }
@@ -786,12 +834,18 @@ private fun LargeCover(
         // 首字字号从容器宽度算，不写死 140.sp。
         // 容器是 dp，字号是 sp —— 系统字号放大到 1.5x 时 140sp 会涨到 210sp，
         // 直接把封面这个视觉中心撑爆。写死数字在这里一定是错的。
+        //
+        // 语义：这个首字是**装饰**，不是信息（R6.2）。
+        // 标题正文已经在上方单独播报了，TalkBack 再把封面读一遍
+        // （"小" / "听" / 某个汉字）纯属噪音 —— 而且读出来的是个残缺的字，
+        // 用户会以为标题就是这么个单字。⇒ 整个封面对无障碍树隐藏。
         Text(
             text = initials,
             color = Color.White.copy(alpha = 0.85f),
             fontSize = (maxWidth.value * 0.40f).sp,
             fontWeight = FontWeight.Light,
             fontFamily = FontFamily.Serif,
+            modifier = Modifier.clearAndSetSemantics { },
         )
         if (coverUrl == null) {
             Box(
@@ -826,13 +880,13 @@ private fun Metadata(
     ) {
         Text(
             text = title,
-            color = Color(0xFFF5F2EB),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.SemiBold,
+            color = Cream,
+            // 标题走 typography role（titleLarge = 20sp Serif SemiBold / lineHeight 28sp）。
+            // 原先写死 22sp + 单独指定 lineHeight 28sp + Serif —— 现在由 role 统一带，
+            // 字号体系只有一处真相（R4.3）。
+            style = MaterialTheme.typography.titleLarge,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
-            lineHeight = 28.sp,
-            fontFamily = FontFamily.Serif,
         )
         if (!author.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -842,8 +896,8 @@ private fun Metadata(
             ) {
                 Text(
                     text = author,
-                    color = Color(0xFFD4CFC6),
-                    fontSize = 14.sp,
+                    color = Neutral200,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -851,7 +905,7 @@ private fun Metadata(
                     modifier = Modifier
                         .size(3.dp)
                         .background(
-                            Color(0xFFD4CFC6).copy(alpha = 0.5f),
+                            Neutral200.copy(alpha = 0.5f),
                             CircleShape,
                         ),
                 )
@@ -862,9 +916,8 @@ private fun Metadata(
                     // 改报播放器确实掌握、也确实会变的量：当前码率。
                     // 多码率本来就是本 App 的招牌能力，把它露出来更有意义。
                     text = "$bitrate kbps",
-                    color = Color(0xFFD4CFC6),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = Neutral200,
+                    style = MaterialTheme.typography.labelMedium,
                 )
             }
         }
@@ -905,8 +958,12 @@ private fun SubtitleArea(
     text: String?,
     modifier: Modifier = Modifier,
 ) {
-    val lineHeightSp = 26.sp
-    val reservedHeight = with(LocalDensity.current) { (lineHeightSp * 2).toDp() }
+    // 字幕用 bodyLarge（16sp）再放宽行距到 26sp —— 字幕是"正在听到哪一句"，
+    // 是这一屏里被读得最多的文字，需要比正文更松的行距。
+    // 固定高度由这个 style 的 lineHeight 推导，而不是另写一个常数 ——
+    // 否则改了行距，保留高度还是旧的，文字会被裁掉一截。
+    val subtitleStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp)
+    val reservedHeight = with(LocalDensity.current) { (subtitleStyle.lineHeight * 2).toDp() }
     Box(
         modifier = modifier.height(reservedHeight),
     ) {
@@ -925,9 +982,8 @@ private fun SubtitleArea(
             } else {
                 Text(
                     text = line,
-                    color = Color(0xFFF5F2EB),
-                    fontSize = 17.sp,
-                    lineHeight = lineHeightSp,
+                    color = Cream,
+                    style = subtitleStyle,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(),
@@ -999,8 +1055,8 @@ private fun ProgressSection(
             onValueChange = { onDragChange(it) },
             onValueChangeFinished = { onDragFinish(dragValue) },
             colors = SliderDefaults.colors(
-                thumbColor = Color(0xFFF5F2EB),
-                activeTrackColor = Color(0xFFF5F2EB),
+                thumbColor = Cream,
+                activeTrackColor = Cream,
                 inactiveTrackColor = Color.White.copy(alpha = 0.25f),
             ),
             modifier = Modifier.fillMaxWidth(),
@@ -1016,13 +1072,13 @@ private fun ProgressSection(
             }
             Text(
                 text = formatTime(displayPosition),
-                color = Color(0xFFD4CFC6),
-                fontSize = 12.sp,
+                color = Neutral200,
+                style = MaterialTheme.typography.labelMedium,
             )
             Text(
                 text = formatTime(duration),
-                color = Color(0xFFD4CFC6),
-                fontSize = 12.sp,
+                color = Neutral200,
+                style = MaterialTheme.typography.labelMedium,
             )
         }
     }
@@ -1050,27 +1106,34 @@ private fun PlaybackErrorBanner(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0x33FF5252), RoundedCornerShape(12.dp))
-            .border(1.dp, Color(0x66FF5252), RoundedCornerShape(12.dp))
+            .background(PlayerErrorBg, RoundedCornerShape(12.dp))
+            .border(1.dp, PlayerErrorBorder, RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = message,
-            color = Color(0xFFFFE0E0),
+            color = PlayerErrorText,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
         Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            text = "重试",
-            color = Color(0xFFFFCDD2),
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = onRetry)
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-        )
+        // 「重试」是这条横幅里**唯一**能让用户脱离失败态的入口 ——
+        // 它的触控区原来只有 ~28dp（文字高 + 上下 4dp padding），
+        // 是整个屏幕上最难点中却最必须点中的控件。
+        // 现在用 TextButton：自带 48dp 最小触控区、涟漪反馈和正确的语义角色。
+        TextButton(
+            onClick = onRetry,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = PlayerErrorText,
+            ),
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text(
+                text = "重试",
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
     }
 }
 
@@ -1102,7 +1165,7 @@ private fun ControlButtons(
             Icon(
                 imageVector = Icons.Default.SkipPrevious,
                 contentDescription = "上一首",
-                tint = Color(0xFFE8E4DD),
+                tint = Neutral100,
                 iconSizeDp = 36,
             )
         }
@@ -1113,7 +1176,7 @@ private fun ControlButtons(
             Icon(
                 imageVector = Icons.Default.Replay10,
                 contentDescription = "后退 10 秒",
-                tint = Color(0xFFE8E4DD),
+                tint = Neutral100,
                 iconSizeDp = 40,
             )
         }
@@ -1129,7 +1192,7 @@ private fun ControlButtons(
             Icon(
                 imageVector = Icons.Default.Forward30,
                 contentDescription = "前进 30 秒",
-                tint = Color(0xFFE8E4DD),
+                tint = Neutral100,
                 iconSizeDp = 40,
             )
         }
@@ -1141,7 +1204,7 @@ private fun ControlButtons(
             Icon(
                 imageVector = Icons.Default.SkipNext,
                 contentDescription = "下一首",
-                tint = Color(0xFFE8E4DD),
+                tint = Neutral100,
                 iconSizeDp = 36,
             )
         }
@@ -1168,10 +1231,15 @@ private fun PlayPauseButton(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .background(Color(0xFFF5F2EB))
+            .background(Cream)
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                // R7.5：Material 涟漪。
+                // 原来这里是 indication = null（涟漪被关掉了）——
+                // 这个键有自绘的 scale + alpha 按压反馈，但**没有涟漪**，
+                // 手指按下去看不到"按在哪儿"。
+                // 涟漪和自绘动画不冲突：涟漪负责位置，自绘负责整颗键的响应。
+                indication = ripple(),
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
@@ -1187,7 +1255,7 @@ private fun PlayPauseButton(
             Icon(
                 imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (playing) "暂停" else "播放",
-                tint = Color(0xFF3A2F26),
+                tint = PlayerBgTop,
                 modifier = Modifier.size(40.dp),
             )
         }
@@ -1229,7 +1297,7 @@ private fun SpeedRow(
             label = "speedRowScale",
         )
         val bgColor by animateColorAsState(
-            targetValue = Color(0xFFFFFFFF).copy(alpha = 0.12f),
+            targetValue = PlayerHighlight.copy(alpha = 0.12f),
             animationSpec = tween(durationMillis = 160),
             label = "speedRowBg",
         )
@@ -1243,7 +1311,8 @@ private fun SpeedRow(
                 .background(bgColor)
                 .clickable(
                     interactionSource = interactionSource,
-                    indication = null,
+                    // R7.5：Material 涟漪（原来 indication = null）。
+                    indication = ripple(),
                     onClick = onShowSpeedSheet,
                 )
                 // 48dp 触控下限：原来「更多」键只有 36dp，手指很难点准。
@@ -1254,14 +1323,13 @@ private fun SpeedRow(
         ) {
             Text(
                 text = formatSpeedLabel(currentSpeed),
-                color = Color(0xFFF5F2EB),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
+                color = Cream,
+                style = MaterialTheme.typography.labelLarge,
             )
             Icon(
                 imageVector = Icons.Default.ExpandMore,
                 contentDescription = "选择播放速度",
-                tint = Color(0xFFD4CFC6),
+                tint = Neutral200,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -1297,7 +1365,7 @@ private fun SleepTimerChip(
         label = "timerChipScale",
     )
     val bgColor by animateColorAsState(
-        targetValue = Color(0xFFFFFFFF).copy(alpha = 0.12f),
+        targetValue = PlayerHighlight.copy(alpha = 0.12f),
         animationSpec = tween(durationMillis = 160),
         label = "timerChipBg",
     )
@@ -1311,7 +1379,8 @@ private fun SleepTimerChip(
             .background(bgColor)
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                // R7.5：Material 涟漪（原来 indication = null）。
+                indication = ripple(),
                 onClick = onClick,
             )
             .heightIn(min = 48.dp)
@@ -1321,14 +1390,13 @@ private fun SleepTimerChip(
     ) {
         Text(
             text = if (minutes > 0) "定时 $minutes 分钟" else "定时器",
-            color = Color(0xFFF5F2EB),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
+            color = Cream,
+            style = MaterialTheme.typography.labelLarge,
         )
         Icon(
             imageVector = Icons.Default.ExpandMore,
             contentDescription = "设置睡眠定时器",
-            tint = Color(0xFFD4CFC6),
+            tint = Neutral200,
             modifier = Modifier.size(18.dp),
         )
     }
@@ -1358,7 +1426,7 @@ private fun BottomActions(
             Icon(
                 imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                 contentDescription = if (isFavorite) "已收藏" else "收藏",
-                tint = if (isFavorite) WarmOchre else Color(0xFFD4CFC6),
+                tint = if (isFavorite) WarmOchre else Neutral200,
                 iconSizeDp = 24,
             )
         }
@@ -1369,7 +1437,7 @@ private fun BottomActions(
             Icon(
                 imageVector = Icons.Default.Tag,
                 contentDescription = "标签订阅",
-                tint = Color(0xFFD4CFC6),
+                tint = Neutral200,
                 iconSizeDp = 24,
             )
         }
@@ -1380,7 +1448,7 @@ private fun BottomActions(
             Icon(
                 imageVector = Icons.Default.Feedback,
                 contentDescription = "反馈",
-                tint = Color(0xFFD4CFC6),
+                tint = Neutral200,
                 iconSizeDp = 24,
             )
         }
@@ -1391,7 +1459,7 @@ private fun BottomActions(
             Icon(
                 imageVector = Icons.Default.Share,
                 contentDescription = "分享",
-                tint = Color(0xFFD4CFC6),
+                tint = Neutral200,
                 iconSizeDp = 24,
             )
         }
@@ -1416,22 +1484,21 @@ private fun PlaylistSheetContent(
     ) {
         Text(
             text = "播放列表${if (items.isNotEmpty()) "（${items.size}）" else ""}",
-            color = Color(0xFFF5F2EB),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
+            color = Cream,
+            style = MaterialTheme.typography.titleLarge,
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "点任意一篇直接切过去；列表与你的播放列表同步。",
-            color = Color(0xFFD4CFC6),
-            fontSize = 13.sp,
+            color = Neutral200,
+            style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(modifier = Modifier.height(16.dp))
         if (items.isEmpty()) {
             Text(
                 text = "队列是空的",
-                color = Color(0xFFD4CFC6),
-                fontSize = 14.sp,
+                color = Neutral200,
+                style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(vertical = 24.dp),
             )
         } else {
@@ -1448,7 +1515,7 @@ private fun PlaylistSheetContent(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(
-                                if (isCurrent) Color(0xFFFFFFFF).copy(alpha = 0.16f)
+                                if (isCurrent) PlayerHighlight.copy(alpha = 0.16f)
                                 else Color.Transparent
                             )
                             .clickable { onSelect(index) }
@@ -1459,16 +1526,19 @@ private fun PlaylistSheetContent(
                         Icon(
                             imageVector = if (isCurrent) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = if (isCurrent) "正在播放" else "播放这一篇",
-                            tint = if (isCurrent) WarmOchre else Color(0xFFD4CFC6),
+                            tint = if (isCurrent) WarmOchre else Neutral200,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = item.title?.takeIf { it.isNotBlank() } ?: "（无标题）",
-                                color = if (isCurrent) Color(0xFFF5F2EB) else Color(0xFFE8E4DD),
-                                fontSize = 15.sp,
-                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isCurrent) Cream else Neutral100,
+                                // 当前播放的那一条要更重一点，扫一眼就知道自己在哪。
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold
+                                    else FontWeight.Normal,
+                                ),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1476,7 +1546,7 @@ private fun PlaylistSheetContent(
                                 Text(
                                     text = "正在播放",
                                     color = WarmOchre,
-                                    fontSize = 12.sp,
+                                    style = MaterialTheme.typography.labelMedium,
                                 )
                             }
                         }
@@ -1603,7 +1673,8 @@ private fun PressableIconButton(
             }
             .clickable(
                 interactionSource = interactionSource,
-                indication = null,
+                // R7.5：Material 涟漪（原来 indication = null）。
+                indication = ripple(),
                 enabled = enabled,
                 onClick = onClick,
             ),

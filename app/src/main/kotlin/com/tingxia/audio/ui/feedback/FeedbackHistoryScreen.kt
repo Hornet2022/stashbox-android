@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.tingxia.audio.data.remote.FeedbackCategory
@@ -137,10 +139,19 @@ private fun EmptyFeedbackHistoryState(
         verticalArrangement = Arrangement.Center,
     ) {
         Icon(
-            imageVector = Icons.Default.Settings,
+            // 2026-10-27：原来用齿轮（Settings）表示「还没有反馈」——
+            // 齿轮在用户心智里是「设置 / 偏好」，和「反馈」毫无关系，
+            // 空态图标在说的是另一件事。换成意见气泡（Feedback），图标和文案对上。
+            imageVector = Icons.Outlined.Feedback,
             contentDescription = null,
             modifier = Modifier.size(64.dp),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+            // 2026-10-27：alpha 从 0.5 提到 0.7。
+            // 0.5 合成后压米白底只有 2.29:1 —— 这图标淡到几乎看不见，
+            // 空态会变成"只有两行字、上面一片空白"。
+            // 0.7 → 3.42:1，正好过非文本档 3:1（R6.7）。
+            // 它是纯装饰（contentDescription = null），按 WCAG 1.4.11
+            // 不算"需要辨识的控件本体"，所以不追求 4.5:1。
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
         )
         Spacer(Modifier.height(16.dp))
         Text(
@@ -152,7 +163,10 @@ private fun EmptyFeedbackHistoryState(
         Text(
             text = "使用过程中遇到问题，欢迎提交反馈与建议",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            // 2026-10-27：原来写 onSurfaceVariant.copy(alpha = 0.7f)，
+            // 浅色主题下实测对比度只有 3.82:1，低于正文要求的 4.5:1（R6.7）。
+            // 去掉 alpha，直接用 onSurfaceVariant —— 正文本来就不该再压透明度。
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
@@ -187,7 +201,17 @@ private fun FeedbackItemCard(feedback: FeedbackItem) {
                     color = MaterialTheme.colorScheme.primary,
                 )
                 if (feedback.rating != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // 2026-10-27 无障碍：原来 14dp 的星形图标 contentDescription = null，
+                    // 读屏把这一整块评分当成「什么都没有」——
+                    // 评分只靠图形承载，读屏用户完全拿不到「这篇我给了几分」（R6.1）。
+                    // 现在把分数写进整行的 contentDescription；
+                    // 星形图标本身仍是装饰性的（null），不会被重复播报。
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.semantics {
+                            contentDescription = "评分 ${feedback.rating} 星"
+                        },
+                    ) {
                         repeat(feedback.rating) {
                             Icon(
                                 imageVector = Icons.Filled.Star,

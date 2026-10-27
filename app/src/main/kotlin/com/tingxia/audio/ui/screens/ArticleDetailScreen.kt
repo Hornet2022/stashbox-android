@@ -46,6 +46,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -88,6 +91,7 @@ import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.articles.ShareState
 import com.tingxia.audio.ui.components.BitrateSelectorSheet
 import com.tingxia.audio.ui.components.DownloadButton
+import com.tingxia.audio.ui.components.ResponsiveContent
 import com.tingxia.audio.ui.components.ShareArticleDialog
 import com.tingxia.audio.ui.components.SourceBadge
 import com.tingxia.audio.ui.components.StatusBadge
@@ -155,6 +159,8 @@ fun ArticleDetailScreen(
     var folders by remember { mutableStateOf<List<FolderCount>>(emptyList()) }
     // 0041 共享：共享对话框开关（低频动作，只进溢出菜单，不进顶栏）
     var showShareDialog by remember { mutableStateOf(false) }
+    // 2026-10-27：复制链接等瞬时动作的可见反馈（见 Scaffold 里的 snackbarHost 说明）
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // §3 多码率弹窗需要 PlayerController（用于切档不重启）
     val bitratePlayerController = remember {
@@ -421,6 +427,33 @@ fun ArticleDetailScreen(
     }
 
     Scaffold(
+        // 2026-10-27：Snackbar 宿主。
+        //
+        // 为什么现在才加：这一屏原来**所有**瞬时反馈都是 Toast（17 处），
+        // 而 Toast 在 App 底部弹一下就消失，且**压不住底部的全局播放条**。
+        //
+        // 「复制原文链接」是最典型的受害者：点下去剪贴板确实变了，
+        // 但屏幕上**什么都没有** —— 用户会以为没点上，于是再点一次。
+        // Android 13+ 系统自己会弹「已复制」气泡，但本 App 支持 Android 12
+        // （目标设备就是 Android 12），那里什么都没有。
+        //
+        // 配色为什么不用默认：Material 的 Snackbar 走 **inverse** 角色
+        // （inverseSurface / inverseOnSurface）—— 也就是「永远反着主题来」：
+        // 深色主题下它是一大块**米白**。在别处这符合 M3 惯例，
+        // 但这个 App **刻意不用 Material You 动态色**，走的是自己的暖深色审美
+        // （见 Theme.kt 顶部注释）；一块冷调米白浮在暖深色界面里非常突兀。
+        // ⇒ 显式换成 App 自己的容器色（深色下是暖深棕，浅色下是米白深一档），
+        // 两种主题下都和所在界面同一套色。
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    actionColor = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
         topBar = {
             TopAppBar(
                 // 原来直接 `Text(article?.title)`，没有 maxLines/overflow。
@@ -617,13 +650,19 @@ fun ArticleDetailScreen(
                 }
                 else -> {
                     val safeArticle = article ?: return@Crossfade
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
+                    // 2026-10-27：宽屏限宽（R3.4）。
+                    // 详情页是全 App 文字最长的屏 —— 平板/横屏下满宽铺开，
+                    // 一行能塞 60+ 个汉字，眼睛找行首会累。
+                    // ResponsiveContent 在 Expanded 下把内容限到 840dp 并居中，
+                    // Compact 下完全等价于原来（widthIn 不生效）。
+                    ResponsiveContent(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
                         Text(
                             text = safeArticle.title ?: "",
                             style = MaterialTheme.typography.headlineSmall,
@@ -693,7 +732,14 @@ fun ArticleDetailScreen(
                                 modifier = Modifier.padding(horizontal = 4.dp),
                             )
                             TextButton(
-                                onClick = { clipboardManager.setText(AnnotatedString(safeArticle.url)) },
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(safeArticle.url))
+                                    // 必须给可见反馈：剪贴板变了但屏幕上什么都没发生，
+                                    // 用户会以为按钮没生效而重复点（R5.19）。
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("链接已复制")
+                                    }
+                                },
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Link,
@@ -774,6 +820,7 @@ fun ArticleDetailScreen(
                                     )
                                 }
                             }
+                        }
                         }
                     }
                 }
@@ -1173,14 +1220,12 @@ private fun DistilledScriptCard(
                             text = para,
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
-                            lineHeight = 28.sp,
                         )
                     } else {
                         Text(
                             text = para,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
-                            lineHeight = 26.sp,
                         )
                     }
                 }
@@ -1222,7 +1267,6 @@ private fun ScriptPartsBody(
             text = hook,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
-            lineHeight = 28.sp,
         )
     }
 
@@ -1240,7 +1284,6 @@ private fun ScriptPartsBody(
             text = outro,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
-            lineHeight = 26.sp,
         )
     }
 }
@@ -1271,7 +1314,6 @@ private fun ScriptSection(title: String, items: List<String>) {
                 text = item,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
-                lineHeight = 26.sp,
             )
         }
     }

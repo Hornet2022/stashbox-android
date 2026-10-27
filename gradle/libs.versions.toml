@@ -34,6 +34,15 @@ androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graph
 androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+# 2026-10-27：响应式布局（Material 3 指南 R3.1）。
+# 之前全仓没有任何窗口尺寸判断 ⇒ 平板/折叠屏上内容满宽铺开、行长失控。
+# material3-window-size-class 提供 WindowSizeClass（Compact/Medium/Expanded）。
+#
+# 别名不能叫 "...window-size-class"：Gradle 的版本目录把含 "class" 的别名
+# 当作保留名（会生成不出访问器），整个构建直接失败：
+#   "alias 'androidx-compose-material3-window-size-class' is a reserved name in Gradle"
+# 所以别名去掉 class，坐标保持 material3 的归属。
+androidx-compose-material3-window-size = { group = "androidx.compose.material3", name = "material3-window-size-class" }
 # CP8.5 — FullScreenPlayer 用到 SkipNext / Forward30 / Bookmark / Tag 等扩展图标
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 

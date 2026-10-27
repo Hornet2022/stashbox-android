@@ -29,6 +29,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,10 +46,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.audio.PlaybackState
@@ -179,7 +181,13 @@ fun AudioPlayerBar(
                     activeTrackColor = primary,
                     inactiveTrackColor = muted.copy(alpha = 0.25f),
                 ),
-                modifier = Modifier.fillMaxWidth().height(20.dp),
+                // ⚠️ 坑：原来这里是 Modifier.fillMaxWidth().height(20.dp)，
+                // 那个 height 把 material3 内部给 Slider 预留的 48dp
+                // 最小交互尺寸直接压掉了 —— 滑块看着细，但**手指能按到的热区
+                // 只有 20dp 高**，拖动极难对准（R6.5）。
+                // 想让进度条看起来细一点，只需要调 colors / 轨道粗细，
+                // 不要动控件本身的高度。
+                modifier = Modifier.fillMaxWidth(),
             )
 
             Row(
@@ -187,9 +195,22 @@ fun AudioPlayerBar(
                     .fillMaxWidth()
                     .clickable(
                         interactionSource = interactionSource,
-                        indication = null,
+                        // R7.5：涟漪是 Material 的标准反馈。
+                        // 原来这里是 indication = null —— 涟漪被关掉了，
+                        // 用户按下去一点反应都没有。
+                        // 按压缩放动画（上面的 barScale）保留 —— 那是这个栏原本的手感。
+                        //
+                        // ⚠️ 必须显式给 indication：带 interactionSource 的
+                        // clickable 重载没有「默认涟漪」这个参数位，
+                        // 不传就编译不过（而带默认 interactionSource 的重载
+                        // 又拿不到我们这个 interactionSource，按压动画会失联）。
+                        indication = ripple(),
                         onClick = onClick,
-                    ),
+                    )
+                    // R6.2：整栏可点 → 跳全屏播放器，但语义里只有标题文字，
+                    // 读屏用户不知道点了会去哪里。
+                    // contentDescription 说清**去向**（"打开全屏播放器"）。
+                    .semantics { contentDescription = "打开全屏播放器" },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -231,9 +252,13 @@ fun AudioPlayerBar(
                     Text(
                         text = formatClock(position) + " / " +
                             if (duration > 0L) formatClock(duration) else "--:--",
+                        // R4.3：只用 typography 角色，不要在角色之上再写死字号。
+                        // 原来是 labelSmall + fontSize = 11.sp —— 写死的 11sp
+                        // 把字重/行高/字距都绕过了 typography，也不再跟随
+                        // 用户的大字号设置（labelSmall 本来就是 11sp，
+                        // 覆盖它没有任何收益，只有风险）。
                         style = MaterialTheme.typography.labelSmall,
                         color = muted,
-                        fontSize = 11.sp,
                     )
                 }
 

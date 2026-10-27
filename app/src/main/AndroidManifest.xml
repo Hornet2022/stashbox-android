@@ -30,7 +30,25 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Tingxia"
         android:usesCleartextTraffic="true"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true">
+        <!--
+          预测性返回手势（2026-10-27，Material 3 指南 R2.10）。
+
+          Android 13（API 33）起，系统返回手势支持**预测式**动画：手指滑动时
+          目标页面会跟着缩小/位移，抬手才真正完成返回。
+
+          ⚠️ 本项目 targetSdk=35 ⇒ 预测性返回**本来就是默认开启的**
+          （`android:enableOnBackInvokedCallback` 对 targetSdk≥33 的应用默认为 true），
+          所以这里写 `true` 是**显式声明现状**而不是"打开某个开关"。
+
+          为什么要显式写出来：默认值是**隐式**的 —— 将来若有人把 targetSdk 降到 33
+          以下、或误写成 false，行为会静默变回"一下就跳走"（无预览动画）。
+          写出来 + 注释，是为了让"返回手势有动画"成为**可审查的约定**而不是运气。
+
+          App 内没有任何自定义 onBackPressed 覆写，返回由 NavController /
+          Compose BackHandler 接管，二者都已支持预测式返回。
+        -->
 
         <!--
           关掉 WorkManager 的默认初始化（2026-10-02）。

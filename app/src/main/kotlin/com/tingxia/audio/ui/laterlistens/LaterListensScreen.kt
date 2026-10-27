@@ -63,9 +63,29 @@ fun LaterListensScreen(
         }
     }
 
+    // ── 三态分离（2026-10-27）────────────────────────────────────────
+    //
+    // 原来加载失败只弹一个 Toast，界面接着渲染「暂无稍后听内容」⇒ 用户看到的是
+    // "我没预约过"，而不是"没加载出来"；Toast 还会自己消失 ⇒ 事后回头看，
+    // 什么都判断不出来。
+    //
+    // 现在三种状态严格分开：
+    //   · 加载中 → 转圈（还没加载完就说"暂无稍后听内容"是骗人）
+    //   · 加载失败 → 错误文案 + 一个**能点**的「重试」
+    //   · 成功但为空 → 原来的空态文案（这才是真的"没预约"）
+    //
+    // 判据用「error != null 且列表为空」：列表为空 ⇒ 用户此刻没有任何内容可看，
+    // 这时再渲染空态文案就是把失败说成了"没有"；列表还在（取消失败等）
+    // ⇒ 内容照旧显示，错误走 Toast，不夺走用户的列表。
+    val loadFailed = uiState.error != null && uiState.laterListens.isEmpty()
+
     LaunchedEffect(uiState.error) {
-        uiState.error?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+        val message = uiState.error
+        // 加载失败由常驻的错误态承载（见下），不再叠一个 Toast ——
+        // Toast 会消失，用户回头就不知道刚才到底是失败还是"真的没预约"。
+        // 只有「列表还在、只是这次操作失败」（如取消失败）才走 Toast：轻量、不打断浏览。
+        if (message != null && uiState.laterListens.isNotEmpty()) {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -99,12 +119,21 @@ fun LaterListensScreen(
         ) {
             when {
                 uiState.isLoading && uiState.laterListens.isEmpty() -> {
+                    // 加载中：只转圈，不写"暂无稍后听内容"—— 那是在替服务端撒谎。
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
                         CircularProgressIndicator()
                     }
+                }
+                loadFailed -> {
+                    // 加载失败：说清是"没加载出来"，并给一个能点的重试。
+                    LoadErrorState(
+                        message = uiState.error ?: "加载失败",
+                        onRetry = { viewModel.loadLaterListens() },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
                 uiState.laterListens.isEmpty() -> {
                     EmptyLaterListensState(
@@ -181,6 +210,50 @@ private fun LaterListenItem(
                 TextButton(onClick = onCancel) {
                     Text("取消", color = MaterialTheme.colorScheme.error)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 加载失败态：一句说清"是加载失败、不是没有内容"，外加一个**能点**的重试。
+ *
+ * 为什么不能只给文案：用户看到失败后唯一能做的事就是重试。
+ * 没有按钮 ⇒ 用户只能退出重进，而 Toast 早就没了 ⇒ 这条错误等于没报过。
+ *
+ * 按钮用 Material3 的 [Button]：最小可点区域由 minimumInteractiveComponentSize
+ * 兜到 48dp（视觉高度 40dp，触摸区域 48dp），满足无障碍最小触达要求。
+ */
+@Composable
+private fun LoadErrorState(
+    message: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                // 前面这句是给用户的**判据**：界面上出现"加载失败"和"暂无稍后听内容"
+                // 两句完全不同的话，用户才分得清"是没数据"还是"是没加载出来"。
+                text = "加载失败：$message",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "点「重试」重新拉一次稍后听。",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Button(onClick = onRetry) {
+                Text("重试")
             }
         }
     }

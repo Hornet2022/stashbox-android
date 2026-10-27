@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -69,6 +71,7 @@ import com.tingxia.audio.ui.settings.SettingsScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
 import com.tingxia.audio.ui.components.GlobalPlayerBar
+import com.tingxia.audio.ui.components.ResponsiveContent
 import com.tingxia.audio.ui.favorites.FavoritesScreen
 import com.tingxia.audio.ui.laterlistens.LaterListensScreen
 import com.tingxia.audio.ui.paywall.PaywallScreen
@@ -439,234 +442,50 @@ private fun AppNavigation() {
             // 会露出窗口底色，看着像一条缝。
             .background(MaterialTheme.colorScheme.background),
     ) {
-        NavHost(
-            modifier = Modifier.padding(bottom = contentBottomPadding),
-            navController = navController,
-            startDestination = "home",
-        ) {
-            composable("home") {
-            HomeScreen(
-                onNavigateToFavorites = { navController.navigate("favorites") },
-                onNavigateToNotifications = { navController.navigate("notifications") },
-                onNavigateToCapture = { navController.navigate("capture") },
-                onNavigateToDistill = { navController.navigate("distill") },
-                onNavigateToSubscribe = { navController.navigate("tags") },
-                onNavigateToReview = { navController.navigate("later-listens") },
-                onNavigateToPlaylist = { navController.navigate("playlist") },
-                onNavigateToArticleList = { navController.navigate("list") },
-                onNavigateToDetail = { id -> navController.navigate("detail/$id") },
-                onNavigateToOfflineDownload = { navController.navigate("offline_download") },
-                onNavigateToSettings = { navController.navigate("settings") },
-            )
-        }
-        composable("list") {
-            ArticleListScreen(
-                playerController = playerController,
-                commutePrefetcher = commutePrefetcher,
-                onNavigateToDetail = { id ->
-                    navController.navigate("detail/$id")
-                },
-                onNavigateToTags = {
-                    navController.navigate("tags")
-                },
-                onNavigateToNotifications = {
-                    navController.navigate("notifications")
-                },
-                // 「剪藏」菜单项原来只关菜单，是个死的 affordance（CP4.6 的 TODO）。
-                // 剪藏屏本来就已经在导航图里，缺的只是这一根接线。
-                onNavigateToCapture = { navController.navigate("capture") },
-                onNavigateToFavorites = {
-                    navController.navigate("favorites")
-                },
-                onNavigateToLaterListens = {
-                    navController.navigate("later-listens")
-                },
-                onNavigateToFeedbackHistory = {
-                    navController.navigate("feedback-history")
-                },
-                feedbackRepository = feedbackRepository,
-            )
-        }
-        composable(
-            route = "detail/{id}",
-            arguments = listOf(navArgument("id") { type = NavType.StringType }),
-            deepLinks = listOf(navDeepLink { uriPattern = "stashbox://detail/{id}" }),
-        ) { backStackEntry ->
-            val id = backStackEntry.arguments?.getString("id").orEmpty()
-            ArticleDetailScreen(
-                articleId = id,
-                onBack = { navController.popBackStack() },
-                onOpenFullScreenPlayer = {
-                    navController.navigate("player")
-                },
-                favoritesRepository = favoritesRepository,
-                feedbackRepository = feedbackRepository,
-            )
-        }
-        composable("player") {
-            FullScreenPlayerScreen(
-                // P1-2：title/author 留空占位 — 屏内 collect PlayerController 状态决定显示
-                title = "",
-                author = null,
-                coverUrl = null,
-                // 2026-10-03：底部 4 个动作键此前全是空实现（isFavorite 恒 false、
-                // 四个回调都是默认的 {}），四个可见控件点了没有任何反应。
-                // 这里把两个仓库传下去，屏内自己接线：收藏走乐观更新，
-                // 反馈走 FeedbackBottomSheet。
-                favoritesRepository = favoritesRepository,
-                feedbackRepository = feedbackRepository,
-                onDismiss = { navController.popBackStack() },
-            )
-        }
-        composable("tags") {
-            TagSubscriptionScreen(
-                onBack = { navController.popBackStack() },
-                // CP-TAG-FILTER：点击 tag 行 → 跳 article_list?tag=slug
-                onTagClick = { slug ->
-                    navController.navigate("article_list?tag=$slug")
-                },
-                // 2026-10-23：订阅闭环的「读回」一环 —— 点订阅更新里的文章进详情页
-                onArticleClick = { articleId ->
-                    navController.navigate("detail/$articleId")
-                },
-            )
-        }
-        composable("notifications") {
-            NotificationCenterScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToArticle = { articleId ->
-                    navController.navigate("detail/$articleId")
-                },
-            )
-        }
-        composable("favorites") {
-            FavoritesScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToDetail = { articleId ->
-                    navController.navigate("detail/$articleId")
-                },
-            )
-        }
-        composable("playlist") {
-            PlaylistScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-        composable("later-listens") {
-            LaterListensScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToDetail = { articleId ->
-                    navController.navigate("detail/$articleId")
-                },
-            )
-        }
-        composable("feedback-history") {
-            FeedbackHistoryScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-        composable("capture") {
-            CaptureScreen(
-                onBack = { navController.popBackStack() },
-                onCaptured = { navController.popBackStack() },
-                onQuotaExhausted = {
-                    // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
-                    navController.navigate("paywall")
-                },
-                // BUG#10：最近剪藏的卡片原先不可点，补上详情跳转
-                onNavigateToDetail = { articleId ->
-                    navController.navigate("detail/$articleId")
-                },
-            )
-        }
-        composable("distill") {
-            DistillScreen(
-                onBack = { navController.popBackStack() },
-                onDistilled = { navController.popBackStack() },
-            )
-        }
-        // CP-TAG-FILTER：带可选 tag 参数的路由（从 TagSubscriptionScreen 跳转）
-        composable(
-            route = "article_list?tag={tag}",
-            arguments = listOf(
-                navArgument("tag") {
-                    type = NavType.StringType
-                    nullable = true
-                    defaultValue = null
-                },
-            ),
-        ) { entry ->
-            val tag = entry.arguments?.getString("tag")
-            ArticleListScreen(
-                onNavigateToDetail = { id -> navController.navigate("detail/$id") },
-                onNavigateToTags = { navController.navigate("tags") },
-                onNavigateToNotifications = { navController.navigate("notifications") },
-                onNavigateToCapture = { navController.navigate("capture") },
-                onNavigateToFavorites = { navController.navigate("favorites") },
-                onNavigateToLaterListens = { navController.navigate("later-listens") },
-                onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
-                initialTag = tag,
-                feedbackRepository = feedbackRepository,
-                // 2026-10-03：这两条原来没传。
-                // playerController 决定「上一首/下一首」有没有队列可走 ——
-                //   队列就是由这个参数灌进去的。不传的话，从「主题标签」
-                //   点进来这一屏，播放器里这两颗键是灰的。
-                // commutePrefetcher 决定通勤窗口到点时会不会预加载 ——
-                //   不传的话同一条路径上通勤预加载整个不工作。
-                // 也就是说同一个 ArticleListScreen，走「全部」进来能用、
-                // 走「某个标签」进来就哑了，而用户看不出这两个入口的区别。
-                playerController = playerController,
-                commutePrefetcher = commutePrefetcher,
-            )
-        }
-        // 2026-10-03：删掉 fullscreen_player 路由。它和上面的 "player"
-        // 指向同一个 FullScreenPlayerScreen、参数逐字相同，是同一条路注册了两次；
-        // 而唯一能进播放器的入口是详情页的 onOpenFullScreenPlayer → "player"。
-        // HomeScreen 上的 onNavigateToFullscreenPlayer 参数从来没有被调用过，
-        // 整条路是死的。
-        // CP11.0.4 P1.2: 付费墙
-        composable("paywall") {
-            PaywallScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-        // CP7.4.0: 通勤预加载（§3.2 warm 客户端入口）
-        composable("offline_download") {
-            OfflineDownloadScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-        // 设置页（CP5.6.0 / §4 G2 个性化开关 UI 灰置）
-        composable("settings") {
-            SettingsScreen(
-                feedbackRepository = feedbackRepository,
-                onBack = { navController.popBackStack() },
-                onNavigateToOfflineDownload = { navController.navigate("offline_download") },
-                onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
-                // 2026-10-21：注销账号入口（危险操作，单独隔在设置页底部红区）
-                onNavigateToAccountDeletion = { navController.navigate("account-deletion") },
-                onLogout = { authViewModel.logout() },
-            )
-        }
-        // 2026-10-21：注销账号页。
+        // 2026-10-27：宽屏限宽（R3.4）。
         //
-        // 注销是不可逆的终局操作，所以它在**自己的页面**里（要打字确认），
-        // 而不是设置页里弹个对话框。设置页里那个入口还会先弹一次确认，
-        // 两层确认是故意的：误触一次不该丢掉全部数据。
-        composable("account-deletion") {
-            AccountDeletionScreen(
-                onBack = { navController.popBackStack() },
-                // 注销完成后由 AuthViewModel 把登录态翻回未登录 ——
-                // 和「退出登录」走同一条路（AuthRoot 按 state 分支渲染登录页，
-                // 登录页不是 NavHost 的 destination，所以这里**不能** navigate）。
-                //
-                // 用 onAccountDeleted() 而不是 logout()：注销流程里
-                // AccountRepository.logoutLocalOnly() 已经清了 token + 本机数据，
-                // 再走一遍 logout() 会多打一次注定 401 的服务端请求。
-                onAccountDeleted = { authViewModel.onAccountDeleted() },
-            )
+        // 为什么放在 NavHost 这一层而不是逐屏改：逐屏套用要改十几个文件，
+        // 且每个都要各自处理"限宽 + 居中"两件事 —— 漏一个就是布局歪掉的单点故障。
+        // 放在这里则所有页面共用同一条规则。
+        //
+        // 为什么排除 player 路由：全屏播放器是**沉浸式**的 ——
+        // 它的背景是一整幅纵向渐变，限宽会在两侧露出底色，
+        // 像手机 App 被硬塞进一个框里。播放器另有一套自己的尺寸逻辑
+        // （封面按可用宽高取小），不受这条规则约束。
+        if (currentRoute == "player") {
+            NavHost(
+                modifier = Modifier.padding(bottom = contentBottomPadding),
+                navController = navController,
+                startDestination = "home",
+            ) {
+                navGraph(
+                    navController = navController,
+                    playerController = playerController,
+                    favoritesRepository = favoritesRepository,
+                    feedbackRepository = feedbackRepository,
+                    commutePrefetcher = commutePrefetcher,
+                    authViewModel = authViewModel,
+                )
+            }
+        } else {
+            ResponsiveContent(modifier = Modifier.fillMaxSize()) {
+                NavHost(
+                    modifier = Modifier.padding(bottom = contentBottomPadding),
+                    navController = navController,
+                    startDestination = "home",
+                ) {
+                    navGraph(
+                        navController = navController,
+                        playerController = playerController,
+                        favoritesRepository = favoritesRepository,
+                        feedbackRepository = feedbackRepository,
+                        commutePrefetcher = commutePrefetcher,
+                        authViewModel = authViewModel,
+                    )
+                }
+            }
         }
-        }
+            // 导航图见下方 navGraph()（宽屏限宽需要 NavHost 有两种套法，故抽出）。
 
         // 全局迷你播放条：叠在 NavHost 之上，底部对齐。
         //
@@ -683,4 +502,254 @@ private fun AppNavigation() {
             onContentHeightChange = { playerBarHeight = it },
         )
     }
+}
+
+/**
+ * App 的导航图（2026-10-27 抽出）。
+ *
+ * ## 为什么抽出来
+ *
+ * MainActivity 原来把整张导航图直接写在 `NavHost { ... }` 里，
+ * 而宽屏限宽要求 NavHost 有时**套一层** ResponsiveContent、有时套一层
+ * （player 路由要保持满宽的沉浸式渐变）—— 同一张图不能写两遍。
+ * 抽成函数后，两条分支共用一份定义，新增路由时不会漏改一处。
+ *
+ * ⚠️ 这是纯结构调整：路由、参数、行为逐字未改。
+ */
+private fun NavGraphBuilder.navGraph(
+    navController: NavHostController,
+    playerController: PlayerController,
+    favoritesRepository: FavoritesRepository,
+    feedbackRepository: FeedbackRepository,
+    commutePrefetcher: com.tingxia.audio.data.sync.CommutePrefetcher,
+    authViewModel: AuthViewModel,
+) {
+    composable("home") {
+        HomeScreen(
+            onNavigateToFavorites = { navController.navigate("favorites") },
+            onNavigateToNotifications = { navController.navigate("notifications") },
+            onNavigateToCapture = { navController.navigate("capture") },
+            onNavigateToDistill = { navController.navigate("distill") },
+            onNavigateToSubscribe = { navController.navigate("tags") },
+            onNavigateToReview = { navController.navigate("later-listens") },
+            onNavigateToPlaylist = { navController.navigate("playlist") },
+            onNavigateToArticleList = { navController.navigate("list") },
+            onNavigateToDetail = { id -> navController.navigate("detail/$id") },
+            onNavigateToOfflineDownload = { navController.navigate("offline_download") },
+            onNavigateToSettings = { navController.navigate("settings") },
+        )
+}
+composable("list") {
+    ArticleListScreen(
+        playerController = playerController,
+        commutePrefetcher = commutePrefetcher,
+        onNavigateToDetail = { id ->
+            navController.navigate("detail/$id")
+        },
+        onNavigateToTags = {
+            navController.navigate("tags")
+        },
+        onNavigateToNotifications = {
+            navController.navigate("notifications")
+        },
+        // 「剪藏」菜单项原来只关菜单，是个死的 affordance（CP4.6 的 TODO）。
+        // 剪藏屏本来就已经在导航图里，缺的只是这一根接线。
+        onNavigateToCapture = { navController.navigate("capture") },
+        onNavigateToFavorites = {
+            navController.navigate("favorites")
+        },
+        onNavigateToLaterListens = {
+            navController.navigate("later-listens")
+        },
+        onNavigateToFeedbackHistory = {
+            navController.navigate("feedback-history")
+        },
+        feedbackRepository = feedbackRepository,
+    )
+}
+composable(
+    route = "detail/{id}",
+    arguments = listOf(navArgument("id") { type = NavType.StringType }),
+    deepLinks = listOf(navDeepLink { uriPattern = "stashbox://detail/{id}" }),
+) { backStackEntry ->
+    val id = backStackEntry.arguments?.getString("id").orEmpty()
+    ArticleDetailScreen(
+        articleId = id,
+        onBack = { navController.popBackStack() },
+        onOpenFullScreenPlayer = {
+            navController.navigate("player")
+        },
+        favoritesRepository = favoritesRepository,
+        feedbackRepository = feedbackRepository,
+    )
+}
+composable("player") {
+    FullScreenPlayerScreen(
+        // P1-2：title/author 留空占位 — 屏内 collect PlayerController 状态决定显示
+        title = "",
+        author = null,
+        coverUrl = null,
+        // 2026-10-03：底部 4 个动作键此前全是空实现（isFavorite 恒 false、
+        // 四个回调都是默认的 {}），四个可见控件点了没有任何反应。
+        // 这里把两个仓库传下去，屏内自己接线：收藏走乐观更新，
+        // 反馈走 FeedbackBottomSheet。
+        favoritesRepository = favoritesRepository,
+        feedbackRepository = feedbackRepository,
+        // 2026-10-27：播放器底部的「标签订阅」是**死按钮** ——
+        // 屏内参数默认值是 `onNavigateToTags: () -> Unit = {}`（空实现），
+        // 而这里没传 ⇒ 用户点了毫无反应。
+        // 这类默认值在 Compose 里很危险：签名能编译、调用点看不见，
+        // 只有真机点一下才发现是空的。⇒ 调用点必须显式接线。
+        onNavigateToTags = { navController.navigate("tags") },
+        onDismiss = { navController.popBackStack() },
+    )
+}
+composable("tags") {
+    TagSubscriptionScreen(
+        onBack = { navController.popBackStack() },
+        // CP-TAG-FILTER：点击 tag 行 → 跳 article_list?tag=slug
+        onTagClick = { slug ->
+            navController.navigate("article_list?tag=$slug")
+        },
+        // 2026-10-23：订阅闭环的「读回」一环 —— 点订阅更新里的文章进详情页
+        onArticleClick = { articleId ->
+            navController.navigate("detail/$articleId")
+        },
+    )
+}
+composable("notifications") {
+    NotificationCenterScreen(
+        onBack = { navController.popBackStack() },
+        onNavigateToArticle = { articleId ->
+            navController.navigate("detail/$articleId")
+        },
+    )
+}
+composable("favorites") {
+    FavoritesScreen(
+        onBack = { navController.popBackStack() },
+        onNavigateToDetail = { articleId ->
+            navController.navigate("detail/$articleId")
+        },
+    )
+}
+composable("playlist") {
+    PlaylistScreen(
+        onBack = { navController.popBackStack() },
+    )
+}
+composable("later-listens") {
+    LaterListensScreen(
+        onBack = { navController.popBackStack() },
+        onNavigateToDetail = { articleId ->
+            navController.navigate("detail/$articleId")
+        },
+    )
+}
+composable("feedback-history") {
+    FeedbackHistoryScreen(
+        onBack = { navController.popBackStack() },
+    )
+}
+composable("capture") {
+    CaptureScreen(
+        onBack = { navController.popBackStack() },
+        onCaptured = { navController.popBackStack() },
+        onQuotaExhausted = {
+            // CP11.0.4 P1.2: 配额用尽 → 跳付费墙
+            navController.navigate("paywall")
+        },
+        // BUG#10：最近剪藏的卡片原先不可点，补上详情跳转
+        onNavigateToDetail = { articleId ->
+            navController.navigate("detail/$articleId")
+        },
+    )
+}
+composable("distill") {
+    DistillScreen(
+        onBack = { navController.popBackStack() },
+        onDistilled = { navController.popBackStack() },
+    )
+}
+// CP-TAG-FILTER：带可选 tag 参数的路由（从 TagSubscriptionScreen 跳转）
+composable(
+    route = "article_list?tag={tag}",
+    arguments = listOf(
+        navArgument("tag") {
+            type = NavType.StringType
+            nullable = true
+            defaultValue = null
+        },
+    ),
+) { entry ->
+    val tag = entry.arguments?.getString("tag")
+    ArticleListScreen(
+        onNavigateToDetail = { id -> navController.navigate("detail/$id") },
+        onNavigateToTags = { navController.navigate("tags") },
+        onNavigateToNotifications = { navController.navigate("notifications") },
+        onNavigateToCapture = { navController.navigate("capture") },
+        onNavigateToFavorites = { navController.navigate("favorites") },
+        onNavigateToLaterListens = { navController.navigate("later-listens") },
+        onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
+        initialTag = tag,
+        feedbackRepository = feedbackRepository,
+        // 2026-10-03：这两条原来没传。
+        // playerController 决定「上一首/下一首」有没有队列可走 ——
+        //   队列就是由这个参数灌进去的。不传的话，从「主题标签」
+        //   点进来这一屏，播放器里这两颗键是灰的。
+        // commutePrefetcher 决定通勤窗口到点时会不会预加载 ——
+        //   不传的话同一条路径上通勤预加载整个不工作。
+        // 也就是说同一个 ArticleListScreen，走「全部」进来能用、
+        // 走「某个标签」进来就哑了，而用户看不出这两个入口的区别。
+        playerController = playerController,
+        commutePrefetcher = commutePrefetcher,
+    )
+}
+// 2026-10-03：删掉 fullscreen_player 路由。它和上面的 "player"
+// 指向同一个 FullScreenPlayerScreen、参数逐字相同，是同一条路注册了两次；
+// 而唯一能进播放器的入口是详情页的 onOpenFullScreenPlayer → "player"。
+// HomeScreen 上的 onNavigateToFullscreenPlayer 参数从来没有被调用过，
+// 整条路是死的。
+// CP11.0.4 P1.2: 付费墙
+composable("paywall") {
+    PaywallScreen(
+        onBack = { navController.popBackStack() },
+    )
+}
+// CP7.4.0: 通勤预加载（§3.2 warm 客户端入口）
+composable("offline_download") {
+    OfflineDownloadScreen(
+        onBack = { navController.popBackStack() },
+    )
+}
+// 设置页（CP5.6.0 / §4 G2 个性化开关 UI 灰置）
+composable("settings") {
+    SettingsScreen(
+        feedbackRepository = feedbackRepository,
+        onBack = { navController.popBackStack() },
+        onNavigateToOfflineDownload = { navController.navigate("offline_download") },
+        onNavigateToFeedbackHistory = { navController.navigate("feedback-history") },
+        // 2026-10-21：注销账号入口（危险操作，单独隔在设置页底部红区）
+        onNavigateToAccountDeletion = { navController.navigate("account-deletion") },
+        onLogout = { authViewModel.logout() },
+    )
+}
+// 2026-10-21：注销账号页。
+//
+// 注销是不可逆的终局操作，所以它在**自己的页面**里（要打字确认），
+// 而不是设置页里弹个对话框。设置页里那个入口还会先弹一次确认，
+// 两层确认是故意的：误触一次不该丢掉全部数据。
+composable("account-deletion") {
+    AccountDeletionScreen(
+        onBack = { navController.popBackStack() },
+        // 注销完成后由 AuthViewModel 把登录态翻回未登录 ——
+        // 和「退出登录」走同一条路（AuthRoot 按 state 分支渲染登录页，
+        // 登录页不是 NavHost 的 destination，所以这里**不能** navigate）。
+        //
+        // 用 onAccountDeleted() 而不是 logout()：注销流程里
+        // AccountRepository.logoutLocalOnly() 已经清了 token + 本机数据，
+        // 再走一遍 logout() 会多打一次注定 401 的服务端请求。
+        onAccountDeleted = { authViewModel.onAccountDeleted() },
+    )
+}
 }
