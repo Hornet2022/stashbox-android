@@ -42,8 +42,18 @@ class SubtitleTimeline(val cues: List<SubtitleCue>) {
      * 用二分查找而不是线性扫：长文能有几百条，每 500ms 查一次，
      * 线性扫在低端机上会明显费电。
      */
-    fun cueAt(positionMs: Long): SubtitleCue? {
-        if (cues.isEmpty()) return null
+    fun cueAt(positionMs: Long): SubtitleCue? = cues.getOrNull(indexAt(positionMs))
+
+    /**
+     * 某一时刻是**第几条**（-1 = 此刻不在任何一句上）。
+     *
+     * 为什么单独给一个「下标」接口（2026-10-27）：
+     * 滚动字幕区要知道「当前该高亮第几条」，还要知道「总共有几条」——
+     * 只给文本的话，UI 只能靠文本匹配去猜当前条目（重复句就全乱了）。
+     * 下标是**位置驱动的**唯一真相，和音频进度天然同频。
+     */
+    fun indexAt(positionMs: Long): Int {
+        if (cues.isEmpty()) return -1
         var lo = 0
         var hi = cues.size - 1
         var found = -1
@@ -60,9 +70,9 @@ class SubtitleTimeline(val cues: List<SubtitleCue>) {
         // 播完了（position 超过最后一条的结束）→ 不显示
         if (found >= 0) {
             val cue = cues[found]
-            if (positionMs <= cue.endMs) return cue
+            if (positionMs <= cue.endMs) return found
         }
-        return null
+        return -1
     }
 
     companion object {

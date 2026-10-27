@@ -153,6 +153,48 @@ class ThemeContrastTest {
         Pair("error 压 surfaceContainerHighest", { it.error }, { it.surfaceContainerHighest }, 3.0),
     )
 
+    /**
+     * 音符进度指示器的圆底**不得**等于轨道色（R-MUSIC-KNOB 2026-10-27）。
+     *
+     * 用户反馈：「圆底的着色和进度轨道的颜色是一样的，不好看」——
+     * 之前圆底直接取 activeTrackColor（底部条 = primary、全屏 = Cream），
+     * 圆底和轨道糊成一块，指示器的圆形读不出来。
+     *
+     * 这条断言的意义：把"圆底 ≠ 轨道色"写成**会红的测试**，
+     * 将来谁把圆底改回跟随轨道色，这里立刻失败。
+     */
+    @Test
+    fun `音符圆底色不得等于两条进度轨道的颜色`() {
+        assertTrue(
+            "圆底色不得等于底部条轨道色（primary）",
+            MusicNoteKnob != PrimaryLight,
+        )
+        assertTrue(
+            "圆底色不得等于全屏播放器轨道色（Cream）",
+            MusicNoteKnob != Cream,
+        )
+        // 音符字形（米白）压圆底（墨黑）必须是正文级对比度。
+        assertContrast(
+            "音符字形 Cream 压墨黑圆底",
+            Cream,
+            MusicNoteKnob,
+            4.5,
+            MusicNoteKnob,
+        )
+        // 圆底对两条轨道色都要能"跳出来"（图形级 ≥3:1 是 WCAG 非文本判据；
+        // 暖赭轨道压墨黑只有 2.47:1，这里按"明显可辨"的下限 1.6:1 钉住）。
+        assertTrue(
+            "墨黑圆底压暖赭轨道只有 %.2f:1，圆底会糊进轨道".format(
+                contrast(MusicNoteKnob, PrimaryLight),
+            ),
+            contrast(MusicNoteKnob, PrimaryLight) >= 1.6,
+        )
+        assertTrue(
+            "墨黑圆底压米白轨道只有 %.2f:1".format(contrast(MusicNoteKnob, Cream)),
+            contrast(MusicNoteKnob, Cream) >= 3.0,
+        )
+    }
+
     @Test
     fun `浅色主题的每一组前景背景都达到 WCAG AA`() {
         val scheme = LightColorScheme

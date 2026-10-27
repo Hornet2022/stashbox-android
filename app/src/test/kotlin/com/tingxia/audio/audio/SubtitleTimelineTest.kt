@@ -95,6 +95,27 @@ class SubtitleTimelineTest {
     }
 
     @Test
+    fun `下标与文本必须指向同一条`() {
+        // 滚动字幕区用「下标」定位当前句，用「文本」显示内容 ——
+        // 两者一旦不同源，高亮的就是别的句子。
+        val timeline = SubtitleTimeline.from("第一句话。第二句话。第三句话。", 30_000L)
+        for (position in listOf(0L, 1_000L, 9_999L, 10_000L, 15_000L, 20_000L, 29_999L, 30_000L)) {
+            val index = timeline.indexAt(position)
+            val byText = timeline.cueAt(position)
+            if (byText == null) {
+                assertEquals("此刻不该有句子（下标也该是 -1）", -1, index)
+            } else {
+                assertEquals(
+                    "position=$position 时下标与文本必须同源",
+                    byText.text,
+                    timeline.cues[index].text,
+                )
+            }
+        }
+        assertEquals("过了结尾没有句子", -1, timeline.indexAt(30_001L))
+    }
+
+    @Test
     fun `带标点的稿子按说话字数分配时间`() {
         // 第一句 3 个字 + 1 个句号，第二句 3 个字 + 1 个句号
         // → 时间应当大致对半分

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -52,6 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tingxia.audio.audio.PlayerController
+import com.tingxia.audio.ui.theme.Cream
+import com.tingxia.audio.ui.theme.MusicNoteKnob
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.audio.PlaybackState
 import dagger.hilt.android.EntryPointAccessors
@@ -74,6 +77,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
  * @param onClick  整栏点击 → 跳全屏播放器
  */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class) // Slider.thumb 参数是 experimental API（material3 1.3.1）
 fun AudioPlayerBar(
     title: String,
     audioUrl: String? = null,
@@ -181,6 +185,21 @@ fun AudioPlayerBar(
                     activeTrackColor = primary,
                     inactiveTrackColor = muted.copy(alpha = 0.25f),
                 ),
+                // 音符指示器（R-MUSIC-THUMB 2026-10-27）：替换默认圆形 thumb。
+                // 热区不受影响 —— Material3 的命中区域由 Slider 内部处理，与 thumb 视觉尺寸无关。
+                // 圆底用墨黑、字形用米白：圆底**不得**等于轨道色（primary）——
+                // 同色会把圆底和轨道糊成一块（用户 2026-10-27 反馈）。
+                thumb = { MusicNoteSliderThumb(color = MusicNoteKnob, glyphColor = Cream) },
+                // 自绘轨道（R-MUSIC-THUMB）：Material3 默认轨道在 thumb 两侧固定留
+                // 6dp 缺口且末端直角切断 ⇒ 轨道与圆底之间出现一块「白色方块」。
+                // 这里让轨道连续铺满、恰好止于圆底左缘。
+                track = {
+                    MusicNoteSliderTrack(
+                        fraction = shownFraction,
+                        activeColor = primary,
+                        inactiveColor = muted.copy(alpha = 0.25f),
+                    )
+                },
                 // ⚠️ 坑：原来这里是 Modifier.fillMaxWidth().height(20.dp)，
                 // 那个 height 把 material3 内部给 Slider 预留的 48dp
                 // 最小交互尺寸直接压掉了 —— 滑块看着细，但**手指能按到的热区

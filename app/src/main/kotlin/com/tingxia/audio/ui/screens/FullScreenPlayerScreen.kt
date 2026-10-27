@@ -1,6 +1,7 @@
 package com.tingxia.audio.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -17,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -40,6 +43,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bookmark
@@ -99,14 +106,18 @@ import android.content.Intent
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tingxia.audio.audio.PlaybackState
+import com.tingxia.audio.audio.SubtitleCue
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.audio.PlayerControllerEntryPoint
 import com.tingxia.audio.data.repository.FavoritesRepository
 import com.tingxia.audio.data.repository.FeedbackRepository
 import com.tingxia.audio.ui.feedback.FeedbackBottomSheet
+import com.tingxia.audio.ui.components.MusicNoteSliderThumb
+import com.tingxia.audio.ui.components.MusicNoteSliderTrack
 import com.tingxia.audio.ui.components.ObservePlayerPositionUpdates
 import com.tingxia.audio.ui.theme.WarmOchre
 import com.tingxia.audio.ui.theme.Cream
+import com.tingxia.audio.ui.theme.MusicNoteKnob
 import com.tingxia.audio.ui.theme.Neutral100
 import com.tingxia.audio.ui.theme.Neutral200
 import com.tingxia.audio.ui.theme.PlayerBgMid
@@ -201,6 +212,10 @@ fun FullScreenPlayerScreen(
     val sleepTimerMinutes by controller.sleepTimerMinutes.collectAsStateWithLifecycle()
     // 字幕（2026-10-23）：当前该显示的那一句。
     val currentSubtitle by controller.currentSubtitle.collectAsStateWithLifecycle()
+    // 滚动字幕区（2026-10-27）：整条字幕序列 + 当前句下标。
+    // 两者都由**播放位置**驱动（见 PlayerController.updateSubtitle）⇒ 与音频同频。
+    val subtitleCues by controller.subtitleCues.collectAsStateWithLifecycle()
+    val currentSubtitleIndex by controller.currentSubtitleIndex.collectAsStateWithLifecycle()
     // 队列边界（2026-10-23）：到头/到尾时把对应的按钮灰掉。
     //
     // 用户的原话是「上一首/下一首要等队列里真有下一项才亮」。
@@ -294,105 +309,117 @@ fun FullScreenPlayerScreen(
         // 底部的「收藏/标签订阅/反馈/分享」整排落在导航栏后面（实测
         // y=3090~3200，导航栏从 ~3080 开始），用户根本点不到。
         // 缩小封面 + 收紧间距后，这一屏能完整放下，滚动只作为小屏兜底。
-        val coverSize = minOf(maxWidth - 64.dp, maxHeight * 0.32f)
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                // 不可滚动 = 字体放大到 1.3x、或横屏、或小屏时控制键够不着。
-                // 这是音频 App 最要命的断法：暂停不了、拖不动进度。
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp),
-        ) {
-            // 顶部：下拉关闭 + 标题栏
-            TopBar(
-                onDismiss = onDismiss,
-                title = "正在播放",
-                // 播放列表控件（2026-10-27）：右侧换成队列入口。
-                // 原先是「右侧留白对齐」的 Spacer —— 现在这里放一个
-                // 队列图标键，点了弹「当前队列」sheet。
-                trailingAction = {
-                    PressableIconButton(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            showPlaylistSheet = true
-                        },
-                        // 48dp：R6.5 最小触控区。原先 44dp 比 Material 规范小 4dp。
-                        sizeDp = 48,
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = "播放列表",
-                            tint = Cream,
-                            iconSizeDp = 24,
-                        )
-                    }
-                },
-            )
+        // ── 布局结构重构（2026-10-27，产品设计规范 / Material 3）──────────
+        //
+        // 原结构 = 「一列到底 + 一串裸 Spacer + 固定比例封面 + 整列滚动」。
+        // 真机截图量出来的三个结构性问题：
+        // ① 封面固定 = min(宽−64dp, 高×0.32) ⇒ 常见机型上只有 274dp，
+        //    上下却空着 —— 视觉重心偏上，底部一条大片留白；
+        // ② 字幕区**固定**保留两行高度，无字幕时就是一条 52dp 的空带，
+        //    把「元信息」和「进度条」隔成两块互不相干的区域；
+        // ③ 区块之间全靠裸 Spacer(16.dp) 堆叠，没有分组 —— 语速 chip 与
+        //    底部动作行的视觉重量完全一样，用户分不出「播放设置」和「内容操作」。
+        //
+        // 新结构（四段，分组间距不同）：
+        //   顶部栏 ｜ 内容段（封面 + 元信息 + 字幕） ｜ 传输段（进度 + 播放键）
+        //          ｜ 设置段（语速 / 定时） ｜ 操作段（收藏 / 标签 / 反馈 / 分享）
+        //
+        // 关键是**封面改成弹性**：它吃掉内容段的剩余高度，并按可用宽度取最大
+        // 正方形。于是（a）常见机型上封面直接铺满内容宽度；（b）字幕出现/消失、
+        // 标题 1 行↔3 行造成的高度变化**由封面吸收**，下面的控制键不会被推走 ——
+        // 这正是原来要用「固定高度硬扛」的那个跳动问题。
+        //
+        // 矮屏（可用高 < 640dp：横屏、小屏、字体放大到 1.3x）才退回
+        // 「固定封面 + 整页滚动」兜底 —— 音频 App 最要命的断法是
+        // 暂停不了、拖不动进度，所以那条兜底路径必须保留。
+        // 视口尺寸要在进入 Column 之前取出来：Column 里 maxWidth/maxHeight 的
+        // 隐式接收者变成了 Column 自己，引用不到外层 BoxWithConstraints 的。
+        val viewportWidth = maxWidth
+        val viewportHeight = maxHeight
+        val compactHeight = viewportHeight < 640.dp
+        // R3.2：compact 档的网格边距是 16dp（原来用 24dp）。
+        // 不只是合规问题 —— 底部那一行（倍速/定时器/4 个动作键）要一行放下，
+        // 16dp 边距多出的 16dp 正好是那行的余量。
+        val horizontalPadding = 16.dp
+        // ── 竖屏一列 / 横屏两栏 ────────────────────────────────────────────
+        //
+        // 横屏原来的结构是**错的**：封面按「宽 − padding」算尺寸，在横屏
+        // 变成一个缩在左上角的小方块，右侧整片空白（真机截图 /tmp/ui5/I2.png）。
+        // 竖屏的「一列到底」在横屏不成立 —— 音频 App 横屏时视线是横向的，
+        // 内容应该**并排**（封面+元信息 ｜ 字幕+传输+操作），不是堆叠。
+        //
+        // 判定用**视口宽高**而不是屏幕方向：折叠屏展开 / 分屏 / 多窗口下，
+        // 配置里的方向和实际可用尺寸不是一回事。
+        val isLandscape = viewportWidth > viewportHeight
 
-            Spacer(modifier = Modifier.height(16.dp))
-
+        // 面板抽成**局部 @Composable lambda**而不是顶层函数：它们要闭包捕获
+        // 几十个播放器状态（position/duration/speed/…），拆成顶层函数就得写
+        // 一长串参数表，而且这些状态几乎每处都要用。
+        //
+        // 竖屏：内容段（封面 + 元信息 + 字幕） → 传输段 → 设置段 → 操作段。
+        val coverPane: @Composable (Modifier, Alignment) -> Unit = { paneModifier, paneAlignment ->
             // 大封面 — 无封面图时用标题首字 + 渐变
             // 传 displayTitle 而不是入参 title：MainActivity 两处都传 title = ""，
             // 传参的话每一篇的封面都印同一个「听」。
-            LargeCover(
-                title = displayTitle,
-                coverUrl = coverUrl,
-                modifier = Modifier.size(coverSize),
-            )
+            Box(
+                modifier = paneModifier,
+                contentAlignment = paneAlignment,
+            ) {
+                LargeCover(
+                    title = displayTitle,
+                    coverUrl = coverUrl,
+                    modifier = Modifier
+                        .sizeIn(maxWidth = 420.dp, maxHeight = 420.dp)
+                        .aspectRatio(1f),
+                )
+            }
+        }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
+        val metaPane: @Composable () -> Unit = {
             // 标题 + 作者 + 当前码率
             Metadata(
                 title = displayTitle,
                 author = displayAuthor,
                 bitrate = currentBitrate,
             )
+            Spacer(modifier = Modifier.height(if (isLandscape) 12.dp else 16.dp))
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 字幕（2026-10-23 新增）
+        val subtitlePane: @Composable () -> Unit = {
+            // 滚动字幕区（2026-10-27 新增）。
             //
-            // 位置在标题/作者与进度条之间：这是听的位置，
-            // 放在这里视线自然从标题落到文字再落到进度条。
+            // 之前这里只有**当前一句**（SubtitleArea，固定两行）。它确实是
+            // 跟音频同频的（位置 → cueAt），但用户看到的是「一句一换」，
+            // 没法回看前面说过什么，也没法一眼看到上下文。
             //
-            // 只显示**当前这一句**（不是全文滚动）—— 全文已经在下面的
-            // 「听感整理稿」区块里；字幕的职责是「现在听到哪」，
-            // 两者的分工不能混。
+            // 现在是**整条序列的滚动视图**：当前句高亮（字重 + 亮度），
+            // 列表随播放位置自动滚到当前句 ⇒ 滚动和高亮**同源**，
+            // 因此天然与音频进度同频。
             //
-            // ⚠️ 高度必须**固定**（见 [SubtitleArea]）：之前是
-            // `currentSubtitle?.let { Text(...) }`，句子的行数一变
-            // （1 行 ↔ 2 行），整个 Column 的高度就变 →
-            // 进度条、控制键、语速行整体上下位移。
-            // 真机实测：1 行 ↔ 2 行差 91px，字幕每换一句整个下半屏都在跳。
-            SubtitleArea(
-                text = currentSubtitle,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-            )
-
-            // 进度条（可拖拽 seek）
-            ProgressSection(
-                position = position,
-                duration = duration,
-                isDragging = isDragging,
-                dragValue = dragValue,
-                onDragStart = {
-                    isDragging = true
-                    dragValue = if (duration > 0L) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+            // 高度**固定**（见 [ScrollingSubtitleArea]）：句子 1 行↔2 行、
+            // 当前句在列表中间还是末尾，都不引起下方任何位移 ——
+            // 高度变化由弹性封面吸收。
+            ScrollingSubtitleArea(
+                cues = subtitleCues,
+                // 播完了（位置 ≥ 时长）时，时间轴已经「过界」，下标是 -1 ——
+                // 但用户此刻看到的应该是**最后一句**（那正是刚听完的），
+                // 否则整页会停在稿子开头（实测：打开就已播完的文章，
+                // 字幕区停在第一句且没有高亮，像坏了）。
+                currentIndex = if (
+                    currentSubtitleIndex < 0 &&
+                    subtitleCues.isNotEmpty() &&
+                    duration > 0L &&
+                    position >= duration
+                ) {
+                    subtitleCues.lastIndex
+                } else {
+                    currentSubtitleIndex
                 },
-                onDragChange = { v -> dragValue = v },
-                onDragFinish = { v ->
-                    isDragging = false
-                    if (duration > 0L) {
-                        controller.seekTo((v * duration).toLong())
-                    }
-                },
+                modifier = Modifier.fillMaxWidth(),
             )
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
+        val bannersPane: @Composable () -> Unit = {
             // 播放失败提示 + 重试（2026-10-23 新增）
             //
             // 此前播放失败**完全没有反馈**：状态是乐观设成 PLAYING 的，
@@ -433,8 +460,35 @@ fun FullScreenPlayerScreen(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
 
-            // 5 个控制按钮 — 上一首 / 后退 15s / 播放 / 前进 30s / 下一首
+        val progressPane: @Composable () -> Unit = {
+            // ── 传输段：进度条 ──
+            // 与上面的「内容段」之间留 20dp：进度条属于「正在播这一篇」，
+            // 不该和标题/字幕粘在一起（那会让进度条看起来像字幕的一部分）。
+            // 进度条（可拖拽 seek）
+            ProgressSection(
+                position = position,
+                duration = duration,
+                isDragging = isDragging,
+                dragValue = dragValue,
+                onDragStart = {
+                    isDragging = true
+                    dragValue = if (duration > 0L) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+                },
+                onDragChange = { v -> dragValue = v },
+                onDragFinish = { v ->
+                    isDragging = false
+                    if (duration > 0L) {
+                        controller.seekTo((v * duration).toLong())
+                    }
+                },
+            )
+            Spacer(modifier = Modifier.height(if (isLandscape) 12.dp else 20.dp))
+        }
+
+        val controlPane: @Composable () -> Unit = {
+            // 5 个控制按钮 — 上一首 / 后退 10s / 播放 / 前进 30s / 下一首
             ControlButtons(
                 // RECOVERING 也算「在播」（2026-10-26）：断流恢复中，
                 // 按钮该显示暂停、点了也该能暂停。
@@ -494,99 +548,238 @@ fun FullScreenPlayerScreen(
                 hasPreviousItem = hasPreviousItem,
                 hasNextItem = hasNextItem,
             )
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        // ── 底部一行：倍速 / 定时器 / 收藏 / 标签 / 反馈 / 分享 ──────────
+        //
+        // 用户原话：「把倍速、定时器和最底下的四个按钮放一行，两行有些丑」。
+        //
+        // 为什么用 [FlowRow] 而不是固定 Row：
+        // 这一行有 6 个控件（2 个 chip + 4 个 48dp 图标键）。按 R6.5
+        // 图标键不能小于 48dp，4 个就是 192dp；两个 chip 再加文字约 170dp ——
+        // 合计约 370dp。窄机型（360dp，扣边距只剩 328dp）放不下，
+        // 硬塞会**裁掉分享键**（那是最常用的一个）。
+        // FlowRow 的语义正好是「**能一行就一行，放不下才换行**」：
+        // 宽一点的机型（横屏、平板、大屏手机）得到用户要的一行；
+        // 窄机型优雅地退回两行，且任何一个键都不会被裁掉。
+        val bottomBarPane: @Composable () -> Unit = {
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 语速 chip（单 chip，展开后是服务端下发的完整档位列表）
+                SpeedChip(
+                    currentSpeed = speed,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        showSpeedSheet = true
+                    },
+                )
+                // 睡眠定时器 chip
+                SleepTimerChip(
+                    minutes = sleepTimerMinutes,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        showSleepTimerSheet = true
+                    },
+                )
+                // 内容操作四键（收藏 / 标签 / 反馈 / 分享）
+                BottomActions(
+                    isFavorite = shownFavorite,
+                    onToggleFavorite = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        val repo = favoritesRepository
+                        val id = currentArticleId
+                        if (repo == null || id.isNullOrBlank()) {
+                            // 没有仓库（或没在播放）时不要假装成功：点收藏要有反应，
+                            // 但反应必须是诚实的。
+                            Toast.makeText(context, "先播放一篇文章再收藏", Toast.LENGTH_SHORT).show()
+                            return@BottomActions
+                        }
+                        val target = !shownFavorite
+                        favoriteOverride = target          // 乐观更新
+                        scope.launch {
+                            runCatching {
+                                if (shownFavorite) {
+                                    val hit = repo.listFavorites()
+                                        .firstOrNull { it.article_id == id }
+                                    if (hit != null) repo.deleteFavorite(hit.id) else repo.addFavorite(id)
+                                } else {
+                                    repo.addFavorite(id)
+                                }
+                            }.onFailure {
+                                favoriteOverride = !target    // 失败翻回去
+                                Toast.makeText(
+                                    context,
+                                    friendlyError(it, "收藏没存上"),
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    },
+                    onNavigateToTags = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onNavigateToTags()
+                    },
+                    onFeedback = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (feedbackRepository != null) showFeedbackSheet = true else onFeedback()
+                    },
+                    onShare = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        // 分享链接用已注册的深链 stashbox://detail/{id}，和通知
+                        // 点进来用的是同一条路，不另造一套。
+                        val link = shareUrl
+                            ?: currentArticleId?.takeIf { it.isNotBlank() }?.let { "stashbox://detail/$it" }
+                        if (link != null) {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, "${displayTitle}\n$link")
+                            }
+                            context.startActivity(Intent.createChooser(intent, "分享到"))
+                        } else {
+                            onShare()
+                        }
+                    },
+                )
+                // 离导航栏留一点呼吸：这一行是全屏页最后一行内容，
+                // 贴着系统栏会显得被挤下去（实测视觉上像被切了一截）。
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
 
-            // 语速：单一 chip 展示当前档位，点开 sheet 选。
-            // 原来这里排了 5 个 chip + 一个「更多」键，但算一下宽度：
-            // 5 × (12+12 padding + 约 30dp 文字) ≈ 270dp，加 4 个 8dp 间距、
-            // 再加「更多」键，合计约 346dp；而 360dp 机型上这行只有
-            // 360 - 24×2 = 312dp。「更多」键被挤出屏幕。
-            // 而且 sheet 里列的就是同一批档位，两处状态是重复的。
-            // 单 chip 是 Spotify / Apple Podcasts / 小宇宙的通行做法，
-            // 任何字号和屏宽下都不会溢出。
-            SpeedRow(
-                currentSpeed = speed,
-                onShowSpeedSheet = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    showSpeedSheet = true
-                },
-                extraChip = {
-                    SleepTimerChip(
-                        minutes = sleepTimerMinutes,
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = horizontalPadding),
+        ) {
+            // 顶部：下拉关闭 + 标题栏
+            TopBar(
+                onDismiss = onDismiss,
+                title = "正在播放",
+                // 播放列表控件（2026-10-27）：右侧换成队列入口。
+                // 原先是「右侧留白对齐」的 Spacer —— 现在这里放一个
+                // 队列图标键，点了弹「当前队列」sheet。
+                trailingAction = {
+                    PressableIconButton(
                         onClick = {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            showSleepTimerSheet = true
+                            showPlaylistSheet = true
                         },
-                    )
+                        // 48dp：R6.5 最小触控区。原先 44dp 比 Material 规范小 4dp。
+                        sizeDp = 48,
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                            contentDescription = "播放列表",
+                            tint = Cream,
+                            iconSizeDp = 24,
+                        )
+                    }
                 },
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(if (isLandscape) 8.dp else 12.dp))
 
-            // 底部 4 个动作 — 收藏 / 标签 / 反馈 / 分享
-            // 2026-10-03：这四个键此前全是空实现，MainActivity 一个回调都没传，
-            // 四个可见控件点了没有任何反应。现在全部接线。
-            BottomActions(
-                isFavorite = shownFavorite,
-                onToggleFavorite = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    val repo = favoritesRepository
-                    val id = currentArticleId
-                    if (repo == null || id.isNullOrBlank()) {
-                        // 没有仓库（或没在播放）时不要假装成功：点收藏要有反应，
-                        // 但反应必须是诚实的。
-                        Toast.makeText(context, "先播放一篇文章再收藏", Toast.LENGTH_SHORT).show()
-                        return@BottomActions
+            if (isLandscape) {
+                // ── 横屏：两栏 ──────────────────────────────────────────────
+                //
+                // 左栏 = 封面 + 元信息（视觉主体）；右栏 = 字幕 + 传输 + 设置 + 操作
+                // （全部控制）。两栏各自独立滚动 —— 横屏可用高度很小
+                // （本机 3200×1440 旋转后约 411dp），一栏挤不下时另一栏
+                // 不该跟着被推走。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                ) {
+                    // 左栏 = **内容**：封面 + 元信息 + 内容操作（收藏/标签/反馈/分享）。
+                    // 这三样作用在同一篇文章上（操作段本来就比其它段多留 24dp），
+                    // 放在一起语义自洽，也刚好把左栏的空余高度用掉 ——
+                    // 否则 4 个动作键只能挤在右栏底部并被导航栏切掉。
+                    Column(
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        // 横屏封面按**高度**取尺寸：横屏的瓶颈是高度不是宽度，
+                        // 按宽度算会得到一个高过视口的大方块（原来就是这个毛病）。
+                        // 左对齐（CenterStart）而不是居中：下面的标题是左对齐的，
+                        // 封面与标题的左边缘对齐才读得出「一组」。
+                        // 尺寸同时受**高度**约束：横屏的瓶颈是高度
+                        // （本机旋转后可用高约 387dp），按宽度算会得到一个
+                        // 高过视口的大方块 —— 原来就是这个毛病。
+                        // 高度再留一档余量，好让下面的标题 + 4 个动作键
+                        // 一屏放得下（实测 0.58f 时底部动作键被导航栏切掉）。
+                        val landscapeCoverSize = minOf(
+                            viewportWidth * 0.32f,
+                            viewportHeight * 0.46f,
+                        ).coerceIn(120.dp, 420.dp)
+                        coverPane(Modifier.size(landscapeCoverSize), Alignment.CenterStart)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        metaPane()
                     }
-                    val target = !shownFavorite
-                    favoriteOverride = target          // 乐观更新
-                    scope.launch {
-                        runCatching {
-                            if (shownFavorite) {
-                                val hit = repo.listFavorites()
-                                    .firstOrNull { it.article_id == id }
-                                if (hit != null) repo.deleteFavorite(hit.id) else repo.addFavorite(id)
+
+                    // 右栏 = **播放**：字幕 + 进度 + 播放键 + 播放设置。
+                    Column(
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        subtitlePane()
+                        bannersPane()
+                        progressPane()
+                        controlPane()
+                        // 底部一行：倍速 / 定时器 / 收藏 / 标签 / 反馈 / 分享。
+                        // 宽裕的横屏里它就是**一行**（用户要的）。
+                        bottomBarPane()
+                    }
+                }
+            } else {
+                // ── 竖屏：一列 ──────────────────────────────────────────────
+                //
+                // 封面弹性（weight）：吃掉内容段的剩余高度，尺寸按可用宽度
+                // 取**最大正方形**。于是（a）常见机型上封面直接铺满内容宽度；
+                //（b）字幕出现/消失、标题 1 行↔3 行造成的高度变化**由封面吸收**，
+                // 下面的控制键不会被推走 —— 这正是原来要用「固定高度硬扛」的
+                // 那个跳动问题。
+                //
+                // 矮屏（可用高 < 640dp：小屏、字体放大到 1.3x）才退回
+                // 「固定封面 + 整页滚动」兜底 —— 音频 App 最要命的断法是
+                // 暂停不了、拖不动进度，所以那条兜底路径必须保留。
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (compactHeight) {
+                                Modifier.verticalScroll(rememberScrollState())
                             } else {
-                                repo.addFavorite(id)
-                            }
-                        }.onFailure {
-                            favoriteOverride = !target    // 失败翻回去
-                            Toast.makeText(
-                                context,
-                                friendlyError(it, "收藏没存上"),
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                    }
-                },
-                onNavigateToTags = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onNavigateToTags()
-                },
-                onFeedback = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    if (feedbackRepository != null) showFeedbackSheet = true else onFeedback()
-                },
-                onShare = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    // 分享链接用已注册的深链 stashbox://detail/{id}，和通知
-                    // 点进来用的是同一条路，不另造一套。
-                    val link = shareUrl
-                        ?: currentArticleId?.takeIf { it.isNotBlank() }?.let { "stashbox://detail/$it" }
-                    if (link != null) {
-                        val intent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "${displayTitle}\n$link")
-                        }
-                        context.startActivity(Intent.createChooser(intent, "分享到"))
-                    } else {
-                        onShare()
-                    }
-                },
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
+                                Modifier
+                            },
+                        ),
+                ) {
+                    coverPane(
+                        if (compactHeight) {
+                            Modifier.size(
+                                minOf(viewportWidth - horizontalPadding * 2, viewportHeight * 0.30f),
+                            )
+                        } else {
+                            Modifier.fillMaxWidth().weight(1f)
+                        },
+                        Alignment.Center,
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    metaPane()
+                    subtitlePane()
+                    bannersPane()
+                    progressPane()
+                    controlPane()
+                    bottomBarPane()
+                }
+            }
         }
         }
     }
@@ -929,75 +1122,86 @@ private fun Metadata(
 // ─────────────────────────────────────────────────────────
 
 /**
- * 当前这一句字幕。**高度固定**（两行），文字切换不引起布局回流。
+ * 滚动字幕区（2026-10-27 新增，替代原来的单句 [SubtitleArea]）。
  *
- * ## 为什么必须固定高度
+ * ## 为什么是「滚动 + 高亮」而不是「只显示当前句」
+ * 只显示当前句时，用户的上下文只有一句话：听到「因此我们可以…」时，
+ * 他不知道「因此」指的是什么。滚动区把**整条听感稿**摆在眼前，
+ * 当前句高亮，其余压暗 —— 用户既知道现在说到哪，也能回看前面。
  *
- * 之前是 `currentSubtitle?.let { Text(...) }` —— 句子的行数会变
- * （1 行 ↔ 2 行），而它在 Column 里**占位** → 行数一变，下面整列的高度就变
- * → 进度条、控制键、语速行、底部动作行整体上下位移。
+ * ## 怎么保证「与音频进度同频」
+ * 高亮与滚动都由**同一个下标**驱动，而这个下标来自播放位置
+ * （`PlayerController.updateSubtitle` → `SubtitleTimeline.indexAt`），
+ * 不是 UI 自己算的。所以「听到哪」和「看到哪」**不可能**对不上。
  *
- * 真机实测（小米 Mi 11）：1 行 ↔ 2 行相差 91px。字幕每换一句，
- * 下半个屏幕都在跳 —— 进度条被顶开、按钮被顶开，正在拖的进度条还会
- * 被「从手指底下挪走」。
+ * ## 为什么高度固定
+ * 句子有长有短（1 行↔2 行），如果高度跟着内容变，每换一句下方所有控件
+ * 就会跳一下。高度固定 ⇒ 换句只改颜色和滚动位置，**布局零位移**。
  *
- * 固定高度之后，字幕怎么换都不会影响别的东西。
- *
- * ## 文字底部对齐
- *
- * 1 行字幕时贴着进度条（离听觉最近），2 行时向上长 ——
- * 视觉上字幕始终「坐在」进度条上面，而不是悬在中间。
- *
- * ## 超出两行怎么办
- *
- * 截断并加省略号。字幕的职责是「现在听到哪」，全文在详情页的
- * 「听感整理稿」区块里；这里要的是一眼能扫完的一行。
+ * ## 无障碍
+ * 用真正的 [LazyColumn]（不是 Canvas 自绘）：TalkBack 能逐句朗读，
+ * 也能用系统滚动手势翻看（自绘的 Canvas 文字对 TalkBack 是不可见的）。
  */
 @Composable
-private fun SubtitleArea(
-    text: String?,
+private fun ScrollingSubtitleArea(
+    cues: List<SubtitleCue>,
+    currentIndex: Int,
     modifier: Modifier = Modifier,
 ) {
-    // 字幕用 bodyLarge（16sp）再放宽行距到 26sp —— 字幕是"正在听到哪一句"，
-    // 是这一屏里被读得最多的文字，需要比正文更松的行距。
-    // 固定高度由这个 style 的 lineHeight 推导，而不是另写一个常数 ——
-    // 否则改了行距，保留高度还是旧的，文字会被裁掉一截。
-    val subtitleStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp)
-    val reservedHeight = with(LocalDensity.current) { (subtitleStyle.lineHeight * 2).toDp() }
-    Box(
-        modifier = modifier.height(reservedHeight),
+    // 没有稿子 → 什么都不画（不留空带）。
+    if (cues.isEmpty()) return
+    val listState = rememberLazyListState()
+    // 当前句变化 → 把它滚到视口中间。
+    // 偏移量用「视口一半 − 半行」近似居中：句高不固定（1~2 行），
+    // 精确居中反而会在长句时跳。
+    LaunchedEffect(currentIndex, cues.size) {
+        if (currentIndex < 0) return@LaunchedEffect
+        val viewport = listState.layoutInfo.viewportSize.height
+        if (viewport <= 0) return@LaunchedEffect
+        listState.animateScrollToItem(currentIndex, -(viewport / 2 - 28))
+    }
+    LazyColumn(
+        state = listState,
+        // 固定高度：内容再长也不推挤下方控件（见上面的「为什么高度固定」）。
+        //
+        // 上下各 14dp 的**渐隐**（用 DstOut 把边缘文字擦掉，不是盖一层底色）：
+        // 列表滚动时上下边缘会切到半行字，那道硬边看起来像被裁坏了；
+        // 渐隐让它自然消失，而且不依赖背景是什么颜色（播放页背景是渐变，
+        // 盖一层实色会露出一条色带）。
+        // 固定高度：内容再长也不推挤下方控件（见上面的「为什么高度固定」）。
+        //
+        // 边缘被切到半行字是**滚动列表的正常形态**（这里的内容本来就在滚动），
+        // 不要用 DstOut 去「擦掉」它：实测两种做法都会翻车 ——
+        // 直接 DstOut 把整个窗口图层打穿（字幕区变成黑框），
+        // 离屏图层 + DstOut 在 LazyColumn 上整块渲染为空（字幕全没了）。
+        // 需要更柔的边缘时，正确做法是给列表加上下内边距让切边落在
+        // 行与行之间，而不是在绘制层做文章。
+        modifier = modifier.height(ScrollingSubtitleAreaHeight),
+        contentPadding = PaddingValues(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        AnimatedContent(
-            targetState = text,
-            transitionSpec = {
-                (fadeIn(animationSpec = tween(120)) +
-                    slideInVertically(animationSpec = tween(120)) { it / 4 })
-                    .togetherWith(fadeOut(animationSpec = tween(80)))
-            },
-            label = "subtitle",
-            modifier = Modifier.align(Alignment.BottomCenter),
-        ) { line ->
-            if (line.isNullOrBlank()) {
-                Spacer(modifier = Modifier.fillMaxWidth())
-            } else {
-                Text(
-                    text = line,
-                    color = Cream,
-                    style = subtitleStyle,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+        itemsIndexed(cues, key = { index, _ -> index }) { index, cue ->
+            val isCurrent = index == currentIndex
+            Text(
+                text = cue.text,
+                // R4.3：走 typography role，不写死字号。
+                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp),
+                // R6.7：当前句 Cream（对比度 15.4:1），其余 Neutral200 压到
+                // 0.8（实测仍 > 4.5:1）—— 压暗是为了「一眼看到现在这句」，
+                // 不是为了省对比度。
+                color = if (isCurrent) Cream else Neutral200.copy(alpha = 0.8f),
+                // R6.8：不靠颜色单独表意 —— 当前句同时加粗。
+                fontWeight = if (isCurrent) FontWeight.Medium else FontWeight.Normal,
+            )
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────
-// 进度条 + 时间
-// ─────────────────────────────────────────────────────────
+/** 滚动字幕区固定高度（约 3 行 16sp/26dp 行高）。 */
+private val ScrollingSubtitleAreaHeight = 88.dp
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class) // Slider.thumb 参数是 experimental API（material3 1.3.1）
 private fun ProgressSection(
     position: Long,
     duration: Long,
@@ -1059,6 +1263,20 @@ private fun ProgressSection(
                 activeTrackColor = Cream,
                 inactiveTrackColor = Color.White.copy(alpha = 0.25f),
             ),
+            // 音符指示器（R-MUSIC-THUMB 2026-10-27）：替换默认圆形 thumb。
+            // 圆底用墨黑、字形用米白：圆底**不得**等于轨道色（Cream）——
+            // 同色会把圆底和轨道糊成一块（用户 2026-10-27 反馈）。
+            thumb = { MusicNoteSliderThumb(color = MusicNoteKnob, glyphColor = Cream) },
+            // 自绘轨道（R-MUSIC-THUMB）：Material3 默认轨道在 thumb 两侧固定留
+            // 6dp 缺口且末端直角切断 ⇒ 轨道与圆底之间出现一块「白色方块」。
+            // 这里让轨道连续铺满、恰好止于圆底左缘。
+            track = {
+                MusicNoteSliderTrack(
+                    fraction = progress.value,
+                    activeColor = Cream,
+                    inactiveColor = Color.White.copy(alpha = 0.25f),
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
         )
         Row(
@@ -1267,91 +1485,70 @@ private fun PlayPauseButton(
 // ─────────────────────────────────────────────────────────
 
 @Composable
-private fun SpeedRow(
+private fun SpeedChip(
     currentSpeed: Float,
-    onShowSpeedSheet: () -> Unit,
-    extraChip: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
 ) {
-    // CP-TTS-VOICE: 原来是 `var currentSpeed by remember { mutableStateOf("1.0x") }`
-    // —— 纯粹本地 state,点哪个 chip 都只改这个变量,播放器速度纹丝不动,
+    // CP-TTS-VOICE：原来是 `var currentSpeed by remember { mutableStateOf("1.0x") }`
+    // —— 纯粹本地 state，点哪个 chip 都只改这个变量，播放器速度纹丝不动，
     // 切屏/重启即丢。这条链路从 UI 到 ExoPlayer 根本没接上。
     // 现在 currentSpeed 由 PlayerController 的 StateFlow 驱动。
     //
     // 2026-10-03: 5 个内联 chip + 「更多」键换成单 chip。
     // 算宽度：chip = 24 padding + 约 30dp 文字 ≈ 54dp，5 个 = 270dp，
     // 加 4 个 8dp 间隔和「更多」键约 346dp；而 360dp 机型这行只有
-    // 360 − 48 = 312dp —— 「更多」键被挤出屏幕，且 sheet 里列的还是同一批档位。
+    // 360 − 32 = 328dp —— 「更多」键被挤出屏幕，且 sheet 里列的还是同一批档位。
     // 单 chip 既不溢出又把当前档位一眼可见，展开后的 sheet 给的是完整列表。
+    //
+    // 2026-10-27：水平内边距从 20dp 收到 12dp —— 底部那一行要放下
+    // 「倍速 + 定时器 + 4 个 48dp 图标键」，省下的 16dp 正是那行的余量。
+    // 高度仍是 48dp（R6.5 触控下限没动）。
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
+        label = "speedChipScale",
+    )
+    val bgColor by animateColorAsState(
+        targetValue = PlayerHighlight.copy(alpha = 0.12f),
+        animationSpec = tween(durationMillis = 160),
+        label = "speedChipBg",
+    )
     Row(
-        // 不用 fillMaxWidth —— 语速 chip 与定时器 chip 要**并排居中**，
-        // 填满宽度会把第二个 chip 顶到边上（360dp 机型上直接被截断）。
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(20.dp))
+            .background(bgColor)
+            .clickable(
+                interactionSource = interactionSource,
+                // R7.5：Material 涟漪（原来 indication = null）。
+                indication = ripple(),
+                onClick = onClick,
+            )
+            // 48dp 触控下限：原来「更多」键只有 36dp，手指很难点准。
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        val interactionSource = remember { MutableInteractionSource() }
-        val isPressed by interactionSource.collectIsPressedAsState()
-        val scale by animateFloatAsState(
-            targetValue = if (isPressed) 0.95f else 1f,
-            animationSpec = tween(durationMillis = 120, easing = LinearEasing),
-            label = "speedRowScale",
+        Text(
+            text = formatSpeedLabel(currentSpeed),
+            color = Cream,
+            style = MaterialTheme.typography.labelLarge,
         )
-        val bgColor by animateColorAsState(
-            targetValue = PlayerHighlight.copy(alpha = 0.12f),
-            animationSpec = tween(durationMillis = 160),
-            label = "speedRowBg",
+        Icon(
+            imageVector = Icons.Default.ExpandMore,
+            contentDescription = "选择播放速度",
+            tint = Neutral200,
+            modifier = Modifier.size(18.dp),
         )
-        Row(
-            modifier = Modifier
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                }
-                .clip(RoundedCornerShape(20.dp))
-                .background(bgColor)
-                .clickable(
-                    interactionSource = interactionSource,
-                    // R7.5：Material 涟漪（原来 indication = null）。
-                    indication = ripple(),
-                    onClick = onShowSpeedSheet,
-                )
-                // 48dp 触控下限：原来「更多」键只有 36dp，手指很难点准。
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = formatSpeedLabel(currentSpeed),
-                color = Cream,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Icon(
-                imageVector = Icons.Default.ExpandMore,
-                contentDescription = "选择播放速度",
-                tint = Neutral200,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-
-        // 附加 chip（睡眠定时器）—— 与语速 chip 并排。
-        if (extraChip != null) {
-            Spacer(modifier = Modifier.width(10.dp))
-            extraChip()
-        }
     }
 }
 
-/**
- * 睡眠定时器 chip（2026-10-23 新增）。
- *
- * 显示口径：没设就显示「定时器」，设了就显示剩余分钟数 ——
- * 用户必须一眼看出「还剩多久会停」，否则不敢靠它睡觉。
- *
- * 为什么是 chip 而不是底部第四个图标键：底部那排是
- * 收藏/标签/反馈/分享，全是**立刻见效**的动作；
- * 定时器是**设置型**的，和语速同类，放一起更合理。
- */
 @Composable
 private fun SleepTimerChip(
     minutes: Int,
@@ -1384,9 +1581,9 @@ private fun SleepTimerChip(
                 onClick = onClick,
             )
             .heightIn(min = 48.dp)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = if (minutes > 0) "定时 $minutes 分钟" else "定时器",
@@ -1414,9 +1611,12 @@ private fun BottomActions(
     onFeedback: () -> Unit,
     onShare: () -> Unit,
 ) {
+    // 2026-10-27：它现在是「底部一行」里的一个整体（FlowRow 的一个 item）。
+    // 原来 fillMaxWidth + SpaceEvenly 会占满整行 → 在一行布局里等于把
+    // 前面两个 chip 挤到第二行。改成内容宽度 + 紧凑间距。
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        modifier = Modifier,
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PressableIconButton(

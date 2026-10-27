@@ -112,6 +112,25 @@ class PlayerController @Inject constructor(
     /** 当前该显示的字幕行（null = 没有字幕，或此刻不在任何一句上）。 */
     val currentSubtitle: StateFlow<String?> = _currentSubtitle.asStateFlow()
 
+    /**
+     * 当前这篇的**完整字幕序列**（2026-10-27 新增）。
+     *
+     * 为什么要把整条时间轴暴露出去：滚动字幕区要同时知道
+     * 「总共有几句」和「现在是第几句」—— 只有一句文本的话，
+     * UI 没法列出全文、也没法高亮当前那句（重复句还会匹配错）。
+     * 两者都由**播放位置**驱动 ⇒ 与音频进度天然同频。
+     */
+    private val _subtitleCues = MutableStateFlow<List<SubtitleCue>>(emptyList())
+
+    /** 整条字幕序列（空 = 这篇没有稿子 / 还没算出来）。 */
+    val subtitleCues: StateFlow<List<SubtitleCue>> = _subtitleCues.asStateFlow()
+
+    /** 当前是第几句（-1 = 此刻不在任何一句上）。 */
+    private val _currentSubtitleIndex = MutableStateFlow(-1)
+
+    /** 当前句下标（-1 = 无）。 */
+    val currentSubtitleIndex: StateFlow<Int> = _currentSubtitleIndex.asStateFlow()
+
     /** articleId → 听感稿全文（缓存，避免同一篇反复取）。 */
     private val subtitleScripts = HashMap<String, String>()
 
@@ -401,18 +420,27 @@ class PlayerController @Inject constructor(
         val script = currentScript
         if (script.isNullOrBlank()) {
             if (_currentSubtitle.value != null) _currentSubtitle.value = null
+            if (_currentSubtitleIndex.value != -1) _currentSubtitleIndex.value = -1
+            if (_subtitleCues.value.isNotEmpty()) _subtitleCues.value = emptyList()
             return
         }
         val duration = _duration.value
         if (duration <= 0L) {
             if (_currentSubtitle.value != null) _currentSubtitle.value = null
+            if (_currentSubtitleIndex.value != -1) _currentSubtitleIndex.value = -1
+            if (_subtitleCues.value.isNotEmpty()) _subtitleCues.value = emptyList()
             return
         }
         if (duration != subtitleTimelineDurationMs) {
             subtitleTimeline = SubtitleTimeline.from(script, duration)
             subtitleTimelineDurationMs = duration
+            // 时间轴重算 ⇒ 整条序列换了 ⇒ 一次性把新序列推给 UI
+            //（不要每 500ms 推一次同样的 List：那会让重组白白发生）。
+            _subtitleCues.value = subtitleTimeline.cues
         }
-        _currentSubtitle.value = subtitleTimeline.cueAt(_position.value)?.text
+        val index = subtitleTimeline.indexAt(_position.value)
+        _currentSubtitleIndex.value = index
+        _currentSubtitle.value = subtitleTimeline.cues.getOrNull(index)?.text
     }
 
     /** 位置泵是否开着（internal 便于单测断言「换曲后泵有没有被拉回来」）。 */
