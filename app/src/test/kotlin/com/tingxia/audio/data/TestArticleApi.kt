@@ -12,6 +12,8 @@ import com.tingxia.audio.data.model.ListenCompleteResponse
 import com.tingxia.audio.data.model.RatingRequest
 import com.tingxia.audio.data.model.RatingResponse
 import com.tingxia.audio.data.model.RetryResponse
+import com.tingxia.audio.data.model.ShareRequest
+import com.tingxia.audio.data.model.ShareResponse
 import com.tingxia.audio.data.model.SkipRequest
 import com.tingxia.audio.data.model.SkipResponse
 import com.tingxia.audio.data.remote.ArticleApi
@@ -36,6 +38,12 @@ open class FakeArticleApi : ArticleApi {
     var audioUrls: Map<String, String> = emptyMap()
     var statuses: Map<String, DistillStatus> = emptyMap()
     var statusResponses: Map<String, DistillStatusResponse> = emptyMap()
+
+    // 0041 共享：share/unshare 的响应（默认「已共享，无标签」）。
+    // 测试可覆写 shareResponses / shareError 来控制行为。
+    var shareResponse: ShareResponse = ShareResponse(id = null, shared = true, sharedTags = emptyList())
+    var shareError: Throwable? = null
+    var lastShareRequest: ShareRequest? = null
 
     override suspend fun getArticles(tag: String?): ArticleListResponse =
         ArticleListResponse(items = articles)
@@ -86,4 +94,16 @@ open class FakeArticleApi : ArticleApi {
 
     override suspend fun skipArticle(id: String, body: SkipRequest): SkipResponse =
         SkipResponse(id = id, skip = true, feedbackId = 3, reason = body.reason)
+
+    // 0041 共享：记录请求，返回可配置响应（或抛错）。
+    override suspend fun shareArticle(id: String, body: ShareRequest): ShareResponse {
+        lastShareRequest = body
+        shareError?.let { throw it }
+        return shareResponse
+    }
+
+    override suspend fun unshareArticle(id: String): ShareResponse {
+        shareError?.let { throw it }
+        return ShareResponse(id = id, shared = false, sharedTags = null)
+    }
 }

@@ -38,13 +38,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Feedback
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
@@ -189,6 +193,9 @@ fun FullScreenPlayerScreen(
     // 之前是永远亮的 —— 到末尾点下去毫无反应（死按钮）。
     val hasNextItem by controller.hasNextItem.collectAsStateWithLifecycle()
     val hasPreviousItem by controller.hasPreviousItem.collectAsStateWithLifecycle()
+    // 播放列表控件（2026-10-27）：当前真正在播的队列快照 + 当前项下标。
+    val queueItems by controller.queueItems.collectAsStateWithLifecycle()
+    val currentQueueIndex by controller.currentQueueIndex.collectAsStateWithLifecycle()
     val availableSpeeds by controller.availableSpeeds.collectAsStateWithLifecycle()
     // 多码率是本 App 的招牌能力（闭环 3），播放器掌握当前实际在放的码率。
     val currentBitrate by controller.currentBitrate.collectAsStateWithLifecycle()
@@ -205,6 +212,9 @@ fun FullScreenPlayerScreen(
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showFeedbackSheet by remember { mutableStateOf(false) }
     var showSleepTimerSheet by remember { mutableStateOf(false) }
+    // 播放列表控件（2026-10-27 新增）：全屏播放器里的「队列」sheet，
+    // 展示当前真正在播的队列（播放列表 + 当前文章），点某一项直接切过去。
+    var showPlaylistSheet by remember { mutableStateOf(false) }
     // 收藏是乐观更新：先翻图标，失败再翻回来并提示。播放器的收藏不该
     // 阻塞在一次网络往返上。
     var favoriteOverride by remember { mutableStateOf<Boolean?>(null) }
@@ -262,6 +272,25 @@ fun FullScreenPlayerScreen(
             TopBar(
                 onDismiss = onDismiss,
                 title = "正在播放",
+                // 播放列表控件（2026-10-27）：右侧换成队列入口。
+                // 原先是「右侧留白对齐」的 Spacer —— 现在这里放一个
+                // 队列图标键，点了弹「当前队列」sheet。
+                trailingAction = {
+                    PressableIconButton(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showPlaylistSheet = true
+                        },
+                        sizeDp = 44,
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                            contentDescription = "播放列表",
+                            tint = Color(0xFFF5F2EB),
+                            iconSizeDp = 24,
+                        )
+                    }
+                },
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -630,6 +659,27 @@ fun FullScreenPlayerScreen(
         }
     }
 
+    // 播放列表 sheet（2026-10-27 新增）：展示当前真正在播的队列，
+    // 点某一项直接切过去。内容与播放列表同步 —— 队列 = 播放列表 + 当前文章
+    // （见 PlayerController.buildQueue），且系统媒体面板/耳机键换曲也会反映在这里。
+    if (showPlaylistSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlaylistSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFF2E251E),
+        ) {
+            PlaylistSheetContent(
+                items = queueItems,
+                currentIndex = currentQueueIndex,
+                onSelect = { index ->
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    controller.seekToQueueIndex(index)
+                    showPlaylistSheet = false
+                },
+            )
+        }
+    }
+
     if (showFeedbackSheet && feedbackRepository != null) {
         val appVersion = remember {
             try {
@@ -655,6 +705,7 @@ fun FullScreenPlayerScreen(
 private fun TopBar(
     onDismiss: () -> Unit,
     title: String,
+    trailingAction: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -682,8 +733,12 @@ private fun TopBar(
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.Center,
         )
-        // 右侧留白对齐
-        Spacer(modifier = Modifier.width(44.dp))
+        // 右侧：有 trailingAction 就放它，否则留白对齐（保持标题居中）。
+        if (trailingAction != null) {
+            trailingAction()
+        } else {
+            Spacer(modifier = Modifier.width(44.dp))
+        }
     }
 }
 
@@ -1339,6 +1394,95 @@ private fun BottomActions(
                 tint = Color(0xFFD4CFC6),
                 iconSizeDp = 24,
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// 播放列表 sheet 内容（2026-10-27 新增）
+// ─────────────────────────────────────────────────────────
+
+@Composable
+private fun PlaylistSheetContent(
+    items: List<PlayerController.QueueItem>,
+    currentIndex: Int,
+    onSelect: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .windowInsetsPadding(WindowInsets.navigationBars),
+    ) {
+        Text(
+            text = "播放列表${if (items.isNotEmpty()) "（${items.size}）" else ""}",
+            color = Color(0xFFF5F2EB),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "点任意一篇直接切过去；列表与你的播放列表同步。",
+            color = Color(0xFFD4CFC6),
+            fontSize = 13.sp,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        if (items.isEmpty()) {
+            Text(
+                text = "队列是空的",
+                color = Color(0xFFD4CFC6),
+                fontSize = 14.sp,
+                modifier = Modifier.padding(vertical = 24.dp),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                itemsIndexed(items, key = { _, item -> item.articleId }) { index, item ->
+                    val isCurrent = index == currentIndex
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isCurrent) Color(0xFFFFFFFF).copy(alpha = 0.16f)
+                                else Color.Transparent
+                            )
+                            .clickable { onSelect(index) }
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = if (isCurrent) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isCurrent) "正在播放" else "播放这一篇",
+                            tint = if (isCurrent) WarmOchre else Color(0xFFD4CFC6),
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.title?.takeIf { it.isNotBlank() } ?: "（无标题）",
+                                color = if (isCurrent) Color(0xFFF5F2EB) else Color(0xFFE8E4DD),
+                                fontSize = 15.sp,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (isCurrent) {
+                                Text(
+                                    text = "正在播放",
+                                    color = WarmOchre,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

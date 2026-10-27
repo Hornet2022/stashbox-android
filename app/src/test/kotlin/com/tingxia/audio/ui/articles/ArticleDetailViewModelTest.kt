@@ -7,11 +7,13 @@ import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
 import com.tingxia.audio.data.FakeDistillationApi
 import com.tingxia.audio.data.FakeProgressApi
+import com.tingxia.audio.data.FakeTagApi
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.remote.ProgressGetResponse
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
+import com.tingxia.audio.data.repository.TagRepository
 import com.tingxia.audio.data.local.InMemoryPlaybackProgressDao
 import com.tingxia.audio.data.repository.ProgressRepository
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +88,7 @@ class ArticleDetailViewModelTest {
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
     }
@@ -134,6 +137,7 @@ class ArticleDetailViewModelTest {
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -162,6 +166,7 @@ class ArticleDetailViewModelTest {
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")
@@ -191,6 +196,7 @@ class ArticleDetailViewModelTest {
             playerController = playerController,
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a")

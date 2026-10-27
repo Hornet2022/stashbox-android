@@ -14,6 +14,8 @@ import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.local.InMemoryPlaybackProgressDao
 import com.tingxia.audio.data.repository.ProgressRepository
+import com.tingxia.audio.data.FakeTagApi
+import com.tingxia.audio.data.repository.TagRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -103,6 +105,7 @@ class ArticleDetailRetryTest {
             playerController = fakeController(),
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
     }
@@ -139,6 +142,7 @@ class ArticleDetailRetryTest {
             playerController = fakeController(),
             evaluationRepository = EvaluationRepository(FakeDistillationApi()),
             playlistRepository = PlaylistRepository(FakePlaylistDao()),
+            tagRepository = TagRepository(FakeTagApi()),
             context = RuntimeEnvironment.getApplication(),
         )
         vm.loadArticle("a1")

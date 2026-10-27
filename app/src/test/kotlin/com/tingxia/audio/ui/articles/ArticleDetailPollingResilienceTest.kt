@@ -7,6 +7,7 @@ import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
 import com.tingxia.audio.data.FakeDistillationApi
 import com.tingxia.audio.data.FakeProgressApi
+import com.tingxia.audio.data.FakeTagApi
 import com.tingxia.audio.data.local.InMemoryPlaybackProgressDao
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.AudioUrlResponse
@@ -16,6 +17,7 @@ import com.tingxia.audio.data.remote.ProgressGetResponse
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.EvaluationRepository
 import com.tingxia.audio.data.repository.ProgressRepository
+import com.tingxia.audio.data.repository.TagRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -110,6 +112,7 @@ class ArticleDetailPollingResilienceTest {
         playerController = playerController,
         evaluationRepository = EvaluationRepository(FakeDistillationApi()),
         playlistRepository = PlaylistRepository(FakePlaylistDao()),
+        tagRepository = TagRepository(FakeTagApi()),
         context = RuntimeEnvironment.getApplication(),
     )
 

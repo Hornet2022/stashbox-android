@@ -86,7 +86,6 @@ import com.tingxia.audio.ui.articles.ArticleDetailViewModel
 import com.tingxia.audio.ui.articles.DeleteState
 import com.tingxia.audio.ui.articles.RetryState
 import com.tingxia.audio.ui.articles.ShareState
-import com.tingxia.audio.ui.components.AudioPlayerBar
 import com.tingxia.audio.ui.components.BitrateSelectorSheet
 import com.tingxia.audio.ui.components.DownloadButton
 import com.tingxia.audio.ui.components.ShareArticleDialog
@@ -112,7 +111,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * - 顶部 TopAppBar：返回 + 标题
  * - 主体：标题 + 来源 + 状态 + 原文链接（点击复制）
  * - 蒸馏状态轮询（[ArticleDetailViewModel] 内每 3 秒 GET distill/{task_id}）
- * - status == ready → 显示 [AudioPlayerBar] + audio_url
+ * - status == ready → 有 audio_url 可播。播放条是**全局**的（GlobalPlayerBar，
+ *   见 ui/components/GlobalPlayerBar.kt），不再由本页 bottomBar 承载 ——
+ *   离开详情页后控件依然可见。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -587,20 +588,6 @@ fun ArticleDetailScreen(
                     }
                 },
             )
-        },
-        bottomBar = {
-            // 有音频（READY 或 LISTENED）才显示播放条。LISTENED 是「已听完」标记，
-            // 音频仍在、详情页重开会自动播放，没有播放条＝已听过的文章音频在播却无控件（回归）。
-            if (uiState.status.hasAudio && article != null) {
-                AudioPlayerBar(
-                    title = article.title ?: "",
-                    audioUrl = uiState.audioUrl,
-                    // 播放器据此判定"这次播放属于哪篇文章"→ 完听上报 → 自动弹评分卡。
-                    // 漏传会让听感评分彻底不触发（真机 listen_complete 长期为 0 的根因）。
-                    articleId = article.id,
-                    onClick = onOpenFullScreenPlayer,
-                )
-            }
         },
     ) { innerPadding ->
         Crossfade(

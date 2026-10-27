@@ -199,8 +199,26 @@ android {
         //   可得计数（读服务端 list_tags 的 subscribable_count）。
         // ⚠️ 升 versionCode 是硬要求：0.4.6(19) 已上线 ⇒ 停在 19 的话，
         //   已装 0.4.6 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
-        versionCode = 20
-        versionName = "0.4.7"
+        // 0.4.9(22)：修 0.4.8 的全局播放条位置事故。
+        //   0.4.8 把全局播放条放到了**屏幕顶部**（用户当场发现）。
+        //   根因不是"写错了值"，而是布局对齐的层级：播放条的根 Box 只写了
+        //   fillMaxWidth()（高度=内容高度），而它在 MainActivity 里是
+        //   Box(Modifier.fillMaxSize()) 的子项，父 Box 的 contentAlignment
+        //   是默认 TopStart ⇒ 它被摆到了顶部；它内部的 BottomCenter 在那个
+        //   "只有内容高度"的小 Box 里上下沿重合，等于没写。
+        //   ⇒ 结论：BottomCenter 只有父容器撑满时才有效。已改为 fillMaxSize()，
+        //   并补了 GlobalPlayerBarTest（用节点坐标断言位置，红过）。
+        //   顺带：播放条是浮层，现在把实测高度报给内容区预留空间，
+        //   不然列表最后一项会被它盖住、滚到底也看不全。
+        // ⚠️ 升 versionCode 是硬要求：0.4.8(21) 已上线 ⇒ 停在 21 的话，
+        //   已装 0.4.8 的内测用户收不到更新提示（这个 bug 只在 0.4.8 存在）。
+        //   签名不变 ⇒ 覆盖安装不丢本地库 / 登录态 / 下载进度。
+        // 0.4.8(21)：全局播放条 + 全屏播放器（播放条/播放列表功能），
+        //   并随本版一起发布标签订阅相关修复。
+        // ⚠️ 升 versionCode 是硬要求：0.4.7(20) 已上线 ⇒ 停在 20 的话，
+        //   已装 0.4.7 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
+        versionCode = 22
+        versionName = "0.4.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -9,10 +9,12 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -29,12 +31,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navDeepLink
 import androidx.navigation.navArgument
@@ -64,6 +68,7 @@ import com.tingxia.audio.ui.privacy.PrivacyConsentGate
 import com.tingxia.audio.ui.settings.SettingsScreen
 import com.tingxia.audio.ui.tags.TagSubscriptionScreen
 import com.tingxia.audio.ui.theme.TingxiaTheme
+import com.tingxia.audio.ui.components.GlobalPlayerBar
 import com.tingxia.audio.ui.favorites.FavoritesScreen
 import com.tingxia.audio.ui.laterlistens.LaterListensScreen
 import com.tingxia.audio.ui.paywall.PaywallScreen
@@ -402,11 +407,44 @@ private fun AppNavigation() {
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = "home",
+    // 全局迷你播放条（2026-10-27）：
+    //
+    // 需求：只要**有音频在播**，播放器控件就要始终可见，而不是只在详情页。
+    // 做法：在 NavHost 之上叠一层全局 [GlobalPlayerBar]。它读的是
+    // PlayerController 单例的真实曲目，所以在任何页面都显示当前在播的那一篇。
+    // 唯一例外是全屏播放页 —— 它本身就是展开的控件，再叠一条迷你条是重复的
+    // （见 GlobalPlayerBar 里对 route == "player" 的判断）。
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    // 迷你播放条要占的高度（实测，不含系统导航栏 inset）。
+    //
+    // 播放条是**浮层**（盖在 NavHost 之上），所以内容区必须自己让出这块高度 ——
+    // 否则列表滚到最后一项时，它正好落在播放条底下，用户怎么滚都看不全。
+    //
+    // 为什么扣掉导航栏 inset：各页自己的 Scaffold 已经按 systemBars 内缩过一次，
+    // 这里再计一遍就多出一截空白（导航栏那么高）。
+    var playerBarHeight by remember { mutableStateOf(Dp.Unspecified) }
+    val contentBottomPadding = if (playerBarHeight == Dp.Unspecified) {
+        0.dp
+    } else {
+        playerBarHeight
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // 背景色必须和页面的 Scaffold 底色一致（各页 Scaffold 默认就是
+            // colorScheme.background）—— 否则给播放条预留出来的那条空隙
+            // 会露出窗口底色，看着像一条缝。
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        composable("home") {
+        NavHost(
+            modifier = Modifier.padding(bottom = contentBottomPadding),
+            navController = navController,
+            startDestination = "home",
+        ) {
+            composable("home") {
             HomeScreen(
                 onNavigateToFavorites = { navController.navigate("favorites") },
                 onNavigateToNotifications = { navController.navigate("notifications") },
@@ -628,5 +666,21 @@ private fun AppNavigation() {
                 onAccountDeleted = { authViewModel.onAccountDeleted() },
             )
         }
+        }
+
+        // 全局迷你播放条：叠在 NavHost 之上，底部对齐。
+        //
+        // onContentHeightChange：把条子实测高度报回来，让 NavHost 预留出
+        // 对应空间（见上面 contentBottomPadding 的说明）。
+        GlobalPlayerBar(
+            playerController = playerController,
+            currentRoute = currentRoute,
+            onClick = {
+                navController.navigate("player") {
+                    launchSingleTop = true
+                }
+            },
+            onContentHeightChange = { playerBarHeight = it },
+        )
     }
 }

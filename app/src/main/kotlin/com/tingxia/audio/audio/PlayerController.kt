@@ -979,10 +979,56 @@ class PlayerController @Inject constructor(
     private val _hasPreviousItem = MutableStateFlow(false)
     val hasPreviousItem: StateFlow<Boolean> = _hasPreviousItem.asStateFlow()
 
+    /**
+     * 当前**真正在播的队列**（全屏播放器的播放列表控件用）。
+     *
+     * 为什么从播放器读而不是从 [_playlistItems] 拼：真相源是 ExoPlayer 的
+     * 播放列表 —— 它包含「播放列表 + 当前文章」的 tail（见 [buildQueue]），
+     * 而且**系统媒体面板/耳机键/通知栏**换曲都会改它，App 侧再拼一份
+     * 必然和播放器对不上。这里直接读 `player.getMediaItemAt(i)`，
+     * 和 `hasNextItem` / `hasPreviousItem` 同源，永远一致。
+     */
+    private val _queueItems = MutableStateFlow<List<QueueItem>>(emptyList())
+    val queueItems: StateFlow<List<QueueItem>> = _queueItems.asStateFlow()
+
+    /** 当前正在播的是队列里第几项（-1 = 队列为空 / 未初始化）。 */
+    private val _currentQueueIndex = MutableStateFlow(-1)
+    val currentQueueIndex: StateFlow<Int> = _currentQueueIndex.asStateFlow()
+
     /** 刷新队列边界状态（换曲 / 灌队列之后调）。 */
     private fun refreshQueueBounds() {
         _hasNextItem.value = player.hasNextMediaItem()
         _hasPreviousItem.value = player.hasPreviousMediaItem()
+        // 顺带重建「真正在播的队列」快照 —— 和边界同源，都在换曲/灌队列后刷。
+        // 用 MediaItem 的 mediaId（= articleId）与标题重建，供全屏播放器的
+        // 播放列表控件展示；audioUrl 不在 MediaItem 上可靠暴露，用当前镜像兜底。
+        val count = player.mediaItemCount
+        val items = (0 until count).map { i ->
+            val mi = player.getMediaItemAt(i)
+            val id = mi.mediaId
+            val title = mi.mediaMetadata.title?.toString()
+            val author = mi.mediaMetadata.artist?.toString()
+            val url = _playlistItems.value.firstOrNull { it.articleId == id }?.audioUrl
+                ?: if (id == _currentArticleId.value) _currentAudioUrl.value else ""
+            QueueItem(articleId = id, audioUrl = url.orEmpty(), title = title, author = author)
+        }
+        _queueItems.value = items
+        val idx = player.currentMediaItemIndex
+        _currentQueueIndex.value = if (idx != C.INDEX_UNSET && idx in items.indices) idx else -1
+    }
+
+    /**
+     * 跳到队列里第 [index] 项（全屏播放器的播放列表控件用）。
+     *
+     * 用 `seekTo(index, 0L)` 而不是 `seekToMediaItem`：后者在 Media3 里
+     * 不会把当前项切过去（它是「把某一段设为当前」），前者才真正换曲。
+     * 换曲会触发 [Player.Listener.onMediaItemTransition]，边界与队列快照
+     * 都会随之刷新。
+     */
+    fun seekToQueueIndex(index: Int) {
+        if (index < 0 || index >= player.mediaItemCount) return
+        player.seekTo(index, 0L)
+        player.play()
     }
 
     /**
