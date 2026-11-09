@@ -51,6 +51,18 @@ class ArticleRepository @Inject constructor(private val api: ArticleApi) {
     suspend fun getDistillStatus(taskId: String): DistillStatus =
         api.getDistillStatusByTaskId(taskId).status
 
+    /**
+     * 旧路径的**全字段**版本（2026-11-09 事故引入）。
+     *
+     * 为什么要它：失败时服务端会带回一句**面向用户的原因**
+     * （如「AI 服务暂时连不上，我们正在等它恢复。请稍后重试。」），
+     * 而旧的 [getDistillStatus] 只返回 status，把那句原因丢了 ——
+     * 于是界面只能显示写死的「蒸馏失败，请重试」，用户既不知道为什么、
+     * 也不知道该不该马上重试。
+     */
+    suspend fun getDistillStatusDetail(taskId: String): DistillStatusResponse =
+        api.getDistillStatusByTaskId(taskId)
+
     /** §1.4 主档音频地址（128k，签名 URL）。**过期后重新请求本端点**，不要长缓存。 */
     suspend fun getAudioUrl(id: String): AudioUrlResponse = api.getAudioUrl(id)
 

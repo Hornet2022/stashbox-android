@@ -172,7 +172,8 @@ class DistillViewModel @Inject constructor(
                 delay(POLL_INTERVAL_MS)
                 attempts++
                 try {
-                    val status = repository.getDistillStatus(taskId)
+                    val statusResponse = repository.getDistillStatusDetail(taskId)
+                    val status = statusResponse.status
                     // 查询成功即重置连续失败计数，避免抖动被误判成服务不可达
                     consecutiveFailures = 0
                     when (status) {
@@ -196,7 +197,12 @@ class DistillViewModel @Inject constructor(
                                 inProgress = _uiState.value.inProgress - articleId,
                                 distillingArticles = _uiState.value.distillingArticles.filter { it.id != articleId },
                                 failedArticles = (_uiState.value.failedArticles + moved).distinctBy { it.id },
-                                error = "蒸馏失败，请重试",
+                                // 2026-11-09：优先显示**服务端给的原因**
+                                // （如「AI 服务暂时连不上…请稍后重试。」）。
+                                // 写死的「蒸馏失败，请重试」让用户既不知道为什么失败、
+                                // 也不知道该不该马上重试 —— 上游挂掉时尤其误导。
+                                error = statusResponse.error?.takeIf { it.isNotBlank() }
+                                    ?: "蒸馏失败，请重试",
                             )
                             pollJobs.remove(articleId)
                             return@launch
