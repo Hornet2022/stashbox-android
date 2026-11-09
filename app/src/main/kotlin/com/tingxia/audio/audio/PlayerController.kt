@@ -1439,7 +1439,12 @@ class PlayerController @Inject constructor(
                 "attempt" to attempt,
                 "position_ms" to _position.value,
                 "duration_ms" to _duration.value,
-                "cause" to cause.javaClass.simpleName,
+                // ⚠️ 不能用 `cause.javaClass.simpleName`（2026-11-09）：
+                // release 包开了 R8 ⇒ 类名被混淆 ⇒ 生产埋点里只剩一个没意义的 "y"，
+                // 排查时完全读不出失败原因（debug 包不混淆，所以本地看不出来）。
+                // 这里用**自己定义的固定字符串**，不受混淆影响。
+                "cause" to PlaybackFailure.describe(cause).key,
+                "http_status" to PlaybackFailure.describe(cause).httpStatus,
             ),
         )
         return true

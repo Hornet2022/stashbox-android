@@ -3,6 +3,11 @@ package com.tingxia.audio.audio
 import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
 import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 /**
  * 播放失败的两类成因（2026-10-26）。
@@ -111,17 +116,107 @@ object PlaybackFailure {
     fun isRetryableStatus(responseCode: Int): Boolean =
         responseCode == 408 || responseCode == 429 || responseCode in 500..599
 
-    /** 取 cause 链（含自己），限深防环。 */
-    private fun causeChain(cause: Throwable?): List<Throwable> {
+    /**
+     * 把一次播放失败描述成**稳定的、可上报的**标识。
+     *
+     * ## 为什么不能直接上报 `javaClass.simpleName`
+     *
+     * release 包开了 R8（`isMinifyEnabled = true`）⇒ **类名会被混淆**。
+     * 实测（2026-11-09 内测）：生产埋点里的 `cause` 是 `"y"` ——
+     * 一个被混淆后的类名，**完全读不出失败原因**。
+     * （debug 包不混淆，所以本地看到的是 `SocketException` 这种可读名字，
+     *  于是"生产读不出来"这件事在开发期完全看不见。）
+     *
+     * ⇒ 埋点必须用**自己定义的固定字符串**（不受混淆影响）。
+     *
+     * @param cause 播放失败的异常（通常是 `PlaybackException`，也可能是它的 cause）。
+     */
+    fun describe(cause: Throwable?): FailureDescription {
+        val chain = causeChain(cause)
+        if (chain.isEmpty()) return FailureDescription("unknown")
+
+        // ① HTTP 状态码最具体（服务端明确说了什么）——优先。
+        httpStatusIn(chain)?.let { status ->
+            val key = when {
+                status == 404 -> "http_404"
+                status == 403 -> "http_403"
+                status == 408 -> "http_408"
+                status == 429 -> "http_429"
+                status in 500..599 -> "http_5xx"
+                status in 400..499 -> "http_4xx"
+                else -> "http_$status"
+            }
+            return FailureDescription(key, status)
+        }
+
+        // ② 连接层异常：按**语义**分类，而不是按类名（类名会被混淆）。
+        chain.forEach { t ->
+            val key = when (t) {
+                is SocketTimeoutException -> "socket_timeout"
+                is UnknownHostException -> "unknown_host"
+                is ConnectException -> "connect_failed"
+                is NoRouteToHostException -> "no_route"
+                is SocketException -> "socket_error"
+                is java.io.EOFException -> "eof"
+                else -> null
+            }
+            if (key != null) return FailureDescription(key)
+        }
+
+        // ③ media3 的 IO 错误码段（2000~2999）——只有区间，没有更细的语义。
+        if (chain.any { it is PlaybackException && it.errorCode in IO_ERROR_CODE_MIN..IO_ERROR_CODE_MAX }) {
+            return FailureDescription("io_error")
+        }
+
+        // ④ 其它 IOException
+        if (chain.any { it is IOException }) return FailureDescription("io_error")
+
+        // ⑤ 解析 / 解码 / 参数错
+        if (chain.any { it is PlaybackException && it.errorCode in 3000..3999 }) {
+            return FailureDescription("parse_error")
+        }
+        if (chain.any { it is PlaybackException && it.errorCode in 4000..4999 }) {
+            return FailureDescription("decode_error")
+        }
+        return FailureDescription("unknown")
+    }
+
+    /** 链上（含 suppressed）第一个 HTTP 状态码；没有则 null。 */
+    fun httpStatusIn(chain: List<Throwable>): Int? =
+        chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
+
+    /**
+     * 取 cause 链（含自己，**含 suppressed**），限深防环。
+     *
+     * 对外公开：文案层（`friendlyError`）也要用同一份链 ——
+     * 否则"分类说 404、文案说网络不给力"这种自相矛盾会再次出现。
+     */
+    fun chainFor(cause: Throwable?): List<Throwable> {
         if (cause == null) return emptyList()
         val chain = ArrayList<Throwable>(4)
         var current: Throwable? = cause
         var depth = 0
         while (current != null && depth < MAX_CAUSE_DEPTH) {
             chain.add(current)
+            current.suppressed.forEach { chain.add(it) }
             current = current.cause
             depth++
         }
         return chain
     }
+
+    private fun causeChain(cause: Throwable?): List<Throwable> = chainFor(cause)
 }
+
+/**
+ * 一次播放失败的**稳定描述**（给埋点用，不受 R8 混淆影响）。
+ *
+ * @param key 固定字符串（如 `http_404` / `socket_timeout` / `io_error`）
+ * @param httpStatus 服务端明确给出的 HTTP 状态码（没有则 null）
+ */
+data class FailureDescription(
+    val key: String,
+    val httpStatus: Int? = null,
+)

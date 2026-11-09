@@ -1,5 +1,6 @@
 package com.tingxia.audio.ui
 
+import com.tingxia.audio.audio.PlaybackFailure
 import com.tingxia.audio.data.remote.ApiException
 import com.tingxia.audio.data.remote.isAudioNotReady
 import com.tingxia.audio.data.remote.isAuthExpired
@@ -55,6 +56,26 @@ import java.net.UnknownHostException
  * ```
  */
 fun friendlyError(e: Throwable, fallback: String = "操作失败，请稍后再试"): String {
+    // 0) media3 播放链上的 HTTP 状态码优先（2026-11-09 加）。
+    //
+    // 为什么放在最前面：`InvalidResponseCodeException` **本身也是 IOException**，
+    // 不先看它就会落到下面的 IOException 分支 ⇒ 一律显示「网络不给力」——
+    // 而服务端明明说了 404（音频被重新生成、旧文件已删），用户看到的却是
+    // 「网络不给力，请检查连接」。**这是当着用户的面说假话。**
+    //
+    // 而且这里必须看**整条 cause 链**（含 suppressed）：备用地址的失败会掩盖
+    // 主地址的真实状态（见 FallbackHttpDataSource 的说明）。
+    PlaybackFailure.httpStatusIn(PlaybackFailure.chainFor(e))?.let { code ->
+        return when (code) {
+            404 -> "音频已更新或已失效，请重新进入文章"
+            403 -> "没有权限播放这篇内容"
+            408, 429 -> "网络不给力，请稍后再试"
+            in 500..599 -> "服务暂不可用，请稍后再试"
+            in 400..499 -> "播放失败（$code）"
+            else -> fallback
+        }
+    }
+
     // 1) 业务信封异常优先：HttpException 先尝试解析为 ApiException
     val apiEx: ApiException? = when (e) {
         is ApiException -> e

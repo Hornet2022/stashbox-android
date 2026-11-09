@@ -57,6 +57,16 @@
 # MediaSession 的回调走 Binder 跨进程，类名会被反射
 -keep class androidx.media3.session.** { *; }
 -keep class androidx.media3.exoplayer.** { *; }
+# ⚠️ 保留**异常类名**（2026-11-09）：
+# 播放失败的埋点曾经上报 `cause.javaClass.simpleName` ⇒ release 包开了 R8 ⇒
+# 类名被混淆成 "y" 这种没意义的字符串 ⇒ 生产环境完全读不出失败原因
+# （debug 包不混淆 ⇒ 本地一切正常 ⇒ 这个坑在开发期完全看不见）。
+#
+# 治本是**不用类名**（改用固定字符串 key，见 PlaybackFailure.describe），
+# 这里保留类名只是**补充信息**：万一还要看堆栈，名字得是人能读的。
+-keepnames class androidx.media3.datasource.** { *; }
+-keepnames class androidx.media3.common.PlaybackException
+-keepnames class com.tingxia.audio.** extends java.lang.Throwable
 
 # ── Kotlin 协程 ─────────────────────────────────────────────────────────────
 -keepclassmembers class kotlinx.coroutines.** { volatile <fields>; }
