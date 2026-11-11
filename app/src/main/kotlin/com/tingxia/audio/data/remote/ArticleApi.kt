@@ -1,6 +1,7 @@
 package com.tingxia.audio.data.remote
 
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.ArticleByUrlResponse
 import com.tingxia.audio.data.model.ArticleListResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.CreateArticleRequest
@@ -85,6 +86,15 @@ interface ArticleApi {
     // 不再用 Article 当返回类型 — 后端响应字段不全,专门的 [CreateArticleResponse]
     @POST("api/v1/articles")
     suspend fun createArticle(@Body request: CreateArticleRequest): CreateArticleResponse
+
+    /**
+     * 2026-11-11：按 URL 幂等回查（剪藏失败时确认"是不是其实成功了"）。
+     *
+     * ⚠️ 后端必须把 `by-url` 注册在 `{article_id}` **之前**，
+     * 否则 "by-url" 会被当成 article_id。
+     */
+    @GET("api/v1/articles/by-url")
+    suspend fun findArticleByUrl(@Query("url") url: String): ArticleByUrlResponse
 
     /**
      * 2026-10-23：**文档剪藏**（上传文件，而不是链接）。

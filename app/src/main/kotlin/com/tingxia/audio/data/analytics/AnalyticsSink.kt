@@ -72,6 +72,19 @@ object EventNames {
      * 有这条之后，下一次同样的反馈能直接查：断在第几分钟、
      * 是什么异常、后台还是前台、有没有自动接上。
      */
+    /**
+     * 剪藏失败（`article_capture_failed`）。
+     *
+     * 2026-11-11 加：此前剪藏失败**只有 logcat**，服务端零记录 ——
+     * 内测反馈「剪藏时提示网络连接失败」时，nginx 侧明明是 200、
+     * 文章也建好了，服务端却答不出"有多少人失败、失败在哪个环节"。
+     *
+     * 属性：`kind`（稳定分类，见 NetworkFailure）/ `duration_ms` /
+     * `url_hash` / `recheck`（回查结果：pending / actually_succeeded /
+     * not_found / server_rejected）。
+     */
+    const val ARTICLE_CAPTURE_FAILED = "article_capture_failed"
+
     const val PLAYBACK_ERROR = "playback_error"
 
     /**

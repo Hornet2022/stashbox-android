@@ -1,6 +1,7 @@
 package com.tingxia.audio.data
 
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.ArticleByUrlResponse
 import com.tingxia.audio.data.model.ArticleListResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.CreateArticleResponse
@@ -73,7 +74,16 @@ open class FakeArticleApi : ArticleApi {
         RetryResponse(article_id = id, status = "pending", retry_count = 0, queued_at = "", distill_triggered = false)
 
     override suspend fun createArticle(request: com.tingxia.audio.data.model.CreateArticleRequest): CreateArticleResponse =
-        CreateArticleResponse(id = "art_new", status = "pending")
+        createArticleError?.let { throw it }
+            ?: CreateArticleResponse(id = "art_new", status = "pending")
+
+    // 2026-11-11：剪藏失败回查（按 URL 问服务端"收过了吗"）。
+    var byUrl: Map<String, ArticleByUrlResponse> = emptyMap()
+    var byUrlError: Throwable? = null
+    var createArticleError: Throwable? = null
+
+    override suspend fun findArticleByUrl(url: String): ArticleByUrlResponse =
+        byUrlError?.let { throw it } ?: byUrl[url] ?: ArticleByUrlResponse(exists = false)
 
     // 2026-10-23：文档剪藏（multipart）。fake 不需要真的处理文件。
     override suspend fun createArticleFromDocument(

@@ -2,12 +2,8 @@ package com.tingxia.audio.audio
 
 import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.HttpDataSource
+import com.tingxia.audio.data.remote.NetworkFailure
 import java.io.IOException
-import java.net.ConnectException
-import java.net.NoRouteToHostException
-import java.net.SocketException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 
 /**
  * 播放失败的两类成因（2026-10-26）。
@@ -150,17 +146,12 @@ object PlaybackFailure {
         }
 
         // ② 连接层异常：按**语义**分类，而不是按类名（类名会被混淆）。
+        //    通用那一份在 [NetworkFailure]（剪藏等链路共用），这里不重复实现。
         chain.forEach { t ->
-            val key = when (t) {
-                is SocketTimeoutException -> "socket_timeout"
-                is UnknownHostException -> "unknown_host"
-                is ConnectException -> "connect_failed"
-                is NoRouteToHostException -> "no_route"
-                is SocketException -> "socket_error"
-                is java.io.EOFException -> "eof"
-                else -> null
+            val kind = NetworkFailure.kindOf(t)
+            if (kind != "other" && kind != "io_error") {
+                return FailureDescription(kind)
             }
-            if (key != null) return FailureDescription(key)
         }
 
         // ③ media3 的 IO 错误码段（2000~2999）——只有区间，没有更细的语义。

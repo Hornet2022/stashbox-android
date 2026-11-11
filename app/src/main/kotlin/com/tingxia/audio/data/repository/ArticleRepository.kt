@@ -1,6 +1,7 @@
 package com.tingxia.audio.data.repository
 
 import com.tingxia.audio.data.model.Article
+import com.tingxia.audio.data.model.ArticleByUrlResponse
 import com.tingxia.audio.data.model.AudioUrlResponse
 import com.tingxia.audio.data.model.CreateArticleRequest
 import com.tingxia.audio.data.model.CreateArticleResponse
@@ -77,6 +78,15 @@ class ArticleRepository @Inject constructor(private val api: ArticleApi) {
     // 解决 CP10.4 暴露的 "Field 'id' is required" 反序列化失败。
     suspend fun createArticle(url: String): CreateArticleResponse =
         api.createArticle(CreateArticleRequest(url))
+
+    /**
+     * 2026-11-11：按 URL 幂等回查。
+     *
+     * 剪藏失败时用它确认"是不是其实成功了"——服务端成功、客户端报错时，
+     * 用户看到的应该是「已提交，正在蒸馏」而不是「网络不给力」。
+     */
+    suspend fun findArticleByUrl(url: String): ArticleByUrlResponse =
+        api.findArticleByUrl(url)
 
     // CP10.5: 手动触发蒸馏(后端返回任务触发响应,字段全 nullable)
     suspend fun distillArticle(id: String): DistillTriggerResponse = api.distillArticle(id)

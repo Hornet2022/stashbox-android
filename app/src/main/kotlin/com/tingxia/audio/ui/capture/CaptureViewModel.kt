@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.model.QuotaStatus
+import com.tingxia.audio.data.analytics.AnalyticsSink
+import com.tingxia.audio.data.analytics.EventNames
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.DocumentUploadRepository
 import com.tingxia.audio.data.repository.QuotaRepository
@@ -35,6 +37,7 @@ class CaptureViewModel @Inject constructor(
     private val quotaRepository: QuotaRepository,
     private val prefetchScheduler: PrefetchScheduler,
     private val documentUploadRepository: DocumentUploadRepository,
+    private val analytics: AnalyticsSink,
 ) : ViewModel() {
 
     data class UiState(
@@ -116,6 +119,7 @@ class CaptureViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            val startedAt = System.currentTimeMillis()
 
             // CP11.0.4 P1.2: 提交前再查一次 quota,拦截用尽用户
             try {
@@ -175,11 +179,64 @@ class CaptureViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 android.util.Log.w("CaptureViewModel", "capture failed: ${e.message}")
+                handleCaptureFailure(url, e, startedAt)
+            }
+        }
+    }
+
+    /**
+     * 剪藏失败时的处理（2026-11-11）。
+     *
+     * 判定逻辑在 [CaptureFailure]（纯函数，可测）—— 这里只负责把结果
+     * 变成界面状态与埋点。
+     *
+     * 为什么不能直接说"失败"：剪藏是**同步长请求**（服务端当场抓取，
+     * 几秒到几十秒才返回），客户端在等响应时任何客户端侧抖动都会变成
+     * 「**服务端成功、客户端报错**」。实测：4 次剪藏服务端全部 200、
+     * 文章全部建好，客户端却弹了「网络不给力」。
+     */
+    private suspend fun handleCaptureFailure(url: String, error: Exception, startedAt: Long) {
+        val durationMs = System.currentTimeMillis() - startedAt
+        val result = CaptureFailure.resolve(
+            url = url,
+            error = error,
+            lookup = { target -> repository.findArticleByUrl(target) },
+        )
+
+        // 埋点：无论结果如何，这次失败都要留痕。
+        // （此前**只有 logcat** ⇒ 服务端零记录 ⇒ 事后只能靠 nginx 反推。）
+        analytics.report(
+            EventNames.ARTICLE_CAPTURE_FAILED,
+            mapOf(
+                "kind" to result.kind,
+                "duration_ms" to durationMs,
+                "url_hash" to url.hashCode(),
+                "recheck" to result.recheck,
+            ),
+        )
+
+        when (result.outcome) {
+            CaptureFailure.Outcome.SUCCEEDED -> {
+                val id = result.articleId.orEmpty()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = friendlyError(e, fallback = "剪藏失败，请稍后再试"),
+                    capturedArticleId = id.ifEmpty { null },
+                    url = "",
                 )
+                loadRecent()
+                refreshQuota()
+                if (id.isNotEmpty()) {
+                    startStatusPolling(id)
+                    prefetchScheduler.watchDistill(id)
+                }
             }
+
+            CaptureFailure.Outcome.FAILED,
+            CaptureFailure.Outcome.UNKNOWN,
+            -> _uiState.value = _uiState.value.copy(
+                isLoading = false,
+                error = result.message,
+            )
         }
     }
 

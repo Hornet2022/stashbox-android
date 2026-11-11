@@ -95,6 +95,25 @@ data class CreateArticleResponse(
     @SerialName("task_id") val taskId: String? = null,
 )
 
+/**
+ * 2026-11-11：按 URL 幂等回查的响应体（`GET /api/v1/articles/by-url?url=`）。
+ *
+ * ## 为什么需要它
+ *
+ * 剪藏是**同步长请求**（服务端当场抓取，几秒到几十秒）。客户端在等响应时
+ * 任何客户端侧抖动都会变成「**服务端成功、客户端报错**」——
+ * 实测：4 次剪藏服务端全部 200、文章全部建好，客户端却弹了「网络不给力」。
+ *
+ * ⇒ 客户端失败时回查一次：文章在 ⇒ 告诉用户「已提交，正在蒸馏」，
+ * 而不是再报一次失败。
+ */
+@Serializable
+data class ArticleByUrlResponse(
+    @SerialName("exists") val exists: Boolean = false,
+    @SerialName("article_id") val articleId: String? = null,
+    @SerialName("status") val status: String? = null,
+)
+
 // CP10.5: POST /api/v1/articles/{id}/distill 响应体
 //
 // 同 [CreateArticleResponse] 思路:不依赖后端字段固定存在,
