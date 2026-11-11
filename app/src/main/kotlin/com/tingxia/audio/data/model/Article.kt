@@ -79,6 +79,17 @@ data class Article(
     // 详情/列表才会带它们。
     @SerialName("shared") val shared: Boolean = false,
     @SerialName("shared_tags") val sharedTags: List<String>? = null,
+    // 2026-11-11：失败原因（**面向用户的中文文案**，服务端 articles.error）。
+    //
+    // 剪藏改成后台抓取后，抓取失败不再在 HTTP 响应里当场返回 ——
+    // 文章落成 status=failed，原因写在这里。没有它的话用户只会看到
+    // 「失败」两个字，不知道是该重试还是该换个源。
+    @SerialName("error") val error: String? = null,
+    // 2026-11-11：服务端**正在后台抓取原文**（status=pending 且还没有正文）。
+    //
+    // 客户端据此显示「抓取中」而不是笼统的「待处理」—— 后台抓取通常要
+    // 几秒到几十秒，用户需要知道它在动，而不是以为卡住了。
+    @SerialName("fetch_pending") val fetchPending: Boolean = false,
 )
 
 /**

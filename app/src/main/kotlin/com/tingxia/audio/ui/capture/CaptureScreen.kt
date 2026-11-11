@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.tingxia.audio.R
 import com.tingxia.audio.data.repository.DocumentUploadRepository
 import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.ui.components.QuotaBanner
@@ -349,9 +350,17 @@ private fun RecentArticleItem(
                     // （那里是 .name.lowercase()，显示 "distilling"），这一处漏了。
                     // ?: 那个 "pending" 更是连兜底都是没翻译的英文。
                     // 一律走 statusLabelRes —— 全 App 唯一的状态到中文的映射。
+                    //
+                    // 2026-11-11：`fetchPending`（服务端正在后台抓原文）时显示
+                    // 「抓取中」而不是「待处理」—— 后台抓取要几秒到几十秒，
+                    // 显示「待处理」会让用户以为卡住了。
                     text = if (isDeleting) "删除中…" else
                         "${stringResource(sourceLabelRes(article.source))} · " +
-                            stringResource(statusLabelRes(article.status ?: DistillStatus.PENDING)),
+                            if (article.fetchPending) {
+                                stringResource(R.string.status_fetching)
+                            } else {
+                                stringResource(statusLabelRes(article.status ?: DistillStatus.PENDING))
+                            },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isDeleting) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant,

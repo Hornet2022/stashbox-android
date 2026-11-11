@@ -361,6 +361,16 @@ class CaptureViewModel @Inject constructor(
                             "CaptureViewModel",
                             "poll: article=$articleId distill FAILED",
                         )
+                        // 2026-11-11：失败要**说清原因**。
+                        //
+                        // 剪藏改成后台抓取后，抓取失败是在**后台**发生的，
+                        // 客户端这一侧只看到 status=failed —— 不把服务端写的
+                        // 原因带出来的话，用户只会看到「失败」两个字，
+                        // 不知道是该重试还是该换个源（服务端已经把中文原因
+                        // 写进 articles.error 了）。
+                        _uiState.value = _uiState.value.copy(
+                            error = updated.error ?: "剪藏失败，请重试",
+                        )
                         return@launch
                     }
                 } catch (e: Exception) {

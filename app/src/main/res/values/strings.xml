@@ -10,6 +10,8 @@
     <string name="status_ready">已就绪</string>
     <string name="status_failed">失败</string>
     <string name="status_listened">已听</string>
+    <!-- 2026-11-11：服务端正在后台抓取原文（剪藏改成后台抓取之后） -->
+    <string name="status_fetching">抓取中</string>
 
     <!-- 蒸馏阶段文案（服务端 agent 的 current_step：fetch/rewrite/tts/concat） -->
     <string name="stage_fetch">正在抓取正文…</string>
