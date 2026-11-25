@@ -50,32 +50,39 @@ class PlaylistViewModel @Inject constructor(
      * 补齐「加入时还没蒸馏好」的条目。
      *
      * 播放列表存的是**地址快照**（见 PlaylistItemEntity）。如果用户在蒸馏
-     * 完成**之前**就把文章加进了列表，那份快照是空的 → 那一篇永远播不了
-     * （队列构建时会跳过空地址的条目）。
+     * 完成**之前**就把文章加进了列表，那份快照是空的 → 那一篇播不了。
      *
-     * 这里用一次「用户文章列表」请求把缺的补上：文章列表带 audio_url 与
-     * duration，一次请求就能补齐所有缺的条目。
+     * ## 为什么按 id 单篇取，而不是拉一次文章列表
+     *
+     * 原来这里调 `getArticles()` 再在内存里按 id 匹配 —— 有两个洞：
+     *
+     * 1. **分页截断**：`GET /api/v1/articles` 默认 `limit=20`（只返回最近
+     *    20 篇）。播放列表里那篇若是老文章，就**永远匹配不上** ⇒ 地址永远
+     *    补不上 ⇒ 用户永远看到「这一篇还没有音频」。
+     * 2. **快照是一次性的**：列表接口给的是**那一刻**的状态。补齐请求发出时
+     *    若文章还在蒸馏，audio_url 仍为空 → 补不上；之后**没有任何机制**会在
+     *    蒸馏完成时再触发一次（蒸馏完成不写本机 Room 表 ⇒ observer 不 emit）。
+     *
+     * ⇒ 改成按 id 取单篇地址（`GET /articles/{id}/audio-url`）：不受分页限制、
+     *   数据是当下的、没就绪时后端直接 404（runCatching 兜住 ⇒ 不写、下一轮再来）。
      */
     private suspend fun backfillMissingMetadata(items: List<PlaylistItemEntity>) {
         // 缺**地址**或缺**时长**都要补：地址缺了播不了，时长缺了列表显示「—」。
         val missing = items.filter { it.audioUrl.isNullOrBlank() || it.durationSec == null }
         if (missing.isEmpty()) return
-        runCatching { articleRepository.getArticles() }
-            .onSuccess { articles ->
-                val byId = articles.associateBy { it.id }
-                for (item in missing) {
-                    val article = byId[item.articleId] ?: continue
-                    val url = article.audioUrl
-                    // 还没蒸馏好 → 地址仍然空着，等下次（时长可以先补上）
-                    repository.refreshUrl(
-                        articleId = item.articleId,
-                        audioUrl = url ?: item.audioUrl,
-                        title = article.title,
-                        durationSec = article.durationSec ?: item.durationSec,
-                    )
-                }
-            }
-            .onFailure { /* 补不上就维持原样：用户还能在详情页重新加入 */ }
+        for (item in missing) {
+            // 还没蒸馏好 → 后端 404 → 兜住、维持原样，等下次。
+            val resp = runCatching { articleRepository.getAudioUrl(item.articleId) }.getOrNull()
+                ?: continue
+            repository.refreshUrl(
+                articleId = item.articleId,
+                audioUrl = resp.audio_url,
+                // 标题用**已有快照**：加入播放列表时就存了（见 ArticleDetailViewModel
+                // .addToPlaylist），这里补不出来也不该补 —— 别为了显示去多打一次请求。
+                title = item.title,
+                durationSec = resp.durationSec ?: item.durationSec,
+            )
+        }
     }
 
     /** 移出播放列表。 */
@@ -115,20 +122,47 @@ class PlaylistViewModel @Inject constructor(
      *
      * 队列由播放列表决定（见 [PlayerController.buildQueue]），
      * 所以这里只要把播放器**切到那一项**即可 —— 上一首/下一首自然就是列表里的。
+     *
+     * ## 快照为空时**现取**地址（2026-11-25 修）
+     *
+     * 播放列表存的是地址**快照**（见 [PlaylistRepository] 的设计契约：
+     * 「只存 id，播放时现取地址」）。用户在蒸馏完成**之前**把文章加进列表 ⇒
+     * 快照是空的；而蒸馏完成**不会**驱动本机表变化 ⇒ 补齐逻辑不会被触发
+     * ⇒ 用户回到列表点播放，拿到的还是空快照 ⇒ 「这一篇还没有音频」。
+     *
+     * ⇒ 这里兜底：**快照空就现取一次**。取到就播（并把新地址写回快照），
+     *   取不到（还在蒸馏）才提示。
      */
     fun playFrom(index: Int) {
         val item = _uiState.value.items.getOrNull(index) ?: return
         val url = item.audioUrl
-        if (url.isNullOrBlank()) {
-            // 文章还没蒸馏好 → 说清楚，而不是按了没反应。
-            _uiState.value = _uiState.value.copy(error = "这一篇还没有音频，蒸馏好了才能播")
+        if (!url.isNullOrBlank()) {
+            playerController.play(
+                audioUrl = url,
+                title = item.title ?: "",
+                articleId = item.articleId,
+            )
             return
         }
-        playerController.play(
-            audioUrl = url,
-            title = item.title ?: "",
-            articleId = item.articleId,
-        )
+        viewModelScope.launch {
+            val fetched = runCatching { articleRepository.getAudioUrl(item.articleId) }.getOrNull()
+            if (fetched == null || fetched.audio_url.isBlank()) {
+                // 文章还没蒸馏好 → 说清楚，而不是按了没反应。
+                _uiState.value = _uiState.value.copy(error = "这一篇还没有音频，蒸馏好了才能播")
+                return@launch
+            }
+            repository.refreshUrl(
+                articleId = item.articleId,
+                audioUrl = fetched.audio_url,
+                title = item.title,
+                durationSec = fetched.durationSec ?: item.durationSec,
+            )
+            playerController.play(
+                audioUrl = fetched.audio_url,
+                title = item.title ?: "",
+                articleId = item.articleId,
+            )
+        }
     }
 
     /** 错误提示消费掉（避免同一个错误反复弹）。 */
