@@ -49,7 +49,22 @@ data class AuthResponse(
 )
 
 @Serializable
-data class WechatLoginRequest(val code: String)
+/**
+ * 登录请求。
+ *
+ * @param deviceId **设备指纹**（`DeviceId.androidIdSuffix()`，= SHA-256(ANDROID_ID) 前缀；
+ *   取不到时用 `analyticsDeviceId()` 的 `and-…`/`rnd-…`）。
+ *   同一台设备恒定 ⇒ 服务端据此生成**唯一用户名**（暂用形态 `d-<机型>_<指纹>`）。
+ *   零额外权限：ANDROID_ID 不需要任何运行时权限。
+ * @param deviceModel 机型（`Build.MANUFACTURER + Build.MODEL`）⇒ 用户名的"特征性"部分。
+ *
+ * 两个字段都是**可选**：旧版本客户端不传 ⇒ 服务端回落到 `t-<id>` 形态，唯一性照样成立。
+ */
+data class WechatLoginRequest(
+    val code: String,
+    val deviceId: String? = null,
+    val deviceModel: String? = null,
+)
 
 @Serializable
 data class RefreshRequest(val refresh_token: String)

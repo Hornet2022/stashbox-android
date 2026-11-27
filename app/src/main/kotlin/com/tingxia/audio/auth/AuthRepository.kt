@@ -46,8 +46,14 @@ class AuthRepository @Inject constructor(
      * 这是**上线后的唯一登录路径**。code 在联调期可传任意稳定串
      * （如 `dev_user_1`），服务端会按 `wx_<code>` 查/建用户。
      */
-    suspend fun wechatLogin(code: String): LoginResult {
-        val resp = api.wechatLogin(WechatLoginRequest(code))
+    suspend fun wechatLogin(
+        code: String,
+        deviceId: String? = null,
+        deviceModel: String? = null,
+    ): LoginResult {
+        // deviceId/deviceModel 透传给服务端 → 生成**唯一用户名**（暂用形态）。
+        // 取不到就传 null ⇒ 服务端回落到 `t-<id>`，不影响登录本身。
+        val resp = api.wechatLogin(WechatLoginRequest(code, deviceId, deviceModel))
         val uid = resp.user_id.toLongOrNull()
             ?: throw IllegalStateException("服务端返回的 user_id 非法: ${resp.user_id}")
         // wechat-login 实际会下发 refresh_token（早期注释说"不返回"已过时）。

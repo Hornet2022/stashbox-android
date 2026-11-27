@@ -1,11 +1,15 @@
 package com.tingxia.audio.ui.auth
 
+import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.lifecycle.ViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.BuildConfig
 import com.tingxia.audio.auth.AuthRepository
+import com.tingxia.audio.util.androidIdSuffix
+import com.tingxia.audio.util.analyticsDeviceId
 import com.tingxia.audio.auth.SessionExpirySignal
 import com.tingxia.audio.data.repository.DeviceRepository
 import com.tingxia.audio.ui.AUTH_EXPIRED_MESSAGE
@@ -40,6 +44,14 @@ class AuthViewModel @Inject constructor(
      * Hilt 侧照常注入（AppUpdateModule 里有 DeviceRepository 的绑定）。
      */
     private val deviceRepository: DeviceRepository? = null,
+    /**
+     * 应用 Context —— 仅为取**设备指纹**（唯一用户名的输入）。
+     *
+     * 同样声明成**可空 + 默认值**：单测里有 `AuthViewModel(repo)` 这样的直接构造，
+     * 加必填参数会把那些不属于本次改动的测试文件一起改坏。
+     * 取不到 context ⇒ 不上报设备信息 ⇒ 服务端回落到 `t-<id>` 形态（唯一性仍成立）。
+     */
+    @ApplicationContext private val context: Context? = null,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<AuthState>(AuthState.Checking)
@@ -97,7 +109,11 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = AuthState.Loading
             try {
-                val resp = authRepository.wechatLogin(code)
+                val resp = authRepository.wechatLogin(
+                    code,
+                    deviceId = context?.let { androidIdSuffix(it) ?: analyticsDeviceId(it) },
+                    deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
+                )
                 // 登录成功 → 登记本机为推送设备（失败不影响登录本身）。
                 registerDeviceForPush()
                 _state.value = loggedInOrError(resp.userId)
