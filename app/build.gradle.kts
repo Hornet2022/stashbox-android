@@ -285,8 +285,25 @@ android {
         //   已装 0.5.5 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
         // 0.5.6：播放列表「可播」闭环（C2 文案分级 + C3 蒸馏完成回写快照）。
         //   见 docs/播放列表可播闭环_2026-11-27.md。
-        versionCode = 29
-        versionName = "0.5.6"
+        // 0.5.7：登录时上报设备特征 ⇒ 服务端生成**设备派生**的唯一用户名（2026-11-27）
+        //   · 背景：内测期所有账号昵称都是常量「听友」⇒ 后台分不出「是哪一个」。
+        //     后端已加 username 唯一列（迁移 0043 已上线），但**唯一性输入只能来自客户端**：
+        //     客户端不上报 ⇒ 服务端回落 t-<用户id>（唯一性成立，但不是设备派生形态）。
+        //   · 本版上报两个字段（零新增权限、零新增采集）：
+        //     deviceId = util/DeviceId.androidIdSuffix()（= SHA-256(ANDROID_ID) 前缀，
+        //     跨重装恒定），取不到可靠指纹时用 analyticsDeviceId()（and-/rnd- 前缀）；
+        //     deviceModel = Build.MANUFACTURER + Build.MODEL。
+        //     ANDROID_ID 是系统自带 ⇒ **不需要任何运行时权限**。
+        //   · 两个字段都是**可选**：旧服务端/旧客户端互不依赖 ⇒ 不传也不会失败。
+        //   · 证据（为什么必须再发一版，而不是蹭 0.5.6）：
+        //     线上 0.5.6 APK（versionCode=29）反查 —— WechatLoginRequest 的
+        //     kotlinx 序列化描述符**只注册了一个元素 "code"**（dexdump 看
+        //     WechatLoginRequest$$serializer.<clinit>）；含本次上报的话应是
+        //     code/deviceId/deviceModel 三个 ⇒ 0.5.6 确实不含设备特征上报。
+        // ⚠️ 升 versionCode 是硬要求：0.5.6(29) 已上线 ⇒ 停在 29 的话，
+        //   已装 0.5.6 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
+        versionCode = 30
+        versionName = "0.5.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
