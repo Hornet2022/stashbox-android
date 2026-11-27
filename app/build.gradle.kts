@@ -281,10 +281,12 @@ android {
         //   · 修法：补齐与播放都改成**按 id 现取**单篇地址
         //     （回到 PlaylistRepository 类注释里那条设计契约：
         //      「只存 id，播放时现取地址」）。
-        // ⚠️ 升 versionCode 是硬要求：0.5.4(27) 已上线 ⇒ 停在 27 的话，
-        //   已装 0.5.4 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
-        versionCode = 28
-        versionName = "0.5.5"
+        // ⚠️ 升 versionCode 是硬要求：0.5.5(28) 已上线 ⇒ 停在 28 的话，
+        //   已装 0.5.5 的内测用户收不到更新提示。签名不变 ⇒ 覆盖安装不丢数据。
+        // 0.5.6：播放列表「可播」闭环（C2 文案分级 + C3 蒸馏完成回写快照）。
+        //   见 docs/播放列表可播闭环_2026-11-27.md。
+        versionCode = 29
+        versionName = "0.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

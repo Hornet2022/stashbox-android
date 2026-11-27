@@ -1,11 +1,14 @@
 package com.tingxia.audio.data.sync
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.tingxia.audio.data.model.Article
 import com.tingxia.audio.data.model.DistillStatus
 import com.tingxia.audio.data.repository.ArticleRepository
+import com.tingxia.audio.data.repository.PlaylistRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.delay
@@ -39,6 +42,7 @@ class DistillReadyWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted params: WorkerParameters,
     private val articleRepository: ArticleRepository,
+    private val playlistRepository: PlaylistRepository,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -66,6 +70,17 @@ class DistillReadyWorker @AssistedInject constructor(
                     DistillNotifier.notifyReady(
                         applicationContext, articleId, article.title, article.durationSec,
                     )
+                    // C3（播放列表「可播」闭环契约 §3）：**把地址写回播放列表快照**。
+                    //
+                    // 为什么必须在这里写：用户往往在**蒸馏还没好**时就把文章加进播放列表
+                    // ⇒ 那时存的快照是空的 ⇒ 播放列表那条永远显示"没有音频"。
+                    // 而 `backfillMissingMetadata` 只在**本机列表数据变化**时触发
+                    // （Room emit）；"服务端蒸馏完成"**不写本机表** ⇒ observer 不 emit
+                    // ⇒ 补齐逻辑永远不跑 ⇒ 用户只能自己再点一次才发现能播了。
+                    //
+                    // ⚠️ 数据源就是**手里这个 article**：getArticle 返回完整 Article，
+                    //    ready 时 audioUrl/durationSec 都在 ⇒ **零新增请求**。
+                    syncPlaylistSnapshot(article)
                     return Result.success()
                 }
 
@@ -81,6 +96,35 @@ class DistillReadyWorker @AssistedInject constructor(
         // 走到这里是真超时了（默认 45 分钟，远超实测的 12 分钟，是给慢机器留的余量）。
         // 不发「失败」通知 —— 服务端可能只是慢，谎报失败比不报更糟。
         return Result.success()
+    }
+
+    /**
+     * 把这篇文章的音频地址写回**播放列表**的本地快照（若它在列表里）。
+     *
+     * 判定逻辑在 [PlaylistSnapshotSync]（可独立单测），这里只做接线。
+     */
+    private suspend fun syncPlaylistSnapshot(article: Article) {
+        try {
+            val written = PlaylistSnapshotSync.sync(
+                article = article,
+                inPlaylist = { articleId -> playlistRepository.contains(articleId) },
+                write = { articleId, audioUrl, title, durationSec ->
+                    playlistRepository.refreshUrl(
+                        articleId = articleId,
+                        audioUrl = audioUrl,
+                        title = title,
+                        durationSec = durationSec,
+                    )
+                },
+            )
+            if (!written) {
+                Log.i("DistillReadyWorker", "不写回播放列表快照（不在列表里或地址为空）: ${article.id}")
+            }
+        } catch (e: Exception) {
+            // 写回失败不该让整条通知链路断掉：用户已经收到"可以听了"的本地通知，
+            // 播放列表这次没补上，下次进列表时 backfill 会再试。
+            Log.w("DistillReadyWorker", "写回播放列表快照失败: ${e.message}", e)
+        }
     }
 
     companion object {

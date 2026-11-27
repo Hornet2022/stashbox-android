@@ -5,6 +5,9 @@ import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.FakeArticleApi
 import com.tingxia.audio.data.local.FakePlaylistDao
 import com.tingxia.audio.data.model.AudioUrlResponse
+import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.model.DistillStatusResponse
+import com.tingxia.audio.data.remote.ApiException
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.PlaylistRepository
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +20,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -59,15 +63,28 @@ class PlaylistViewModelTest {
     private lateinit var playerController: PlayerController
     private lateinit var dao: FakePlaylistDao
 
-    /** 可控的假 API：能记调用次数、能模拟「还没蒸馏好」（抛 404）。 */
+    /** 可控的假 API：能记调用次数、能模拟「还没蒸馏好」（抛 404 + code 40400）。 */
     private class RecordingArticleApi : FakeArticleApi() {
         var audioUrlCalls = 0
         var ready = false
         var url = "https://example.com/ready.mp3"
 
+        /**
+         * ⚠️ **必须抛真实形态**：`ApiException(http=404, biz=40400)`。
+         *
+         * 真实链路是 retrofit `HttpException` → `ApiEnvelope` 拦截器 → `ApiException`，
+         * 而"还没好"的判据 `isAudioNotReady` 正是 **404 + 40400**。
+         * 早先这里抛 `IllegalStateException` ⇒ 走不到分级分支 ⇒ 文案分级守卫会**假绿**。
+         */
         override suspend fun getAudioUrl(id: String): AudioUrlResponse {
             audioUrlCalls++
-            if (!ready) throw IllegalStateException("404 audio not ready")
+            if (!ready) {
+                throw ApiException(
+                    httpCode = 404,
+                    bizCode = 40400,
+                    message = "audio not ready for article $id",
+                )
+            }
             return AudioUrlResponse(audio_url = url, durationSec = 120)
         }
     }
@@ -134,7 +151,7 @@ class PlaylistViewModelTest {
     }
 
     @Test
-    fun `快照为空且还没蒸馏好_不播且说清楚原因`() = runTest(testDispatcher) {
+    fun `快照为空且还没蒸馏好_不播且说清楚是还在蒸馏而不是没有`() = runTest(testDispatcher) {
         dao.upsert(
             com.tingxia.audio.data.local.PlaylistItemEntity(
                 articleId = "art_2",
@@ -145,6 +162,14 @@ class PlaylistViewModelTest {
             ),
         )
         api.ready = false
+        // 服务端说"还在蒸馏"（status 端点：distilling + stage=tts）
+        api.statusResponses = mapOf(
+            "art_2" to DistillStatusResponse(
+                articleId = "art_2",
+                status = DistillStatus.DISTILLING,
+                stage = "tts",
+            ),
+        )
 
         val vm = vm()
         testScope.advanceUntilIdle()
@@ -155,10 +180,53 @@ class PlaylistViewModelTest {
             "还没蒸馏好时不该播（会播出一个空地址）",
             playerController.currentAudioUrl.value.isBlank(),
         )
-        assertNotNull(vm.uiState.value.error, "必须给用户一个能看懂的原因")
+        val error = vm.uiState.value.error
+        assertNotNull(error, "必须给用户一个能看懂的原因")
         assertTrue(
-            "提示要说清楚是「音频还没好」，实际是：${vm.uiState.value.error}",
-            vm.uiState.value.error!!.contains("还没有音频"),
+            "提示必须说明是『还在蒸馏』（用户要知道自己等一下就行），实际是：$error",
+            error!!.contains("蒸馏") || error.contains("合成语音"),
+        )
+        assertFalse(
+            "不能把『还没好』说成『没有音频』——用户会以为永久不可用，实际是：$error",
+            error.contains("没有音频"),
+        )
+    }
+
+    @Test
+    fun `蒸馏失败了_要说是没能生成而不是还在蒸馏`() = runTest(testDispatcher) {
+        dao.upsert(
+            com.tingxia.audio.data.local.PlaylistItemEntity(
+                articleId = "art_failed",
+                position = 0,
+                title = "测试文章",
+                audioUrl = null,
+                durationSec = null,
+            ),
+        )
+        api.ready = false
+        // 服务端说"已经失败"（status 端点：failed）⇒ 等多久都没用
+        api.statusResponses = mapOf(
+            "art_failed" to DistillStatusResponse(
+                articleId = "art_failed",
+                status = DistillStatus.FAILED,
+                error = "上游失败",
+            ),
+        )
+
+        val vm = vm()
+        testScope.advanceUntilIdle()
+        vm.playFrom(0)
+        testScope.advanceUntilIdle()
+
+        val error = vm.uiState.value.error
+        assertNotNull(error, "必须给用户一个能看懂的原因")
+        assertTrue(
+            "蒸馏失败要说『没能生成』并给出下一步，实际是：$error",
+            error!!.contains("没能生成"),
+        )
+        assertFalse(
+            "失败时不该说『还在蒸馏』（会让用户白等），实际是：$error",
+            error.contains("还在蒸馏"),
         )
     }
 

@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tingxia.audio.audio.PlayerController
 import com.tingxia.audio.data.local.PlaylistItemEntity
+import com.tingxia.audio.data.model.DistillStatus
+import com.tingxia.audio.data.remote.ApiException
+import com.tingxia.audio.data.remote.isAudioNotReady
 import com.tingxia.audio.data.repository.ArticleRepository
 import com.tingxia.audio.data.repository.PlaylistRepository
 import com.tingxia.audio.ui.friendlyError
@@ -145,10 +148,19 @@ class PlaylistViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            val fetched = runCatching { articleRepository.getAudioUrl(item.articleId) }.getOrNull()
+            // C2（播放列表「可播」闭环契约 §3）：失败必须走**既有的分级判据**。
+            //
+            // 原写法自己写了一句笼统的「这一篇还没有音频，蒸馏好了才能播」——
+            // 但服务端 `audio-url` 未就绪时返的是 **404 + code 40400**
+            // （既有判据 `ApiException.isAudioNotReady` = "还没好，继续轮询"），
+            // 且 `ErrorMessages` 里已有分级文案「音频还在蒸馏中，请稍候」。
+            // ⇒ 自己重写文案 = 把"还没好"说成"没有" ⇒ 用户以为永久不可用。
+            val result = runCatching { articleRepository.getAudioUrl(item.articleId) }
+            val fetched = result.getOrNull()
             if (fetched == null || fetched.audio_url.isBlank()) {
-                // 文章还没蒸馏好 → 说清楚，而不是按了没反应。
-                _uiState.value = _uiState.value.copy(error = "这一篇还没有音频，蒸馏好了才能播")
+                _uiState.value = _uiState.value.copy(
+                    error = resolveUnavailableMessage(item.articleId, result.exceptionOrNull()),
+                )
                 return@launch
             }
             repository.refreshUrl(
@@ -168,5 +180,42 @@ class PlaylistViewModel @Inject constructor(
     /** 错误提示消费掉（避免同一个错误反复弹）。 */
     fun consumeError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    /**
+     * 音频取不到时的**分级**文案（C2）。
+     *
+     * ## 为什么不能只回一句「这一篇还没有音频」
+     *
+     * 服务端 `audio-url` 在"没 ready"时一律 404 + code 40400 —— 但**没 ready 有两种**：
+     * ① 还在蒸馏（等一会儿就好）；② 蒸馏失败（等多久都没用）。
+     * 一句笼统的"没有音频"会把①说成② ⇒ 用户以为永久不可用。
+     *
+     * ⇒ 命中 `isAudioNotReady` 时**再查一次 `/articles/{id}/status`**（既有端点），
+     * 用 `status` + `stage` 把两种情况分开，并给出**能做什么**的下一步。
+     *
+     * 代价：多一次 GET（仅在取不到地址时）。换来的是文案不说假话。
+     */
+    private suspend fun resolveUnavailableMessage(articleId: String, error: Throwable?): String {
+        val fallback = "这一篇还没有音频，蒸馏好了才能播"
+        val apiError = error as? ApiException
+        if (apiError?.isAudioNotReady == true) {
+            val status = runCatching { articleRepository.getArticleStatus(articleId) }.getOrNull()
+            return when (status?.status) {
+                DistillStatus.FAILED ->
+                    "这篇没能生成音频，可以到文章页重新蒸馏"
+                DistillStatus.DISTILLING -> when (status.stage) {
+                    "tts" -> "正在合成语音，稍等一会儿就能听"
+                    "rewrite" -> "正在改写稿子，稍等一会儿"
+                    "concat" -> "正在拼接音频，马上就好"
+                    else -> "音频还在蒸馏中，请稍候"
+                }
+                DistillStatus.PENDING -> "音频还在蒸馏中，请稍候"
+                // status 也拿不到（网络/服务端抖动）⇒ 退回"还没好"的说法，
+                // 但**不说"没有"** —— 未就绪时最诚实的说法就是"还没好"。
+                else -> "音频还在蒸馏中，请稍候"
+            }
+        }
+        return error?.let { friendlyError(it, fallback) } ?: fallback
     }
 }
